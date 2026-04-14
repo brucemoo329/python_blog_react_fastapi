@@ -1,3 +1,4 @@
+<<<<<<< HEAD
 from fastapi import FastAPI, Depends, HTTPException
 from sqlalchemy.orm import Session
 from app import models
@@ -73,3 +74,11 @@ def get_users(db: Session = Depends(get_db)):
     # 使用 query 查询所有数据
     users = db.query(models.User).all()
     return users
+=======
+def main():
+    print("Hello from backend!")
+
+
+if __name__ == "__main__":
+    main()
+>>>>>>> f1ff395 (后端更新“)
