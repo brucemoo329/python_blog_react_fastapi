@@ -2,6 +2,36 @@ import { useRef, useState } from 'react';
 import { Eye, EyeOff, Mail } from 'lucide-react';
 import AnimatedAuthShowcase, { CharacterAuthBrand } from '../components/AnimatedAuthShowcase.jsx';
 import { login } from '../api/auth.js';
+import { Button } from '@/components/ui/button';
+import {
+  Card,
+  CardContent,
+  CardDescription,
+  CardFooter,
+  CardHeader,
+  CardTitle,
+} from '@/components/ui/card';
+import { Checkbox } from '@/components/ui/checkbox';
+import {
+  Dialog,
+  DialogClose,
+  DialogContent,
+  DialogDescription,
+  DialogFooter,
+  DialogHeader,
+  DialogTitle,
+  DialogTrigger,
+} from '@/components/ui/dialog';
+import { Field, FieldGroup, FieldLabel } from '@/components/ui/field';
+import {
+  InputGroup,
+  InputGroupAddon,
+  InputGroupButton,
+  InputGroupInput,
+} from '@/components/ui/input-group';
+import { Input } from '@/components/ui/input';
+import { Spinner } from '@/components/ui/spinner';
+import { cn } from '@/lib/utils';
 import '../styles/animated-login.css';
 
 function getErrorMessage(error) {
@@ -87,94 +117,134 @@ export default function Login({ onLogin, onNavigateRegister }) {
         passwordVisible={showPassword}
       />
 
-      <section className="character-login-form-panel">
-        <div className="character-login-form-shell">
-          <CharacterAuthBrand mobile />
+      <section className="grid min-h-screen min-w-0 place-items-center bg-background px-6 py-10 md:px-12 lg:px-16">
+        <Card className="w-full max-w-[420px] gap-0 overflow-visible border-0 bg-transparent py-0 ring-0 shadow-none">
+          <CardHeader className="px-0 pb-8 text-center">
+            <CharacterAuthBrand mobile />
+            <CardTitle className="text-4xl font-bold tracking-normal">欢迎回来</CardTitle>
+            <CardDescription className="mt-2">请输入你的账号信息</CardDescription>
+          </CardHeader>
 
-          <header className="character-login-heading">
-            <h2>欢迎回来</h2>
-            <p>请输入你的账号信息</p>
-          </header>
+          <CardContent className="px-0">
+            <form className="flex flex-col gap-5" onSubmit={handleSubmit}>
+              <FieldGroup>
+                <Field>
+                  <FieldLabel htmlFor="login-account">邮箱或用户名</FieldLabel>
+                  <Input
+                    id="login-account"
+                    ref={accountInputRef}
+                    className="h-12 bg-background text-base"
+                    value={form.account}
+                    onChange={(event) => setForm({ ...form, account: event.target.value })}
+                    onFocus={() => setFocusedField('account')}
+                    onBlur={() => setFocusedField(null)}
+                    placeholder="name@campus.edu"
+                    autoComplete="username"
+                  />
+                </Field>
 
-          <form className="character-login-form" onSubmit={handleSubmit}>
-            <label className="character-login-field">
-              <span>邮箱或用户名</span>
-              <input
-                ref={accountInputRef}
-                value={form.account}
-                onChange={(event) => setForm({ ...form, account: event.target.value })}
-                onFocus={() => setFocusedField('account')}
-                onBlur={() => setFocusedField(null)}
-                placeholder="name@campus.edu"
-                autoComplete="username"
-              />
-            </label>
+                <Field>
+                  <FieldLabel htmlFor="login-password">密码</FieldLabel>
+                  <InputGroup className="h-12 bg-background">
+                    <InputGroupInput
+                      id="login-password"
+                      className="text-base"
+                      type={showPassword ? 'text' : 'password'}
+                      value={form.password}
+                      onChange={(event) => setForm({ ...form, password: event.target.value })}
+                      onFocus={() => setFocusedField('password')}
+                      onBlur={() => setFocusedField(null)}
+                      placeholder="请输入密码"
+                      autoComplete="current-password"
+                    />
+                    <InputGroupAddon align="inline-end">
+                      <InputGroupButton
+                        size="icon-xs"
+                        aria-label={showPassword ? '隐藏密码' : '显示密码'}
+                        onMouseDown={(event) => event.preventDefault()}
+                        onClick={() => setShowPassword((value) => !value)}
+                      >
+                        {showPassword ? <EyeOff /> : <Eye />}
+                      </InputGroupButton>
+                    </InputGroupAddon>
+                  </InputGroup>
+                </Field>
+              </FieldGroup>
 
-            <label className="character-login-field">
-              <span>密码</span>
-              <div className="character-login-password">
-                <input
-                  type={showPassword ? 'text' : 'password'}
-                  value={form.password}
-                  onChange={(event) => setForm({ ...form, password: event.target.value })}
-                  onFocus={() => setFocusedField('password')}
-                  onBlur={() => setFocusedField(null)}
-                  placeholder="请输入密码"
-                  autoComplete="current-password"
-                />
-                <button
-                  type="button"
-                  aria-label={showPassword ? '隐藏密码' : '显示密码'}
-                  onMouseDown={(event) => event.preventDefault()}
-                  onClick={() => setShowPassword((value) => !value)}
-                >
-                  {showPassword ? <EyeOff size={20} /> : <Eye size={20} />}
-                </button>
+              <div className="flex items-center justify-between gap-4">
+                <Field orientation="horizontal" className="w-auto gap-2">
+                  <Checkbox
+                    id="remember-account"
+                    checked={form.remember}
+                    onCheckedChange={(checked) => setForm({ ...form, remember: Boolean(checked) })}
+                  />
+                  <FieldLabel htmlFor="remember-account" className="font-normal text-muted-foreground">
+                    记住我
+                  </FieldLabel>
+                </Field>
+
+                <Dialog>
+                  <DialogTrigger asChild>
+                    <Button type="button" variant="link" size="sm" className="px-0">
+                      忘记密码？
+                    </Button>
+                  </DialogTrigger>
+                  <DialogContent>
+                    <DialogHeader>
+                      <DialogTitle>重置密码</DialogTitle>
+                      <DialogDescription>
+                        当前版本暂未开放自助重置，请联系校园集市管理员处理。
+                      </DialogDescription>
+                    </DialogHeader>
+                    <DialogFooter>
+                      <DialogClose asChild>
+                        <Button type="button">我知道了</Button>
+                      </DialogClose>
+                    </DialogFooter>
+                  </DialogContent>
+                </Dialog>
               </div>
-            </label>
 
-            <div className="character-login-options">
-              <label>
-                <input
-                  type="checkbox"
-                  checked={form.remember}
-                  onChange={(event) => setForm({ ...form, remember: event.target.checked })}
-                />
-                <span>记住我</span>
-              </label>
-              <button
-                type="button"
-                onClick={() => setMessage({ type: 'error', text: '请联系校园集市管理员重置密码' })}
-              >
-                忘记密码？
-              </button>
-            </div>
+              {message.text && (
+                <p
+                  className={cn(
+                    'rounded-lg border px-3 py-2.5 text-sm',
+                    message.type === 'success'
+                      ? 'border-primary/30 bg-primary/10 text-primary'
+                      : 'border-destructive/30 bg-destructive/10 text-destructive',
+                  )}
+                  role={message.type === 'error' ? 'alert' : 'status'}
+                  aria-live="polite"
+                >
+                  {message.text}
+                </p>
+              )}
 
-            {message.text && (
-              <p className={`character-login-message ${message.type}`} aria-live="polite">
-                {message.text}
-              </p>
-            )}
+              <Button className="h-12 w-full text-base" type="submit" size="lg" disabled={loading}>
+                {loading && <Spinner data-icon="inline-start" />}
+                {loading ? '正在登录...' : '登录'}
+              </Button>
+            </form>
 
-            <button className="character-login-submit" type="submit" disabled={loading}>
-              {loading ? '正在登录...' : '登录'}
-            </button>
-          </form>
+            <Button
+              className="mt-3 h-12 w-full text-base"
+              variant="outline"
+              size="lg"
+              type="button"
+              onClick={() => accountInputRef.current?.focus()}
+            >
+              <Mail data-icon="inline-start" />
+              使用校园邮箱登录
+            </Button>
+          </CardContent>
 
-          <button
-            className="character-login-campus-email"
-            type="button"
-            onClick={() => accountInputRef.current?.focus()}
-          >
-            <Mail size={19} />
-            使用校园邮箱登录
-          </button>
-
-          <p className="character-login-register">
-            还没有账号？
-            <button type="button" onClick={onNavigateRegister}>立即注册</button>
-          </p>
-        </div>
+          <CardFooter className="justify-center border-0 bg-transparent px-0 pt-7 pb-0 text-sm text-muted-foreground">
+            <span>还没有账号？</span>
+            <Button type="button" variant="link" className="h-auto px-1" onClick={onNavigateRegister}>
+              立即注册
+            </Button>
+          </CardFooter>
+        </Card>
       </section>
     </main>
   );

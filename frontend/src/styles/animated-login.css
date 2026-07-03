@@ -380,37 +380,6 @@
   color: var(--login-ink);
 }
 
-.character-login-options {
-  display: flex;
-  align-items: center;
-  justify-content: space-between;
-  gap: 16px;
-  color: #65656f;
-  font-size: 13px;
-}
-
-.character-login-options label {
-  display: inline-flex;
-  align-items: center;
-  gap: 8px;
-  cursor: pointer;
-}
-
-.character-login-options input {
-  width: 16px;
-  height: 16px;
-  accent-color: var(--login-purple);
-}
-
-.character-login-options button {
-  padding: 0;
-  border: 0;
-  background: none;
-  color: var(--login-purple);
-  font-weight: 700;
-  cursor: pointer;
-}
-
 .character-login-message {
   margin: -4px 0 0;
   padding: 10px 12px;
@@ -430,8 +399,7 @@
   color: #15803d;
 }
 
-.character-login-submit,
-.character-login-campus-email {
+.character-login-submit {
   width: 100%;
   height: 50px;
   display: inline-flex;
@@ -461,18 +429,6 @@
   cursor: wait;
   opacity: 0.7;
   transform: none;
-}
-
-.character-login-campus-email {
-  margin-top: 14px;
-  border: 1px solid #dedee5;
-  background: #fff;
-  color: #3e3e45;
-}
-
-.character-login-campus-email:hover {
-  border-color: #c9c4ee;
-  background: #faf9ff;
 }
 
 .character-login-register {

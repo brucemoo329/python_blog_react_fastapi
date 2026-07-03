@@ -1,6 +1,6 @@
 # 校园交易平台
 
-基于 React 与 FastAPI 的校园二手交易平台。当前版本包含登录、注册、登录状态保存、互动角色动画，以及登录后的 Ferrofluid WebGL 首页。
+基于 React、FastAPI 与 MySQL 的校园综合交易平台。当前版本包含校园二手、跑腿代取、游戏交易、求购、校园动态、地图任务、收藏与订单基础能力。
 
 ## 技术栈
 
@@ -8,12 +8,14 @@
 
 - React 19
 - Vite 8
+- Tailwind CSS 4
+- shadcn/ui（JavaScript / JSX）
 - Axios
 - Lucide React
-- OGL / React Bits Ferrofluid
-- 原生 CSS 响应式布局与动画
+- 高德地图 JS API 2.0 实时定位与校园任务地图
+- 原生 CSS 角色动画
 
-> 当前代码没有安装 Tailwind CSS 或 shadcn/ui。早期 UI 参考代码使用了 Tailwind/shadcn 写法，最终实现已适配为项目现有的 React + CSS 结构，避免引入未使用的依赖。
+项目保持 JavaScript/JSX，不使用 TypeScript。shadcn/ui 组件位于 `frontend/src/components/ui`。
 
 ### 后端
 
@@ -34,10 +36,12 @@ npm run dev
 
 默认地址：`http://127.0.0.1:5173`
 
-如后端地址不是默认值，创建 `frontend/.env.local`：
+本地地图与后端配置放在 `frontend/.env.local`：
 
 ```env
 VITE_API_BASE_URL=http://127.0.0.1:8000
+VITE_AMAP_KEY=你的高德 Web端(JS API) Key
+VITE_AMAP_SECURITY_CODE=你的高德安全密钥
 ```
 
 ### 后端
@@ -57,6 +61,25 @@ uvicorn app.main:app --reload
 - `POST /login`
 - `POST /users/`
 - `GET /users/`
+- `GET /api/marketplace/feed`
+- `GET /api/marketplace/map/tasks`
+- `GET /api/marketplace/summary`
+- `POST /api/marketplace/listings`
+- `POST /api/marketplace/tasks`
+- `POST /api/marketplace/tasks/{id}/accept`
+- `POST /api/marketplace/wanted`
+- `POST /api/marketplace/community`
+- `POST /api/marketplace/favorites`
+- `POST /api/marketplace/orders/listing/{id}`
+
+后端启动时会通过 SQLAlchemy 自动创建校园交易相关表。首次本地开发可写入演示数据：
+
+```bash
+cd backend
+.\venv\Scripts\python.exe seed_marketplace.py
+```
+
+新增表覆盖商品分类、商品与图片、跑腿任务、游戏交易、求购、校园动态、订单、收藏、会话、消息、评价和举报。
 
 ## 检查
 
