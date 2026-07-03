@@ -1,10 +1,11 @@
-<<<<<<< HEAD
 from fastapi import FastAPI, Depends, HTTPException
 from sqlalchemy.orm import Session
+from sqlalchemy import or_
 from app import models
 from app.db import SessionLocal, engine
 from pydantic import BaseModel # 用于接收前端发送的数据
 from fastapi.middleware.cors import CORSMiddleware
+from typing import Optional
 
 
 
@@ -25,6 +26,23 @@ class UserCreate(BaseModel):
     username: str
     email: str
     password: str
+    school: Optional[str] = None
+    phone: Optional[str] = None
+
+class LoginRequest(BaseModel):
+    account: Optional[str] = None
+    username: Optional[str] = None
+    email: Optional[str] = None
+    password: str
+
+def public_user(user: models.User):
+    return {
+        "id": user.id,
+        "username": user.username,
+        "email": user.email,
+        "is_active": user.is_active,
+        "created_at": user.created_at,
+    }
 
 def get_db():
     db = SessionLocal()
@@ -39,17 +57,41 @@ def read_root(db: Session = Depends(get_db)):
     return {"message": "数据库连接成功！", "user_count": user_count}
 
 
-# 这只是演示逻辑，实际项目中需要比对 hashed_password
 @app.post("/login")
-def login(user_data: UserCreate, db: Session = Depends(get_db)):
-    db_user = db.query(models.User).filter(models.User.username == user_data.username).first()
-    if not db_user or db_user.hashed_password != user_data.password:
-        raise HTTPException(status_code=401, detail="用户名或密码错误")
-    return {"message": "登录成功", "user": db_user}
+def login(user_data: LoginRequest, db: Session = Depends(get_db)):
+    account = (user_data.account or user_data.username or user_data.email or "").strip()
+    if not account:
+        raise HTTPException(status_code=400, detail="账号不能为空")
+
+    db_user = db.query(models.User).filter(
+        or_(models.User.username == account, models.User.email == account)
+    ).first()
+
+    if not db_user:
+        raise HTTPException(status_code=404, detail="账号不存在")
+
+    if not db_user.is_active:
+        raise HTTPException(status_code=403, detail="账号已停用，请联系管理员")
+
+    # 当前数据库字段名叫 hashed_password，但原项目实际按明文写入。
+    # 如果你的库里存的是 bcrypt/passlib 哈希，需要在这里接入对应 verify 方法。
+    if db_user.hashed_password != user_data.password:
+        raise HTTPException(status_code=401, detail="密码错误")
+
+    token = f"campus-token-{db_user.id}"
+    return {"message": "登录成功", "access_token": token, "token_type": "bearer", "user": public_user(db_user)}
 
 # --- 新增：写入数据 (创建用户) ---
 @app.post("/users/")
 def create_user(user_data: UserCreate, db: Session = Depends(get_db)):
+    existing_username = db.query(models.User).filter(models.User.username == user_data.username).first()
+    if existing_username:
+        raise HTTPException(status_code=409, detail="用户名已存在")
+
+    existing_email = db.query(models.User).filter(models.User.email == user_data.email).first()
+    if existing_email:
+        raise HTTPException(status_code=409, detail="邮箱已注册")
+
     # 1. 创建数据库模型实例
     # 注意：这里 hashed_password 对应数据库字段，暂用明文演示（实际建议加密）
     db_user = models.User(
@@ -63,7 +105,7 @@ def create_user(user_data: UserCreate, db: Session = Depends(get_db)):
         db.add(db_user) # 添加到会话
         db.commit()     # 提交事务
         db.refresh(db_user) # 刷新以获取数据库生成的 ID
-        return {"message": "写入成功", "user": db_user}
+        return {"message": "注册成功", "user": public_user(db_user)}
     except Exception as e:
         db.rollback() # 出错回滚
         raise HTTPException(status_code=400, detail=f"写入失败: {str(e)}")
@@ -74,11 +116,3 @@ def get_users(db: Session = Depends(get_db)):
     # 使用 query 查询所有数据
     users = db.query(models.User).all()
     return users
-=======
-def main():
-    print("Hello from backend!")
-
-
-if __name__ == "__main__":
-    main()
->>>>>>> f1ff395 (后端更新“)

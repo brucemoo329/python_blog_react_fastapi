@@ -1,16 +1,36 @@
-# React + Vite
+# 校园交易平台前端
 
-This template provides a minimal setup to get React working in Vite with HMR and some ESLint rules.
+React + Vite 前端，包含：
 
-Currently, two official plugins are available:
+- 校园风登录与注册页面
+- 鼠标、账号输入和密码状态驱动的互动角色
+- Axios 登录/注册 API 封装
+- token 与登录状态持久化
+- OGL Ferrofluid WebGL 动态主页
+- 桌面端和移动端响应式布局
 
-- [@vitejs/plugin-react](https://github.com/vitejs/vite-plugin-react/blob/main/packages/plugin-react) uses [Oxc](https://oxc.rs)
-- [@vitejs/plugin-react-swc](https://github.com/vitejs/vite-plugin-react/blob/main/packages/plugin-react-swc) uses [SWC](https://swc.rs/)
+## 技术说明
 
-## React Compiler
+实际依赖为 React、Vite、Axios、Lucide React 和 OGL。界面使用原生 CSS 实现。
 
-The React Compiler is not enabled on this template because of its impact on dev & build performances. To add it, see [this documentation](https://react.dev/learn/react-compiler/installation).
+Tailwind CSS 与 shadcn/ui 只出现在早期参考组件中，当前代码未安装或调用它们，因此没有将其作为运行依赖保留。
 
-## Expanding the ESLint configuration
+## 启动
 
-If you are developing a production application, we recommend using TypeScript with type-aware lint rules enabled. Check out the [TS template](https://github.com/vitejs/vite/tree/main/packages/create-vite/template-react-ts) for information on how to integrate TypeScript and [`typescript-eslint`](https://typescript-eslint.io) in your project.
+```bash
+npm install
+npm run dev
+```
+
+配置后端地址：
+
+```env
+VITE_API_BASE_URL=http://127.0.0.1:8000
+```
+
+## 构建检查
+
+```bash
+npm run lint
+npm run build
+```
