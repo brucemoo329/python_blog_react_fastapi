@@ -6,12 +6,14 @@ from app.db import SessionLocal, engine
 from pydantic import BaseModel # 用于接收前端发送的数据
 from fastapi.middleware.cors import CORSMiddleware
 from typing import Optional
+from app.marketplace import router as marketplace_router
 
 
 
 models.Base.metadata.create_all(bind=engine)
 
 app = FastAPI()
+app.include_router(marketplace_router)
 
 app.add_middleware(
     CORSMiddleware,
