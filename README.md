@@ -56,21 +56,29 @@ uvicorn app.main:app --reload
 
 默认地址：`http://127.0.0.1:8000`
 
+本地 MySQL 不是默认账号密码时，在项目根目录创建 `.env`：
+
+```env
+DATABASE_URL=mysql+pymysql://用户名:URL编码后的密码@127.0.0.1:3306/blog_db?charset=utf8mb4
+```
+
 当前接口：
 
 - `POST /login`
 - `POST /users/`
 - `GET /users/`
-- `GET /api/marketplace/feed`
-- `GET /api/marketplace/map/tasks`
-- `GET /api/marketplace/summary`
-- `POST /api/marketplace/listings`
-- `POST /api/marketplace/tasks`
-- `POST /api/marketplace/tasks/{id}/accept`
-- `POST /api/marketplace/wanted`
-- `POST /api/marketplace/community`
-- `POST /api/marketplace/favorites`
-- `POST /api/marketplace/orders/listing/{id}`
+- `GET /marketplace/feed`
+- `GET /marketplace/map/tasks`
+- `GET /marketplace/summary`
+- `POST /marketplace/listings`
+- `POST /marketplace/tasks`
+- `POST /marketplace/tasks/{id}/accept`
+- `POST /marketplace/wanted`
+- `POST /marketplace/community`
+- `POST /marketplace/favorites`
+- `POST /marketplace/orders/listing/{id}`
+
+Docker 部署后统一通过 `/api` 访问，例如浏览器请求 `/api/login` 会由 Nginx 转发到 FastAPI 的 `/login`。
 
 后端启动时会通过 SQLAlchemy 自动创建校园交易相关表。首次本地开发可写入演示数据：
 
@@ -88,3 +96,78 @@ cd frontend
 npm run lint
 npm run build
 ```
+
+## Docker 部署
+
+### 第一次部署
+
+服务器需要已安装 Docker、Docker Compose 插件和 Git。
+
+```bash
+cd /opt
+git clone https://github.com/brucemoo329/python_blog_react_fastapi.git
+cd python_blog_react_fastapi
+cp .env.example .env
+nano .env
+docker compose config
+docker compose up -d --build
+docker compose ps
+```
+
+必须在 `.env` 中填写：
+
+- `MYSQL_ROOT_PASSWORD`：MySQL root 密码。
+- `MYSQL_PASSWORD`：业务数据库用户密码。
+- `DATABASE_URL`：密码部分需与 `MYSQL_PASSWORD` 一致；密码含有 `@`、`#`、`:` 等字符时必须进行 URL 编码。
+- `VITE_AMAP_KEY` 与 `VITE_AMAP_SECURITY_CODE`：高德 Web 端 JS API 配置。
+
+不要提交服务器上的 `.env`。
+
+### 后续更新
+
+可以直接执行：
+
+```bash
+cd /opt/python_blog_react_fastapi
+git pull origin main
+docker compose up -d --build
+```
+
+也可以使用一键脚本：
+
+```bash
+cd /opt/python_blog_react_fastapi
+chmod +x deploy.sh
+./deploy.sh
+```
+
+### 查看日志
+
+```bash
+docker compose logs -f
+docker logs -f campus_backend
+docker logs -f campus_frontend
+docker logs -f campus_mysql
+```
+
+部署完成后访问：
+
+```text
+http://服务器公网IP
+```
+
+如果 80 端口已被宝塔或系统 Nginx 占用，将 `docker-compose.yml` 中前端端口从：
+
+```yaml
+- "80:80"
+```
+
+改为：
+
+```yaml
+- "8080:80"
+```
+
+然后访问 `http://服务器公网IP:8080`。
+
+阿里云安全组至少需要按实际用途放行 `22`、`80`，启用 HTTPS 后再放行 `443`。

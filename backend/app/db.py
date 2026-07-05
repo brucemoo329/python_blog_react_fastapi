@@ -1,22 +1,24 @@
+import os
+
+from dotenv import load_dotenv
 from sqlalchemy import create_engine
 from sqlalchemy.ext.declarative import declarative_base
 from sqlalchemy.orm import sessionmaker
 
-# MySQL 连接配置
-SQLALCHEMY_DATABASE_URL = "mysql+pymysql://root:123456@127.0.0.1:3306/blog_db"
-# 修改说明:
-# - root: MySQL用户名（根据你的实际用户名修改）
-# - 123456: MySQL密码（根据你的实际密码修改）
-# - localhost: 数据库主机（默认本地）
-# - 3306: MySQL端口（默认3306）
-# - blog_db: 数据库名称
+load_dotenv()
+
+# 生产环境通过 DATABASE_URL 注入；默认值仅用于本地开发。
+SQLALCHEMY_DATABASE_URL = os.getenv(
+    "DATABASE_URL",
+    "mysql+pymysql://root:root@127.0.0.1:3306/blog_db?charset=utf8mb4",
+)
 
 engine = create_engine(
     SQLALCHEMY_DATABASE_URL,
-    connect_args={"charset": "utf8mb4"},
     pool_size=10,
     max_overflow=20,
-    pool_pre_ping=True
+    pool_pre_ping=True,
+    pool_recycle=3600,
 )
 
 SessionLocal = sessionmaker(autocommit=False, autoflush=False, bind=engine)

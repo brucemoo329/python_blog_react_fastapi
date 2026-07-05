@@ -12,7 +12,7 @@ from app import models
 from app.db import SessionLocal
 
 
-router = APIRouter(prefix="/api/marketplace", tags=["campus-marketplace"])
+router = APIRouter(prefix="/marketplace", tags=["campus-marketplace"])
 
 
 def get_db():
