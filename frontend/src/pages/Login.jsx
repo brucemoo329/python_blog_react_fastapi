@@ -37,10 +37,12 @@ import '../styles/animated-login.css';
 function getErrorMessage(error) {
   if (error.code === 'ECONNABORTED') return '服务器连接超时，请检查后端是否启动';
   if (!error.response) return '服务器连接失败，请确认 FastAPI 后端正在运行';
+  const serverMessage = error.response.data?.detail || error.response.data?.message;
+  if (serverMessage) return serverMessage;
   if (error.response.status === 404) return '登录接口不存在，请检查后端路由 /login';
   if (error.response.status === 422) return '请求格式错误，请检查账号和密码字段';
   if (error.response.status >= 500) return '服务器或数据库校验失败，请查看后端控制台';
-  return error.response.data?.detail || error.response.data?.message || '登录失败，请稍后再试';
+  return '登录失败，请稍后再试';
 }
 
 export default function Login({ onLogin, onNavigateRegister }) {

@@ -70,7 +70,7 @@ def login(user_data: LoginRequest, db: Session = Depends(get_db)):
     ).first()
 
     if not db_user:
-        raise HTTPException(status_code=404, detail="账号不存在")
+        raise HTTPException(status_code=401, detail="账号不存在")
 
     if not db_user.is_active:
         raise HTTPException(status_code=403, detail="账号已停用，请联系管理员")
