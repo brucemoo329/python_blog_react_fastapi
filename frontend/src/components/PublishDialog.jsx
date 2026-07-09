@@ -188,99 +188,101 @@ export default function PublishDialog({ open, onOpenChange, initialType = 'listi
           <DialogDescription>选择内容类型，同校同学会优先看到你的发布。</DialogDescription>
         </DialogHeader>
         <form onSubmit={submit}>
-          {(() => {
-            const hints = COPY_BY_TYPE[type] || COPY_BY_TYPE.listing
-            return (
-              <>
-          <div className="publish-type-grid">
-            {TYPES.map((item) => {
-              const Icon = item.icon
+          <div className="publish-dialog-body">
+            {(() => {
+              const hints = COPY_BY_TYPE[type] || COPY_BY_TYPE.listing
               return (
-                <button
-                  key={item.id}
-                  type="button"
-                  className={cn(type === item.id && 'is-active')}
-                  onClick={() => setType(item.id)}
-                >
-                  <Icon />
-                  {item.label}
-                </button>
+                <>
+                  <div className="publish-type-grid">
+                    {TYPES.map((item) => {
+                      const Icon = item.icon
+                      return (
+                        <button
+                          key={item.id}
+                          type="button"
+                          className={cn(type === item.id && 'is-active')}
+                          onClick={() => setType(item.id)}
+                        >
+                          <Icon />
+                          {item.label}
+                        </button>
+                      )
+                    })}
+                  </div>
+                  <FieldGroup>
+                    <Field>
+                      <FieldLabel htmlFor="publish-title">
+                        {type === 'community' ? '标题（可选）' : '标题'}
+                      </FieldLabel>
+                      <Input
+                        id="publish-title"
+                        value={form.title}
+                        onChange={update('title')}
+                        placeholder={hints.title}
+                      />
+                    </Field>
+                    <Field>
+                      <FieldLabel htmlFor="publish-description">详细描述</FieldLabel>
+                      <Textarea
+                        id="publish-description"
+                        value={form.description}
+                        onChange={update('description')}
+                        placeholder={hints.description}
+                        rows={4}
+                      />
+                    </Field>
+                    <Field>
+                      <FieldLabel>图片</FieldLabel>
+                      <label className="publish-image-picker">
+                        <ImagePlus />
+                        <span>上传商品或内容图片，最多 6 张</span>
+                        <input hidden type="file" accept="image/*" multiple onChange={addImages} />
+                      </label>
+                      {form.images.length ? (
+                        <div className="publish-image-grid">
+                          {form.images.map((image, index) => (
+                            <div key={`${image.slice(0, 24)}-${index}`}>
+                              <img src={image} alt="" />
+                              <button type="button" onClick={() => removeImage(index)}><X /></button>
+                            </div>
+                          ))}
+                        </div>
+                      ) : null}
+                    </Field>
+                    {type !== 'community' ? (
+                      <div className="grid gap-4 sm:grid-cols-2">
+                        <Field>
+                          <FieldLabel htmlFor="publish-price">
+                            {type === 'service' ? '跑腿赏金' : type === 'wanted' ? '最高预算' : '价格'}
+                          </FieldLabel>
+                          <Input
+                            id="publish-price"
+                            type="number"
+                            min="1"
+                            max={MAX_CAMPUS_AMOUNT}
+                            value={form.price}
+                            onChange={update('price')}
+                            placeholder={hints.price}
+                          />
+                        </Field>
+                        <Field>
+                          <FieldLabel htmlFor="publish-location">校内地点</FieldLabel>
+                          <Input
+                            id="publish-location"
+                            value={form.location}
+                            onChange={update('location')}
+                            placeholder={hints.location}
+                          />
+                        </Field>
+                      </div>
+                    ) : null}
+                  </FieldGroup>
+                </>
               )
-            })}
+            })()}
+            {error ? <p className="publish-error" role="alert">{error}</p> : null}
           </div>
-          <FieldGroup>
-            <Field>
-              <FieldLabel htmlFor="publish-title">
-                {type === 'community' ? '标题（可选）' : '标题'}
-              </FieldLabel>
-              <Input
-                id="publish-title"
-                value={form.title}
-                onChange={update('title')}
-                placeholder={hints.title}
-              />
-            </Field>
-            <Field>
-              <FieldLabel htmlFor="publish-description">详细描述</FieldLabel>
-              <Textarea
-                id="publish-description"
-                value={form.description}
-                onChange={update('description')}
-                placeholder={hints.description}
-                rows={4}
-              />
-            </Field>
-            <Field>
-              <FieldLabel>图片</FieldLabel>
-              <label className="publish-image-picker">
-                <ImagePlus />
-                <span>上传商品或内容图片，最多 6 张</span>
-                <input hidden type="file" accept="image/*" multiple onChange={addImages} />
-              </label>
-              {form.images.length ? (
-                <div className="publish-image-grid">
-                  {form.images.map((image, index) => (
-                    <div key={`${image.slice(0, 24)}-${index}`}>
-                      <img src={image} alt="" />
-                      <button type="button" onClick={() => removeImage(index)}><X /></button>
-                    </div>
-                  ))}
-                </div>
-              ) : null}
-            </Field>
-            {type !== 'community' ? (
-              <div className="grid gap-4 sm:grid-cols-2">
-                <Field>
-                  <FieldLabel htmlFor="publish-price">
-                    {type === 'service' ? '跑腿赏金' : type === 'wanted' ? '最高预算' : '价格'}
-                  </FieldLabel>
-                  <Input
-                    id="publish-price"
-                    type="number"
-                    min="1"
-                    max={MAX_CAMPUS_AMOUNT}
-                    value={form.price}
-                    onChange={update('price')}
-                    placeholder={hints.price}
-                  />
-                </Field>
-                <Field>
-                  <FieldLabel htmlFor="publish-location">校内地点</FieldLabel>
-                  <Input
-                    id="publish-location"
-                    value={form.location}
-                    onChange={update('location')}
-                    placeholder={hints.location}
-                  />
-                </Field>
-              </div>
-            ) : null}
-          </FieldGroup>
-              </>
-            )
-          })()}
-          {error ? <p className="publish-error" role="alert">{error}</p> : null}
-          <DialogFooter className="mt-6">
+          <DialogFooter className="mt-4">
             <Button type="button" variant="outline" onClick={() => onOpenChange(false)}>
               取消
             </Button>
@@ -289,6 +291,7 @@ export default function PublishDialog({ open, onOpenChange, initialType = 'listi
             </Button>
           </DialogFooter>
         </form>
+
       </DialogContent>
     </Dialog>
   )
