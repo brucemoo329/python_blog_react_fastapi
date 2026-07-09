@@ -36,6 +36,8 @@ const INITIAL_FORM = {
   images: [],
 }
 
+const MAX_CAMPUS_AMOUNT = 999999.99
+
 const COPY_BY_TYPE = {
   listing: {
     title: '比如：罗技鼠标 9 成新',
@@ -120,6 +122,10 @@ export default function PublishDialog({ open, onOpenChange, initialType = 'listi
     event.preventDefault()
     if (!form.description.trim() || (type !== 'community' && !form.title.trim())) {
       setError('请把标题和内容补充完整')
+      return
+    }
+    if (type !== 'community' && Number(form.price || 1) > MAX_CAMPUS_AMOUNT) {
+      setError('金额不能超过 999999.99 元')
       return
     }
     setSubmitting(true)
@@ -252,6 +258,7 @@ export default function PublishDialog({ open, onOpenChange, initialType = 'listi
                     id="publish-price"
                     type="number"
                     min="1"
+                    max={MAX_CAMPUS_AMOUNT}
                     value={form.price}
                     onChange={update('price')}
                     placeholder={hints.price}

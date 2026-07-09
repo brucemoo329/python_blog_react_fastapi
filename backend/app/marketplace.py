@@ -13,6 +13,7 @@ from app.db import SessionLocal
 
 
 router = APIRouter(prefix="/marketplace", tags=["campus-marketplace"])
+MAX_CAMPUS_AMOUNT = Decimal("999999.99")
 
 
 def get_db():
@@ -300,6 +301,11 @@ def default_category_id(db: Session) -> int:
     return category.id
 
 
+def validate_amount(value: Optional[Decimal], label: str):
+    if value is not None and value > MAX_CAMPUS_AMOUNT:
+        raise HTTPException(status_code=400, detail=f"{label}不能超过 999999.99 元")
+
+
 def reaction_counts(db: Session, target_type: str, target_id: int, user_id: Optional[int] = None):
     rows = db.query(models.ContentReaction.reaction_type, func.count(models.ContentReaction.id)).filter_by(
         target_type=target_type,
@@ -554,6 +560,8 @@ def create_listing(
     db: Session = Depends(get_db),
     user: models.User = Depends(get_current_user),
 ):
+    validate_amount(data.price, "价格")
+    validate_amount(data.original_price, "原价")
     listing = models.Listing(
         seller_id=user.id,
         category_id=data.category_id or default_category_id(db),
@@ -583,6 +591,7 @@ def create_task(
     db: Session = Depends(get_db),
     user: models.User = Depends(get_current_user),
 ):
+    validate_amount(data.reward, "跑腿赏金")
     task = models.ServiceTask(requester_id=user.id, **data.model_dump())
     db.add(task)
     db.commit()
@@ -627,6 +636,8 @@ def create_wanted_post(
     db: Session = Depends(get_db),
     user: models.User = Depends(get_current_user),
 ):
+    validate_amount(data.budget_min, "最低预算")
+    validate_amount(data.budget_max, "最高预算")
     post = models.WantedPost(user_id=user.id, **data.model_dump())
     db.add(post)
     db.commit()
