@@ -1,6 +1,6 @@
 from fastapi import FastAPI, Depends, HTTPException
 from sqlalchemy.orm import Session
-from sqlalchemy import or_
+from sqlalchemy import or_, text
 from app import models
 from app.db import SessionLocal, engine
 from pydantic import BaseModel # 用于接收前端发送的数据
@@ -11,6 +11,34 @@ from app.marketplace import router as marketplace_router
 
 
 models.Base.metadata.create_all(bind=engine)
+
+def ensure_runtime_schema():
+    if engine.dialect.name != "mysql":
+        return
+    statements = [
+        "ALTER TABLE user_profiles MODIFY COLUMN avatar_url LONGTEXT NULL",
+        "ALTER TABLE user_profiles ADD COLUMN background_url LONGTEXT NULL",
+        "ALTER TABLE user_profiles ADD COLUMN background_theme VARCHAR(40) DEFAULT 'teal'",
+        "ALTER TABLE marketplace_listing_images MODIFY COLUMN image_url LONGTEXT NOT NULL",
+        "ALTER TABLE marketplace_service_tasks ADD COLUMN image_url LONGTEXT NULL",
+        "ALTER TABLE marketplace_service_tasks MODIFY COLUMN image_url LONGTEXT NULL",
+        "ALTER TABLE marketplace_wanted_posts ADD COLUMN image_url LONGTEXT NULL",
+        "ALTER TABLE marketplace_wanted_posts MODIFY COLUMN image_url LONGTEXT NULL",
+        "ALTER TABLE marketplace_community_posts MODIFY COLUMN image_url LONGTEXT NULL",
+        "ALTER TABLE marketplace_community_posts ADD COLUMN source_type VARCHAR(30) NULL",
+        "ALTER TABLE marketplace_community_posts ADD COLUMN source_id INT NULL",
+        "ALTER TABLE marketplace_community_posts ADD COLUMN source_title VARCHAR(160) NULL",
+        "ALTER TABLE browse_history MODIFY COLUMN image_url LONGTEXT NULL",
+    ]
+    with engine.begin() as conn:
+        for statement in statements:
+            try:
+                conn.execute(text(statement))
+            except Exception:
+                # MySQL raises when a column already exists; keep startup tolerant.
+                pass
+
+ensure_runtime_schema()
 
 app = FastAPI()
 app.include_router(marketplace_router)
@@ -37,14 +65,26 @@ class LoginRequest(BaseModel):
     email: Optional[str] = None
     password: str
 
-def public_user(user: models.User):
-    return {
+def public_user(user: models.User, db: Optional[Session] = None):
+    payload = {
         "id": user.id,
         "username": user.username,
         "email": user.email,
         "is_active": user.is_active,
         "created_at": user.created_at,
     }
+    if db:
+        profile = db.query(models.UserProfile).filter_by(user_id=user.id).first()
+        if profile:
+            payload["profile"] = {
+                "nickname": profile.nickname or user.username,
+                "avatar_url": profile.avatar_url,
+                "school": profile.school,
+                "language": profile.language,
+                "background_url": profile.background_url,
+                "background_theme": profile.background_theme,
+            }
+    return payload
 
 def get_db():
     db = SessionLocal()
@@ -81,7 +121,7 @@ def login(user_data: LoginRequest, db: Session = Depends(get_db)):
         raise HTTPException(status_code=401, detail="密码错误")
 
     token = f"campus-token-{db_user.id}"
-    return {"message": "登录成功", "access_token": token, "token_type": "bearer", "user": public_user(db_user)}
+    return {"message": "登录成功", "access_token": token, "token_type": "bearer", "user": public_user(db_user, db)}
 
 # --- 新增：写入数据 (创建用户) ---
 @app.post("/users/")
@@ -107,7 +147,15 @@ def create_user(user_data: UserCreate, db: Session = Depends(get_db)):
         db.add(db_user) # 添加到会话
         db.commit()     # 提交事务
         db.refresh(db_user) # 刷新以获取数据库生成的 ID
-        return {"message": "注册成功", "user": public_user(db_user)}
+        db.add(models.UserProfile(
+            user_id=db_user.id,
+            nickname=db_user.username,
+            school=user_data.school or "南通理工学院",
+            signature="在校园里认真交易，也认真生活。",
+        ))
+        db.commit()
+        db.refresh(db_user)
+        return {"message": "注册成功", "user": public_user(db_user, db)}
     except Exception as e:
         db.rollback() # 出错回滚
         raise HTTPException(status_code=400, detail=f"写入失败: {str(e)}")

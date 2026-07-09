@@ -2,6 +2,7 @@
 from sqlalchemy import (
     Boolean,
     Column,
+    Date,
     DateTime,
     ForeignKey,
     Integer,
@@ -10,9 +11,12 @@ from sqlalchemy import (
     Text,
     UniqueConstraint,
 )
-from sqlalchemy.orm import relationship
+from sqlalchemy.orm import backref, relationship
 from sqlalchemy.sql import func
+from sqlalchemy.dialects.mysql import LONGTEXT
 from .db import Base
+
+LongText = Text().with_variant(LONGTEXT, "mysql")
 
 class User(Base):
     __tablename__ = "users"
@@ -26,6 +30,7 @@ class User(Base):
 
     # 建立与 Post 的双向关系
     posts = relationship("Post", back_populates="owner")
+    profile = relationship("UserProfile", back_populates="user", uselist=False, cascade="all, delete-orphan")
 
 
 class Post(Base):
@@ -90,7 +95,7 @@ class ListingImage(Base):
 
     id = Column(Integer, primary_key=True)
     listing_id = Column(Integer, ForeignKey("marketplace_listings.id", ondelete="CASCADE"), nullable=False, index=True)
-    image_url = Column(String(500), nullable=False)
+    image_url = Column(LongText, nullable=False)
     sort_order = Column(Integer, default=0)
 
     listing = relationship("Listing", back_populates="images")
@@ -108,6 +113,7 @@ class ServiceTask(Base):
     reward = Column(Numeric(10, 2), nullable=False)
     pickup_location = Column(String(120), nullable=True)
     delivery_location = Column(String(120), nullable=False)
+    image_url = Column(LongText, nullable=True)
     latitude = Column(Numeric(10, 7), nullable=True)
     longitude = Column(Numeric(10, 7), nullable=True)
     deadline = Column(DateTime(timezone=True), nullable=True)
@@ -146,6 +152,7 @@ class WantedPost(Base):
     budget_min = Column(Numeric(10, 2), nullable=True)
     budget_max = Column(Numeric(10, 2), nullable=True)
     location_name = Column(String(100), nullable=True)
+    image_url = Column(LongText, nullable=True)
     status = Column(String(20), default="open", index=True)
     created_at = Column(DateTime(timezone=True), server_default=func.now(), index=True)
 
@@ -160,7 +167,10 @@ class CommunityPost(Base):
     title = Column(String(120), nullable=True)
     content = Column(Text, nullable=False)
     topic = Column(String(50), default="校园生活", index=True)
-    image_url = Column(String(500), nullable=True)
+    image_url = Column(LongText, nullable=True)
+    source_type = Column(String(30), nullable=True, index=True)
+    source_id = Column(Integer, nullable=True, index=True)
+    source_title = Column(String(160), nullable=True)
     like_count = Column(Integer, default=0)
     comment_count = Column(Integer, default=0)
     created_at = Column(DateTime(timezone=True), server_default=func.now(), index=True)
@@ -250,3 +260,124 @@ class Report(Base):
     description = Column(Text, nullable=True)
     status = Column(String(20), default="pending", index=True)
     created_at = Column(DateTime(timezone=True), server_default=func.now(), index=True)
+
+
+class UserProfile(Base):
+    __tablename__ = "user_profiles"
+
+    id = Column(Integer, primary_key=True)
+    user_id = Column(Integer, ForeignKey("users.id", ondelete="CASCADE"), nullable=False, unique=True, index=True)
+    nickname = Column(String(80), nullable=True)
+    avatar_url = Column(LongText, nullable=True)
+    background_url = Column(LongText, nullable=True)
+    background_theme = Column(String(40), default="teal")
+    school = Column(String(120), default="南通理工学院", index=True)
+    signature = Column(String(180), nullable=True)
+    current_ip = Column(String(80), nullable=True)
+    language = Column(String(20), default="zh-CN")
+    follower_count = Column(Integer, default=0)
+    following_count = Column(Integer, default=0)
+    created_at = Column(DateTime(timezone=True), server_default=func.now())
+    updated_at = Column(DateTime(timezone=True), server_default=func.now(), onupdate=func.now())
+
+    user = relationship("User", back_populates="profile")
+
+
+class UserAddress(Base):
+    __tablename__ = "user_addresses"
+
+    id = Column(Integer, primary_key=True)
+    user_id = Column(Integer, ForeignKey("users.id", ondelete="CASCADE"), nullable=False, index=True)
+    label = Column(String(40), default="宿舍")
+    receiver_name = Column(String(80), nullable=False)
+    phone = Column(String(40), nullable=True)
+    school = Column(String(120), nullable=True)
+    detail = Column(String(240), nullable=False)
+    is_default = Column(Boolean, default=False)
+    created_at = Column(DateTime(timezone=True), server_default=func.now())
+    updated_at = Column(DateTime(timezone=True), server_default=func.now(), onupdate=func.now())
+
+    user = relationship("User")
+
+
+class UserPaymentMethod(Base):
+    __tablename__ = "user_payment_methods"
+
+    id = Column(Integer, primary_key=True)
+    user_id = Column(Integer, ForeignKey("users.id", ondelete="CASCADE"), nullable=False, index=True)
+    method_type = Column(String(20), nullable=False, index=True)
+    channel = Column(String(40), nullable=False)
+    display_name = Column(String(120), nullable=False)
+    account_mask = Column(String(80), nullable=True)
+    is_default = Column(Boolean, default=False)
+    created_at = Column(DateTime(timezone=True), server_default=func.now())
+
+    user = relationship("User")
+
+
+class BrowseHistory(Base):
+    __tablename__ = "browse_history"
+    __table_args__ = (UniqueConstraint("user_id", "item_type", "item_id", name="uq_history_user_item"),)
+
+    id = Column(Integer, primary_key=True)
+    user_id = Column(Integer, ForeignKey("users.id", ondelete="CASCADE"), nullable=False, index=True)
+    item_type = Column(String(30), nullable=False, index=True)
+    item_id = Column(Integer, nullable=False, index=True)
+    title = Column(String(160), nullable=False)
+    image_url = Column(LongText, nullable=True)
+    price_label = Column(String(60), nullable=True)
+    viewed_at = Column(DateTime(timezone=True), server_default=func.now(), onupdate=func.now(), index=True)
+
+    user = relationship("User")
+
+
+class TrustScoreEvent(Base):
+    __tablename__ = "trust_score_events"
+    __table_args__ = (UniqueConstraint("user_id", "event_type", "occurred_on", name="uq_trust_daily_event"),)
+
+    id = Column(Integer, primary_key=True)
+    user_id = Column(Integer, ForeignKey("users.id", ondelete="CASCADE"), nullable=False, index=True)
+    event_type = Column(String(40), nullable=False, index=True)
+    points_delta = Column(Integer, nullable=False)
+    reason = Column(String(160), nullable=False)
+    related_type = Column(String(40), nullable=True)
+    related_id = Column(Integer, nullable=True)
+    occurred_on = Column(Date, nullable=True, index=True)
+    created_at = Column(DateTime(timezone=True), server_default=func.now(), index=True)
+
+    user = relationship("User")
+
+
+class ContentComment(Base):
+    __tablename__ = "content_comments"
+
+    id = Column(Integer, primary_key=True)
+    target_type = Column(String(30), nullable=False, index=True)
+    target_id = Column(Integer, nullable=False, index=True)
+    parent_id = Column(Integer, ForeignKey("content_comments.id", ondelete="CASCADE"), nullable=True, index=True)
+    user_id = Column(Integer, ForeignKey("users.id", ondelete="CASCADE"), nullable=False, index=True)
+    content = Column(Text, nullable=False)
+    like_count = Column(Integer, default=0)
+    dislike_count = Column(Integer, default=0)
+    created_at = Column(DateTime(timezone=True), server_default=func.now(), index=True)
+
+    user = relationship("User")
+    parent = relationship(
+        "ContentComment",
+        remote_side=[id],
+        backref=backref("replies", cascade="all, delete-orphan", order_by="ContentComment.created_at"),
+    )
+
+
+class ContentReaction(Base):
+    __tablename__ = "content_reactions"
+    __table_args__ = (UniqueConstraint("user_id", "target_type", "target_id", name="uq_reaction_user_target"),)
+
+    id = Column(Integer, primary_key=True)
+    user_id = Column(Integer, ForeignKey("users.id", ondelete="CASCADE"), nullable=False, index=True)
+    target_type = Column(String(30), nullable=False, index=True)
+    target_id = Column(Integer, nullable=False, index=True)
+    reaction_type = Column(String(20), nullable=False)
+    created_at = Column(DateTime(timezone=True), server_default=func.now(), index=True)
+
+    user = relationship("User")

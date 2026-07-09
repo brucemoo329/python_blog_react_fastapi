@@ -23,7 +23,7 @@ import {
   TrendingUp,
   UserRound,
 } from 'lucide-react'
-import { Avatar, AvatarFallback } from '@/components/ui/avatar'
+import { Avatar, AvatarFallback, AvatarImage } from '@/components/ui/avatar'
 import { Badge } from '@/components/ui/badge'
 import { Button } from '@/components/ui/button'
 import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card'
@@ -40,26 +40,76 @@ import { InputGroup, InputGroupAddon, InputGroupInput } from '@/components/ui/in
 import { Skeleton } from '@/components/ui/skeleton'
 import { Tabs, TabsList, TabsTrigger } from '@/components/ui/tabs'
 import CampusRadar from '@/components/CampusRadar'
+import ContentDetail from '@/components/ContentDetail'
+import LineSidebar from '@/components/LineSidebar'
+import Particles from '@/components/Particles'
 import PublishDialog from '@/components/PublishDialog'
+import ProfileCenter from '@/components/ProfileCenter'
+import SpotlightCard from '@/components/SpotlightCard'
+import StarBorder from '@/components/StarBorder'
 import {
-  acceptServiceTask,
   getMapTasks,
   getMarketplaceFeed,
   getMarketplaceSummary,
+  recordBrowsingHistory,
   toggleFavorite,
+  updateUserProfile,
 } from '@/api/marketplace'
 import { cn } from '@/lib/utils'
 import '@/styles/marketplace.css'
 
 const NAV_ITEMS = [
-  { id: 'home', label: '首页', icon: Home },
-  { id: 'listing', label: '二手市场', icon: ShoppingBag },
-  { id: 'service', label: '跑腿代取', icon: Bike },
-  { id: 'game', label: '游戏交易', icon: Gamepad2 },
-  { id: 'wanted', label: '求购广场', icon: Search },
-  { id: 'community', label: '校园社区', icon: MessageCircle },
-  { id: 'orders', label: '我的订单', icon: Package },
+  { id: 'home', label: '首页', labels: { en: 'Home', ja: 'ホーム', ko: '홈' }, icon: Home },
+  { id: 'listing', label: '二手市场', labels: { en: 'Market', ja: '中古市', ko: '중고장터' }, icon: ShoppingBag },
+  { id: 'service', label: '跑腿代取', labels: { en: 'Errands', ja: '代行', ko: '심부름' }, icon: Bike },
+  { id: 'game', label: '游戏交易', labels: { en: 'Games', ja: 'ゲーム', ko: '게임' }, icon: Gamepad2 },
+  { id: 'wanted', label: '求购广场', labels: { en: 'Wanted', ja: '求む', ko: '구해요' }, icon: Search },
+  { id: 'community', label: '校园社区', labels: { en: 'Community', ja: 'コミュニティ', ko: '커뮤니티' }, icon: MessageCircle },
+  { id: 'orders', label: '我的订单', labels: { en: 'Orders', ja: '注文', ko: '주문' }, icon: Package },
+  { id: 'profile', label: '我的主页', labels: { en: 'Profile', ja: 'プロフィール', ko: '프로필' }, icon: UserRound },
 ]
+
+const UI_COPY = {
+  'zh-CN': {
+    search: '搜索商品、服务、话题或用户',
+    campusLabel: '选择校区',
+    publish: '发布内容',
+    trust: '信任等级',
+    profile: '个人主页',
+    logout: '退出登录',
+  },
+  'en-US': {
+    search: 'Search items, services, topics or users',
+    campusLabel: 'Choose school',
+    publish: 'Publish',
+    trust: 'Trust level',
+    profile: 'Profile',
+    logout: 'Log out',
+  },
+  'ja-JP': {
+    search: '商品、サービス、話題、ユーザーを検索',
+    campusLabel: '学校を選択',
+    publish: '投稿',
+    trust: '信頼レベル',
+    profile: 'プロフィール',
+    logout: 'ログアウト',
+  },
+  'ko-KR': {
+    search: '상품, 서비스, 주제, 사용자를 검색',
+    campusLabel: '학교 선택',
+    publish: '게시',
+    trust: '신뢰 등급',
+    profile: '프로필',
+    logout: '로그아웃',
+  },
+}
+
+function getLangGroup(language) {
+  if (language?.startsWith('en')) return 'en'
+  if (language?.startsWith('ja')) return 'ja'
+  if (language?.startsWith('ko')) return 'ko'
+  return 'zh'
+}
 
 const DEMO_FEED = [
   {
@@ -188,9 +238,10 @@ function FeedCard({ item, saved, onSave, onAction, onMessage }) {
             </div>
             <div className="pulse-author">
               <Avatar className="size-8">
+                <AvatarImage src={author.avatar_url || undefined} alt={author.nickname || author.username} />
                 <AvatarFallback>{author.username?.slice(0, 1)}</AvatarFallback>
               </Avatar>
-              <span>{author.username}</span>
+              <span>{author.nickname || author.username}</span>
               <Badge variant="outline"><Star /> 信任优秀</Badge>
             </div>
           </div>
@@ -211,7 +262,7 @@ function FeedCard({ item, saved, onSave, onAction, onMessage }) {
               </Button>
               <Button variant="outline" size="sm" onClick={() => onMessage(item)}><MessageCircle /> 私信</Button>
               <Button size="sm" onClick={() => onAction(item)}>
-                {item.type === 'service' ? '接单' : item.type === 'wanted' ? '联系 TA' : item.type === 'community' ? '参与讨论' : '查看详情'}
+                {item.type === 'community' ? '参与讨论' : '查看详情'}
               </Button>
             </div>
           </div>
@@ -221,7 +272,8 @@ function FeedCard({ item, saved, onSave, onAction, onMessage }) {
   )
 }
 
-export default function MarketplaceHome({ user, onLogout }) {
+export default function MarketplaceHome({ user, onLogout, onUserUpdate }) {
+  const [currentUser, setCurrentUser] = useState(user)
   const [activeNav, setActiveNav] = useState('home')
   const [view, setView] = useState('pulse')
   const [filter, setFilter] = useState('all')
@@ -232,9 +284,23 @@ export default function MarketplaceHome({ user, onLogout }) {
   const [loading, setLoading] = useState(true)
   const [publishOpen, setPublishOpen] = useState(false)
   const [publishType, setPublishType] = useState('listing')
-  const [campus, setCampus] = useState('南通理工学院南通校区')
+  const [campus, setCampus] = useState(user?.profile?.school || '南通理工学院南通校区')
   const [savedIds, setSavedIds] = useState(new Set())
   const [notice, setNotice] = useState('')
+  const [selectedDetail, setSelectedDetail] = useState(null)
+  const language = currentUser?.profile?.language || localStorage.getItem('campus_language') || 'zh-CN'
+  const langGroup = getLangGroup(language)
+  const copy = UI_COPY[language] || UI_COPY['zh-CN']
+  const displayProfile = currentUser?.profile || {}
+  const displayName = displayProfile.nickname || currentUser?.username || '校园同学'
+  const displayAvatar = displayProfile.avatar_url
+  const trustScore = currentUser?.trust?.score ?? summary.trust?.score ?? 800
+  const trustGrade = currentUser?.trust?.grade ?? summary.trust?.grade ?? '优秀'
+
+  useEffect(() => {
+    setCurrentUser(user)
+    if (user?.profile?.school) setCampus(user.profile.school)
+  }, [user])
 
   const loadData = useCallback(async () => {
     setLoading(true)
@@ -247,6 +313,16 @@ export default function MarketplaceHome({ user, onLogout }) {
       if (feedResponse.items?.length) setFeed(feedResponse.items)
       if (taskResponse?.length) setTasks(taskResponse)
       setSummary((current) => ({ ...current, ...summaryResponse }))
+      if (summaryResponse.profile) {
+        const nextUser = {
+          ...currentUser,
+          profile: { ...(currentUser?.profile || {}), ...summaryResponse.profile },
+          trust: summaryResponse.trust || currentUser?.trust,
+        }
+        setCurrentUser(nextUser)
+        onUserUpdate?.(nextUser)
+        if (summaryResponse.profile.school) setCampus(summaryResponse.profile.school)
+      }
     } catch {
       // Demo content keeps the home useful while the local API or database is offline.
     } finally {
@@ -291,22 +367,29 @@ export default function MarketplaceHome({ user, onLogout }) {
   }
 
   const handleAction = async (item) => {
-    if (item.type === 'service' && item.id < 100) {
-      try {
-        await acceptServiceTask(item.id)
-        setNotice('接单成功，可在“我的订单”查看进度')
-        loadData()
-        return
-      } catch (error) {
-        setNotice(error.response?.data?.detail || '演示任务已加入待办')
-        return
-      }
+    try {
+      await recordBrowsingHistory({
+        item_type: item.type || 'listing',
+        item_id: Number(item.id),
+        title: item.title || '校园内容',
+        image_url: item.image_url || null,
+        price_label: item.type === 'service'
+          ? `¥${item.reward || 0}`
+          : item.type === 'wanted'
+            ? (item.budget_max ? `预算 ¥${item.budget_max}` : '预算面议')
+            : item.price
+              ? `¥${item.price}`
+              : null,
+      })
+    } catch {
+      // Browsing history is helpful, but it should never block viewing an item.
     }
-    setNotice(item.type === 'community' ? '已打开话题讨论' : '详情功能已准备好继续扩展')
+    setSelectedDetail({ type: item.type || 'listing', id: Number(item.id) })
   }
 
   const selectNav = (id) => {
     setActiveNav(id)
+    setSelectedDetail(null)
     if (id === 'service') setView('radar')
     else setView('pulse')
     setFilter(['listing', 'service', 'game', 'wanted', 'community'].includes(id) ? id : 'all')
@@ -317,39 +400,72 @@ export default function MarketplaceHome({ user, onLogout }) {
     setPublishOpen(true)
   }
 
+  const handleProfileChange = (nextUser) => {
+    const merged = {
+      ...currentUser,
+      ...nextUser,
+      profile: { ...(currentUser?.profile || {}), ...(nextUser?.profile || {}) },
+      trust: nextUser?.trust || currentUser?.trust,
+    }
+    setCurrentUser(merged)
+    onUserUpdate?.(merged)
+    if (merged.profile?.school) setCampus(merged.profile.school)
+  }
+
   return (
     <main className="dark campus-shell">
+        <div className="campus-particles-bg" aria-hidden="true">
+          <Particles
+            particleColors={['#8b5cf6', '#a78bfa', '#f5d0fe']}
+            particleCount={150}
+            particleSpread={13}
+            speed={0.08}
+            particleBaseSize={78}
+            sizeRandomness={1.4}
+            alphaParticles
+            disableRotation={false}
+            pixelRatio={1}
+          />
+        </div>
         <aside className="campus-sidebar">
           <button type="button" className="campus-logo" onClick={() => selectNav('home')}>
             <span><Sparkles /></span>
             <span>校园脉动<small>Campus Pulse</small></span>
           </button>
-          <nav aria-label="主导航">
-            {NAV_ITEMS.map((item) => {
-              const Icon = item.icon
-              return (
-                <button
-                  key={item.id}
-                  type="button"
-                  title={item.label}
-                  className={cn(activeNav === item.id && 'is-active')}
-                  onClick={() => selectNav(item.id)}
-                >
-                  <Icon />
-                  <span>{item.label}</span>
-                </button>
-              )
-            })}
-          </nav>
-          <div className="campus-sidebar-stats">
-            <p>信任等级</p>
-            <strong>优秀</strong>
-            <div><span /></div>
-            <small>842 / 1000</small>
+          <div className="campus-line-nav" aria-label="主导航">
+            <LineSidebar
+              items={NAV_ITEMS.map((item) => item.labels?.[langGroup] || item.label)}
+              defaultActive={Math.max(0, NAV_ITEMS.findIndex((item) => item.id === activeNav))}
+              accentColor="#a78bfa"
+              textColor="rgba(216,180,254,.62)"
+              showIndex={false}
+              showMarker={false}
+              maxShift={22}
+              proximityRadius={138}
+              itemGap={19}
+              fontSize={1.02}
+              smoothing={80}
+              className="campus-main-line-sidebar"
+              onItemClick={(index) => selectNav(NAV_ITEMS[index].id)}
+            />
           </div>
-          <Button className="campus-publish-button" onClick={() => openPublish('listing')}>
-            <PenLine /> 发布内容
-          </Button>
+          <SpotlightCard className="campus-sidebar-stats" spotlightColor="rgba(167, 139, 250, 0.34)">
+            <p>{copy.trust}</p>
+            <strong>{trustGrade}</strong>
+            <div><span /></div>
+            <small>{trustScore} / 1000</small>
+          </SpotlightCard>
+          <StarBorder
+            as="button"
+            type="button"
+            className="campus-publish-button"
+            color="#c084fc"
+            speed="4.8s"
+            thickness={2}
+            onClick={() => openPublish('listing')}
+          >
+            <PenLine /> {copy.publish}
+          </StarBorder>
         </aside>
 
         <section className="campus-workspace">
@@ -361,12 +477,18 @@ export default function MarketplaceHome({ user, onLogout }) {
                 </Button>
               </DropdownMenuTrigger>
               <DropdownMenuContent align="start">
-                <DropdownMenuLabel>选择校区</DropdownMenuLabel>
+                <DropdownMenuLabel>{copy.campusLabel}</DropdownMenuLabel>
                 <DropdownMenuGroup>
                   {['南通理工学院南通校区', '南通理工学院海安校区'].map((item) => (
-                    <DropdownMenuItem key={item} onClick={() => {
-                      setCampus(item)
-                      setNotice(`已切换到${item}`)
+                    <DropdownMenuItem key={item} onClick={async () => {
+                      try {
+                        const response = await updateUserProfile({ school: item })
+                        handleProfileChange({ ...currentUser, profile: { ...(currentUser?.profile || {}), ...response.profile } })
+                        setNotice(`已切换到${item}`)
+                      } catch {
+                        setCampus(item)
+                        setNotice(`已临时切换到${item}`)
+                      }
                     }}>
                       {item}
                     </DropdownMenuItem>
@@ -379,7 +501,7 @@ export default function MarketplaceHome({ user, onLogout }) {
               <InputGroupInput
                 value={search}
                 onChange={(event) => setSearch(event.target.value)}
-                placeholder="搜索商品、服务、话题或用户"
+                placeholder={copy.search}
               />
             </InputGroup>
             <div className="campus-top-actions">
@@ -391,8 +513,8 @@ export default function MarketplaceHome({ user, onLogout }) {
               <DropdownMenu>
                 <DropdownMenuTrigger asChild>
                   <Button variant="ghost" className="campus-profile">
-                    <Avatar className="size-8"><AvatarFallback>{user?.username?.slice(0, 1) || '同'}</AvatarFallback></Avatar>
-                    <span>{user?.username || '校园同学'}</span>
+                    <Avatar className="size-8"><AvatarImage src={displayAvatar || undefined} alt={displayName} /><AvatarFallback>{displayName?.slice(0, 1) || '同'}</AvatarFallback></Avatar>
+                    <span>{displayName}</span>
                     <ChevronDown />
                   </Button>
                 </DropdownMenuTrigger>
@@ -400,19 +522,29 @@ export default function MarketplaceHome({ user, onLogout }) {
                   <DropdownMenuLabel>{user?.email}</DropdownMenuLabel>
                   <DropdownMenuSeparator />
                   <DropdownMenuGroup>
-                    <DropdownMenuItem onClick={() => setNotice('个人主页模块已打开')}><UserRound /> 个人主页</DropdownMenuItem>
-                    <DropdownMenuItem onClick={onLogout}><LogOut /> 退出登录</DropdownMenuItem>
+                    <DropdownMenuItem onClick={() => selectNav('profile')}><UserRound /> {copy.profile}</DropdownMenuItem>
+                    <DropdownMenuItem onClick={onLogout}><LogOut /> {copy.logout}</DropdownMenuItem>
                   </DropdownMenuGroup>
                 </DropdownMenuContent>
               </DropdownMenu>
             </div>
           </header>
 
+          {selectedDetail ? (
+            <ContentDetail
+              target={selectedDetail}
+              onBack={() => setSelectedDetail(null)}
+              onNotice={setNotice}
+              onOpenTarget={(target) => setSelectedDetail(target)}
+            />
+          ) : activeNav === 'profile' ? (
+            <ProfileCenter user={currentUser} onLogout={onLogout} onNotice={setNotice} onProfileChange={handleProfileChange} />
+          ) : (
           <div className="campus-main">
             <div className="campus-center">
               <Card className="pulse-composer">
                 <CardContent>
-                  <Avatar className="size-10"><AvatarFallback>{user?.username?.slice(0, 1) || '同'}</AvatarFallback></Avatar>
+                  <Avatar className="size-10"><AvatarImage src={displayAvatar || undefined} alt={displayName} /><AvatarFallback>{displayName?.slice(0, 1) || '同'}</AvatarFallback></Avatar>
                   <button type="button" onClick={() => openPublish('community')}>
                     分享校园动态、发布商品、服务或求助...
                   </button>
@@ -533,14 +665,16 @@ export default function MarketplaceHome({ user, onLogout }) {
               </Card>
             </aside>
           </div>
+          )}
         </section>
 
         <nav className="campus-mobile-nav" aria-label="移动端导航">
           {NAV_ITEMS.slice(0, 5).map((item) => {
             const Icon = item.icon
+            const label = item.labels?.[langGroup] || item.label
             return (
               <button key={item.id} type="button" className={cn(activeNav === item.id && 'is-active')} onClick={() => selectNav(item.id)}>
-                <Icon /><span>{item.label}</span>
+                <Icon /><span>{label}</span>
               </button>
             )
           })}
@@ -551,8 +685,11 @@ export default function MarketplaceHome({ user, onLogout }) {
           open={publishOpen}
           onOpenChange={setPublishOpen}
           initialType={publishType}
-          onPublished={(message) => {
-            setNotice(message)
+          onPublished={(response) => {
+            setNotice(response?.message || '发布成功，正在打开详情')
+            if (response?.type && response?.id) {
+              setSelectedDetail({ type: response.type, id: response.id })
+            }
             loadData()
           }}
         />

@@ -39,8 +39,13 @@ function App() {
     setUser(null);
   };
 
+  const handleUserUpdate = (nextUser) => {
+    localStorage.setItem('campus_user', JSON.stringify(nextUser || {}));
+    setUser(nextUser || {});
+  };
+
   if (user) {
-    return <MarketplaceHome user={user} onLogout={handleLogout} />;
+    return <MarketplaceHome user={user} onLogout={handleLogout} onUserUpdate={handleUserUpdate} />;
   }
 
   if (route === 'register') {
