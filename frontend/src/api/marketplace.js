@@ -79,3 +79,7 @@ export function toggleReaction(data) {
 export function shareContent(data) {
   return request.post('/marketplace/shares', data)
 }
+
+export function deleteContent(type, id) {
+  return request.delete(`/marketplace/content/${type}/${id}`)
+}

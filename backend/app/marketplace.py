@@ -285,6 +285,21 @@ def compact_order_payload(order, role: str):
     }
 
 
+def default_category_id(db: Session) -> int:
+    category = db.query(models.Category).filter_by(slug="campus-general").first()
+    if not category:
+        category = models.Category(
+            name="校园好物",
+            slug="campus-general",
+            icon="package",
+            sort_order=999,
+            is_active=True,
+        )
+        db.add(category)
+        db.flush()
+    return category.id
+
+
 def reaction_counts(db: Session, target_type: str, target_id: int, user_id: Optional[int] = None):
     rows = db.query(models.ContentReaction.reaction_type, func.count(models.ContentReaction.id)).filter_by(
         target_type=target_type,
@@ -343,6 +358,7 @@ def detail_payload(db: Session, item_type: str, item_id: int, user: models.User)
             "author": {**user_payload(listing.seller), "trust": compute_trust(db, listing.seller_id)},
             "created_at": listing.created_at,
             "reaction": reaction_counts(db, result_type, listing.id, user.id),
+            "can_delete": listing.seller_id == user.id,
         }
     if normalized == "service":
         task = db.query(models.ServiceTask).options(
@@ -364,6 +380,7 @@ def detail_payload(db: Session, item_type: str, item_id: int, user: models.User)
             "author": {**user_payload(task.requester), "trust": compute_trust(db, task.requester_id)},
             "created_at": task.created_at,
             "reaction": reaction_counts(db, "service", task.id, user.id),
+            "can_delete": task.requester_id == user.id,
         }
     if normalized == "wanted":
         wanted = db.query(models.WantedPost).options(
@@ -386,6 +403,7 @@ def detail_payload(db: Session, item_type: str, item_id: int, user: models.User)
             "author": {**user_payload(wanted.user), "trust": compute_trust(db, wanted.user_id)},
             "created_at": wanted.created_at,
             "reaction": reaction_counts(db, "wanted", wanted.id, user.id),
+            "can_delete": wanted.user_id == user.id,
         }
     if normalized == "community":
         post = db.query(models.CommunityPost).options(
@@ -412,6 +430,7 @@ def detail_payload(db: Session, item_type: str, item_id: int, user: models.User)
                 "title": post.source_title,
             } if post.source_type and post.source_id else None,
             "reaction": reaction_counts(db, "community", post.id, user.id),
+            "can_delete": post.author_id == user.id,
         }
     raise HTTPException(status_code=404, detail="内容类型不存在")
 
@@ -537,7 +556,7 @@ def create_listing(
 ):
     listing = models.Listing(
         seller_id=user.id,
-        category_id=data.category_id,
+        category_id=data.category_id or default_category_id(db),
         title=data.title,
         description=data.description,
         price=data.price,
@@ -686,6 +705,57 @@ def get_detail(
         "item": item,
         "comments": [comment_payload(comment, child_map, db, user.id) for comment in roots],
     }
+
+
+@router.delete("/content/{item_type}/{item_id}")
+def delete_content(
+    item_type: str,
+    item_id: int,
+    db: Session = Depends(get_db),
+    user: models.User = Depends(get_current_user),
+):
+    normalized = "listing" if item_type == "game" else item_type
+    cleanup_target_types = {item_type}
+
+    if normalized == "listing":
+        item = db.get(models.Listing, item_id)
+        if not item:
+            raise HTTPException(status_code=404, detail="内容不存在")
+        if item.seller_id != user.id:
+            raise HTTPException(status_code=403, detail="只能删除自己发布的内容")
+        cleanup_target_types.update({"listing", "game"})
+    elif normalized == "service":
+        item = db.get(models.ServiceTask, item_id)
+        if not item:
+            raise HTTPException(status_code=404, detail="内容不存在")
+        if item.requester_id != user.id:
+            raise HTTPException(status_code=403, detail="只能删除自己发布的内容")
+        cleanup_target_types.add("service")
+    elif normalized == "wanted":
+        item = db.get(models.WantedPost, item_id)
+        if not item:
+            raise HTTPException(status_code=404, detail="内容不存在")
+        if item.user_id != user.id:
+            raise HTTPException(status_code=403, detail="只能删除自己发布的内容")
+        cleanup_target_types.add("wanted")
+    elif normalized == "community":
+        item = db.get(models.CommunityPost, item_id)
+        if not item:
+            raise HTTPException(status_code=404, detail="内容不存在")
+        if item.author_id != user.id:
+            raise HTTPException(status_code=403, detail="只能删除自己发布的内容")
+        cleanup_target_types.add("community")
+    else:
+        raise HTTPException(status_code=404, detail="内容类型不存在")
+
+    for target_type in cleanup_target_types:
+        db.query(models.ContentReaction).filter_by(target_type=target_type, target_id=item_id).delete()
+        db.query(models.ContentComment).filter_by(target_type=target_type, target_id=item_id).delete()
+        db.query(models.BrowseHistory).filter_by(item_type=target_type, item_id=item_id).delete()
+
+    db.delete(item)
+    db.commit()
+    return {"message": "已删除发布内容"}
 
 
 @router.post("/comments", status_code=201)

@@ -10,13 +10,14 @@ import {
   ShieldCheck,
   ThumbsDown,
   ThumbsUp,
+  Trash2,
 } from 'lucide-react'
 import { Avatar, AvatarFallback, AvatarImage } from '@/components/ui/avatar'
 import { Badge } from '@/components/ui/badge'
 import { Button } from '@/components/ui/button'
 import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card'
 import { Textarea } from '@/components/ui/textarea'
-import { createComment, getContentDetail, shareContent, toggleReaction } from '@/api/marketplace'
+import { createComment, deleteContent, getContentDetail, shareContent, toggleReaction } from '@/api/marketplace'
 import { cn } from '@/lib/utils'
 
 function timeLabel(value) {
@@ -89,7 +90,7 @@ function CommentNode({ comment, target, onReply, onReact, onOpenSource, depth = 
   )
 }
 
-export default function ContentDetail({ target, onBack, onNotice, onOpenTarget }) {
+export default function ContentDetail({ target, onBack, onNotice, onOpenTarget, onDeleted }) {
   const [detail, setDetail] = useState(null)
   const [comment, setComment] = useState('')
   const [shareText, setShareText] = useState('')
@@ -157,6 +158,17 @@ export default function ContentDetail({ target, onBack, onNotice, onOpenTarget }
     }
   }
 
+  const remove = async () => {
+    if (!window.confirm('确定删除这条发布吗？删除后评论和点赞也会一起清理。')) return
+    try {
+      const response = await deleteContent(item.type, item.id)
+      onNotice?.(response.message || '已删除发布内容')
+      onDeleted?.()
+    } catch (error) {
+      onNotice?.(error.response?.data?.detail || '删除失败')
+    }
+  }
+
   if (loading) {
     return <div className="detail-page"><Card className="detail-card"><CardContent>详情加载中...</CardContent></Card></div>
   }
@@ -221,6 +233,9 @@ export default function ContentDetail({ target, onBack, onNotice, onOpenTarget }
               <ThumbsDown /> {item.reaction?.dislikes || 0}
             </button>
             <button type="button" onClick={share}><Share2 /> 转发到社区</button>
+            {item.can_delete ? (
+              <button type="button" className="is-danger" onClick={remove}><Trash2 /> 删除发布</button>
+            ) : null}
           </div>
 
           <div className="detail-share-box">

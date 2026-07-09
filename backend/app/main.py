@@ -19,6 +19,7 @@ def ensure_runtime_schema():
         "ALTER TABLE user_profiles MODIFY COLUMN avatar_url LONGTEXT NULL",
         "ALTER TABLE user_profiles ADD COLUMN background_url LONGTEXT NULL",
         "ALTER TABLE user_profiles ADD COLUMN background_theme VARCHAR(40) DEFAULT 'teal'",
+        "ALTER TABLE marketplace_listings MODIFY COLUMN category_id INT NULL",
         "ALTER TABLE marketplace_listing_images MODIFY COLUMN image_url LONGTEXT NOT NULL",
         "ALTER TABLE marketplace_service_tasks ADD COLUMN image_url LONGTEXT NULL",
         "ALTER TABLE marketplace_service_tasks MODIFY COLUMN image_url LONGTEXT NULL",

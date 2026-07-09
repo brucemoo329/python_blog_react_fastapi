@@ -536,6 +536,10 @@ export default function MarketplaceHome({ user, onLogout, onUserUpdate }) {
               onBack={() => setSelectedDetail(null)}
               onNotice={setNotice}
               onOpenTarget={(target) => setSelectedDetail(target)}
+              onDeleted={() => {
+                setSelectedDetail(null)
+                loadData()
+              }}
             />
           ) : activeNav === 'profile' ? (
             <ProfileCenter user={currentUser} onLogout={onLogout} onNotice={setNotice} onProfileChange={handleProfileChange} />

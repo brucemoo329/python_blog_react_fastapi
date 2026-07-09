@@ -2019,6 +2019,12 @@
   border-color: transparent;
 }
 
+.detail-actions button.is-danger {
+  color: #fecdd3;
+  background: rgba(127, 29, 29, 0.28);
+  border-color: rgba(251, 113, 133, 0.32);
+}
+
 .detail-actions button.is-burst,
 .detail-comment-actions button:active {
   animation: reaction-burst 0.42s cubic-bezier(.2, .9, .2, 1.2);
