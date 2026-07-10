@@ -1,5 +1,5 @@
 import { useEffect, useRef, useState } from 'react';
-import { Eye, EyeOff, Mail } from 'lucide-react';
+import { ArrowLeft, Eye, EyeOff, Mail } from 'lucide-react';
 import AnimatedAuthShowcase, { CharacterAuthBrand } from '../components/AnimatedAuthShowcase.jsx';
 import LanguageSwitcher from '@/components/LanguageSwitcher';
 import {
@@ -54,7 +54,7 @@ function getErrorMessage(error, language) {
   return t('login.fail', '登录失败，请稍后再试');
 }
 
-export default function Login({ onLogin, onNavigateRegister }) {
+export default function Login({ onLogin, onNavigateRegister, onNavigateHome }) {
   const [language, setLanguage] = useState(() => readStoredLanguage());
   const [mode, setMode] = useState('password'); // password | email
   const [form, setForm] = useState(() => ({
@@ -268,6 +268,11 @@ export default function Login({ onLogin, onNavigateRegister }) {
 
   return (
     <main className="character-login-page">
+      {onNavigateHome ? (
+        <button type="button" className="auth-home-link" onClick={onNavigateHome}>
+          <ArrowLeft /> 平台介绍
+        </button>
+      ) : null}
       <div className="auth-lang-switcher">
         <LanguageSwitcher
           language={language}

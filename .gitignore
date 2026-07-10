@@ -6,6 +6,8 @@ __pycache__/
 *.sqlite3
 *.db
 .codex-artifacts/
+.playwright-cli/
+output/playwright/
 .env
 .venv/
 backend/.venv/

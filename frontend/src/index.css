@@ -75,6 +75,38 @@ button {
   min-height: 100vh;
 }
 
+.app-route-loading {
+  display: grid;
+  min-height: 100vh;
+  place-content: center;
+  justify-items: center;
+  gap: 7px;
+  background: #f5f9f7;
+  color: #183936;
+}
+
+.app-route-loading > span {
+  width: 34px;
+  height: 34px;
+  margin-bottom: 8px;
+  border: 3px solid #cce5dc;
+  border-top-color: #0f9f83;
+  border-radius: 50%;
+  animation: app-route-spin 700ms linear infinite;
+}
+
+.app-route-loading strong {
+  font-size: 17px;
+}
+
+.app-route-loading small {
+  color: #718681;
+}
+
+@keyframes app-route-spin {
+  to { transform: rotate(360deg); }
+}
+
 @theme inline {
   --font-heading: var(--font-sans);
   --font-sans: 'Geist Variable', sans-serif;

@@ -2,7 +2,10 @@ import { useEffect, useState } from 'react';
 import { Eye, EyeOff } from 'lucide-react';
 import AnimatedAuthShowcase, { CharacterAuthBrand } from '../components/AnimatedAuthShowcase.jsx';
 import { registerWithEmailCode, sendEmailCode } from '../api/auth.js';
+import ProfileOnboarding from './ProfileOnboarding.jsx';
 import '../styles/animated-login.css';
+
+const PENDING_PROFILE_KEY = 'campus_pending_profile';
 
 function getErrorMessage(error) {
   if (!error.response) return '服务器连接失败，请确认后端已启动';
@@ -13,7 +16,7 @@ function getErrorMessage(error) {
   return '注册失败，请稍后再试';
 }
 
-export default function Register({ onNavigateLogin, onLogin }) {
+export default function Register({ onNavigateLogin, onNavigateHome, onLogin }) {
   const [form, setForm] = useState({
     username: '',
     email: '',
@@ -30,6 +33,14 @@ export default function Register({ onNavigateLogin, onLogin }) {
   const [codeLoading, setCodeLoading] = useState(false);
   const [cooldown, setCooldown] = useState(0);
   const [message, setMessage] = useState({ type: '', text: '' });
+  const [registeredUser, setRegisteredUser] = useState(() => {
+    try {
+      const pending = sessionStorage.getItem(PENDING_PROFILE_KEY);
+      return pending ? JSON.parse(pending) : null;
+    } catch {
+      return null;
+    }
+  });
 
   const update = (key, value) => setForm((current) => ({ ...current, [key]: value }));
   const passwordFocused = focusedField === 'password' || focusedField === 'confirmPassword';
@@ -120,7 +131,8 @@ export default function Register({ onNavigateLogin, onLogin }) {
       if (token) localStorage.setItem('token', token);
       setMessage({ type: 'success', text: response.message || '注册成功' });
       if (onLogin && response.user && token) {
-        window.setTimeout(() => onLogin(response.user), 400);
+        sessionStorage.setItem(PENDING_PROFILE_KEY, JSON.stringify(response.user));
+        setRegisteredUser(response.user);
       } else {
         window.setTimeout(onNavigateLogin, 900);
       }
@@ -130,6 +142,22 @@ export default function Register({ onNavigateLogin, onLogin }) {
       setLoading(false);
     }
   };
+
+  const finishOnboarding = (nextUser) => {
+    sessionStorage.removeItem(PENDING_PROFILE_KEY);
+    setRegisteredUser(null);
+    onLogin?.(nextUser || registeredUser);
+  };
+
+  if (registeredUser) {
+    return (
+      <ProfileOnboarding
+        user={registeredUser}
+        onComplete={finishOnboarding}
+        onSkip={finishOnboarding}
+      />
+    );
+  }
 
   return (
     <main className="character-login-page character-register-page">
@@ -169,7 +197,7 @@ export default function Register({ onNavigateLogin, onLogin }) {
                 onChange={(event) => update('email', event.target.value)}
                 onFocus={() => setFocusedField('email')}
                 onBlur={() => setFocusedField(null)}
-                placeholder="you@qq.com / Gmail / Outlook…"
+                placeholder="you@qq.com / Gmail / Outlook"
                 autoComplete="email"
               />
             </label>
@@ -279,6 +307,7 @@ export default function Register({ onNavigateLogin, onLogin }) {
             已有账号？
             <button type="button" onClick={onNavigateLogin}>返回登录</button>
           </p>
+          {onNavigateHome ? <button type="button" className="character-login-home-link" onClick={onNavigateHome}>返回平台介绍</button> : null}
         </div>
       </section>
     </main>

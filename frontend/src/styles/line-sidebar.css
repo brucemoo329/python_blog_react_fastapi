@@ -44,8 +44,12 @@
   align-items: baseline;
   color: color-mix(in srgb, var(--accent-color) calc(var(--effect, 0) * 100%), var(--text-color));
   font-size: var(--font-size);
+  font-weight: calc(600 + var(--effect, 0) * 220);
   line-height: 1.2;
-  transform: translateX(calc(var(--effect, 0) * var(--max-shift)));
+  transform: translateX(calc(var(--effect, 0) * var(--max-shift))) scale(calc(1 + var(--effect, 0) * 0.075));
+  transform-origin: left center;
+  transition: color var(--smoothing) ease, font-weight var(--smoothing) ease, transform var(--smoothing) cubic-bezier(0.22, 1, 0.36, 1), text-shadow var(--smoothing) ease;
+  will-change: transform, color;
 }
 
 .line-sidebar__index {

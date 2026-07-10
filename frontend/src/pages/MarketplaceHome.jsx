@@ -19,7 +19,6 @@ import {
   Repeat2,
   Search,
   ShoppingBag,
-  Sparkles,
   Star,
   TrendingUp,
   Shield,
@@ -53,7 +52,6 @@ import ImageLightbox from '@/components/ImageLightbox'
 import MessagesCenter from '@/components/MessagesCenter'
 import OrdersCenter from '@/components/OrdersCenter'
 import { LiquidGlassBar } from '@/components/ui/liquid-glass-button'
-import Particles from '@/components/Particles'
 import ProfileCenter from '@/components/ProfileCenter'
 import PublicProfile from '@/components/PublicProfile'
 import PublishDialog from '@/components/PublishDialog'
@@ -63,6 +61,7 @@ import ErrandTrackingMap from '@/components/ErrandTrackingMap'
 import ErrandNavPage from '@/components/ErrandNavPage'
 import SpotlightCard from '@/components/SpotlightCard'
 import StarBorder from '@/components/StarBorder'
+import CampusBrand from '@/components/CampusBrand'
 import {
   acceptServiceTask,
   clearAllNotifications,
@@ -82,7 +81,7 @@ import {
   updateUserProfile,
 } from '@/api/marketplace'
 import { cn } from '@/lib/utils'
-import { navLabel, normalizeLang, t as translate, typeLabel, writeStoredLanguage } from '@/lib/i18n'
+import { navLabel, normalizeLang, t as translate, writeStoredLanguage } from '@/lib/i18n'
 import '@/styles/marketplace.css'
 
 const NAV_DEFS = [
@@ -261,6 +260,9 @@ export default function MarketplaceHome({ user, onLogout, onUserUpdate }) {
   const trustScore = currentUser?.trust?.score ?? summary.trust?.score ?? 800
   const trustGrade = currentUser?.trust?.grade ?? summary.trust?.grade ?? '优秀'
   const trustPercent = Math.min(100, Math.max(0, Math.round((Number(trustScore) / 1000) * 100)))
+  const trustHue = Math.min(132, Math.max(8, Math.round(8 + trustPercent * 1.55)))
+  const trustColor = `hsl(${trustHue} 68% 38%)`
+  const trustSoftColor = `hsl(${trustHue} 64% 92%)`
 
   useEffect(() => {
     setCurrentUser(user)
@@ -662,15 +664,12 @@ export default function MarketplaceHome({ user, onLogout, onUserUpdate }) {
     }
   }
 
-  const showParticles = !selectedDetail && !checkoutItem && !publicUserId && !activeErrand && !['messages', 'orders', 'admin'].includes(activeNav) && view === 'pulse'
-
   return (
-    <main className="dark campus-shell">
-      {showParticles ? <div className="campus-particles-bg" aria-hidden="true"><Particles particleColors={['#8b5cf6', '#a78bfa', '#f5d0fe']} particleCount={90} particleSpread={13} speed={0.06} particleBaseSize={72} sizeRandomness={1.2} alphaParticles disableRotation pixelRatio={1} /></div> : null}
+    <main className="campus-shell campus-shell--daylight">
       <aside className="campus-sidebar">
-        <button type="button" className="campus-logo" onClick={() => selectNav('home')}><span><Sparkles /></span><span>{t('ui.pulse')}<small>Campus Pulse</small></span></button>
-        <div className="campus-line-nav" aria-label="主导航"><LineSidebar items={navItems.map((item) => item.label)} defaultActive={Math.max(0, navItems.findIndex((item) => item.id === activeNav))} accentColor="#a78bfa" textColor="rgba(216,180,254,.62)" showIndex={false} showMarker={false} maxShift={22} proximityRadius={138} itemGap={19} fontSize={1.02} smoothing={80} className="campus-main-line-sidebar" onItemClick={(index) => selectNav(navItems[index].id)} /></div>
-        <SpotlightCard className="campus-sidebar-stats" spotlightColor="rgba(167, 139, 250, 0.34)">
+        <button type="button" className="campus-logo" onClick={() => selectNav('home')}><CampusBrand /></button>
+        <div className="campus-line-nav" aria-label="主导航"><LineSidebar items={navItems.map((item) => item.label)} defaultActive={Math.max(0, navItems.findIndex((item) => item.id === activeNav))} accentColor="#5b4ae8" textColor="rgba(44,79,73,.62)" showIndex={false} showMarker={false} maxShift={34} proximityRadius={164} itemGap={21} fontSize={1.03} smoothing={72} className="campus-main-line-sidebar" onItemClick={(index) => selectNav(navItems[index].id)} /></div>
+        <SpotlightCard className="campus-sidebar-stats" spotlightColor="rgba(15, 159, 131, 0.18)" style={{ '--trust-color': trustColor, '--trust-soft': trustSoftColor }}>
           <p>{t('ui.trust')}</p>
           <strong>{trustGrade}</strong>
           <div className="campus-trust-bar" role="progressbar" aria-valuenow={trustScore} aria-valuemin={0} aria-valuemax={1000} aria-label={t('ui.trust')}>
@@ -678,7 +677,7 @@ export default function MarketplaceHome({ user, onLogout, onUserUpdate }) {
           </div>
           <small>{trustScore} / 1000</small>
         </SpotlightCard>
-        <StarBorder as="button" type="button" className="campus-publish-button" color="#c084fc" speed="4.8s" thickness={2} onClick={() => openPublish('listing')}><PenLine /> {t('ui.publish')}</StarBorder>
+        <StarBorder as="button" type="button" className="campus-publish-button" color="#0f9f83" speed="4.8s" thickness={2} onClick={() => openPublish('listing')}><PenLine /> {t('ui.publish')}</StarBorder>
       </aside>
 
       <section className="campus-workspace">

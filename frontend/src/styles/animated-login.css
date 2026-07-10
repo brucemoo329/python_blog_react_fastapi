@@ -1,6 +1,6 @@
 .character-login-page {
-  --login-purple: #5f43e9;
-  --login-purple-dark: #4b31cd;
+  --login-purple: #0f8f77;
+  --login-purple-dark: #0b725f;
   --login-ink: #24242a;
   --login-muted: #777782;
   position: relative;
@@ -16,6 +16,30 @@
   top: 16px;
   right: 16px;
   z-index: 40;
+}
+
+.auth-home-link {
+  position: fixed;
+  top: 16px;
+  left: 16px;
+  z-index: 40;
+  display: inline-flex;
+  min-height: 36px;
+  align-items: center;
+  gap: 7px;
+  border: 1px solid rgba(255, 255, 255, 0.24);
+  border-radius: 999px;
+  padding: 0 12px;
+  background: rgba(255, 255, 255, 0.12);
+  color: #fff;
+  font-size: 12px;
+  font-weight: 720;
+  backdrop-filter: blur(12px);
+}
+
+.auth-home-link svg {
+  width: 15px;
+  height: 15px;
 }
 
 .auth-lang-switcher .lang-switcher--login {
@@ -55,7 +79,7 @@
   justify-content: space-between;
   overflow: hidden;
   padding: 44px clamp(36px, 5vw, 76px) 34px;
-  background: var(--login-purple);
+  background: #173f39;
   color: #fff;
 }
 
@@ -105,6 +129,30 @@
   place-items: center;
   border-radius: 8px;
   background: rgba(255, 255, 255, 0.15);
+}
+
+.character-login-brand.campus-brand,
+.character-login-mobile-brand.campus-brand {
+  font-size: inherit;
+}
+
+.character-login-brand .campus-brand__mark {
+  border-color: rgba(255, 255, 255, 0.32);
+  background: rgba(255, 255, 255, 0.16);
+  box-shadow: none;
+}
+
+.character-login-mobile-brand .campus-brand__mark {
+  background: #0f9f83;
+}
+
+.character-login-home-link {
+  display: block;
+  margin: 14px auto 0;
+  background: transparent;
+  color: #7b8884;
+  font-size: 12px;
+  font-weight: 650;
 }
 
 .character-login-visual {
@@ -402,10 +450,10 @@
 }
 .character-login-code-btn {
   flex-shrink: 0;
-  border: 1px solid rgba(148, 163, 184, 0.35);
-  background: rgba(15, 23, 42, 0.55);
-  color: #e2e8f0;
-  border-radius: 12px;
+  border: 1px solid #cddbd7;
+  background: #edf6f2;
+  color: #176b5c;
+  border-radius: 8px;
   padding: 0 12px;
   font-size: 13px;
   cursor: pointer;
@@ -416,8 +464,8 @@
   cursor: not-allowed;
 }
 .character-login-code-btn:not(:disabled):hover {
-  border-color: rgba(167, 139, 250, 0.55);
-  color: #fff;
+  border-color: rgba(15, 143, 119, 0.55);
+  color: #0b725f;
 }
 .character-register-code-field {
   grid-column: 1 / -1;
@@ -485,7 +533,7 @@
   border: 1px solid var(--login-purple);
   background: var(--login-purple);
   color: #fff;
-  box-shadow: 0 12px 28px rgba(95, 67, 233, 0.22);
+  box-shadow: 0 12px 28px rgba(15, 143, 119, 0.22);
 }
 
 .character-login-submit:hover {
@@ -564,6 +612,12 @@
 
   .character-login-showcase {
     display: none;
+  }
+
+  .auth-home-link {
+    color: #31534d;
+    border-color: rgba(24, 57, 54, 0.14);
+    background: rgba(255, 255, 255, 0.88);
   }
 
   .character-login-form-panel {

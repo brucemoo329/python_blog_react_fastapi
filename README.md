@@ -10,12 +10,21 @@
 - Vite 8
 - Tailwind CSS 4
 - shadcn/ui（JavaScript / JSX）
+- React Bits 动效组件（轻量 CSS / Motion / GSAP 组合）
+- Motion
 - Axios
 - Lucide React
 - 高德地图 JS API 2.0 实时定位与校园任务地图
 - 原生 CSS 角色动画
 
 项目保持 JavaScript/JSX，不使用 TypeScript。shadcn/ui 组件位于 `frontend/src/components/ui`。
+
+### 前端入口与资料引导
+
+- `/`：公开平台介绍页，展示校园二手、跑腿、游戏交易、求购和校园社区。
+- `/login`、`/register`：登录与注册；登录页保留互动角色动画。
+- 注册成功后会进入四步资料引导，头像、学校、主页背景和个性签名通过 `PUT /marketplace/profile` 保存。
+- `/app`：登录后的校园信息流、地图任务、消息、订单和个人主页。
 
 ### 后端
 

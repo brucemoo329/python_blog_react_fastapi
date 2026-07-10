@@ -31,41 +31,17 @@ export default function LineSidebar({
   const listRef = useRef(null)
   const itemRefs = useRef([])
   const targetsRef = useRef([])
-  const currentRef = useRef([])
-  const rafRef = useRef(null)
-  const lastRef = useRef(0)
   const activeRef = useRef(defaultActive)
-  const smoothingRef = useRef(smoothing)
   const [activeIndex, setActiveIndex] = useState(defaultActive)
 
-  const runFrame = useCallback(function frame(now) {
-    const dt = Math.min((now - lastRef.current) / 1000, 0.05)
-    lastRef.current = now
-    const tau = Math.max(smoothingRef.current, 1) / 1000
-    const k = 1 - Math.exp(-dt / tau)
-    let moving = false
-
+  const applyEffects = useCallback(() => {
     for (let i = 0; i < itemRefs.current.length; i += 1) {
       const el = itemRefs.current[i]
       if (!el) continue
-      const target = Math.max(targetsRef.current[i] || 0, activeRef.current === i ? 1 : 0)
-      const cur = currentRef.current[i] || 0
-      const next = cur + (target - cur) * k
-      const settled = Math.abs(target - next) < 0.0015
-      const value = settled ? target : next
-      currentRef.current[i] = value
-      el.style.setProperty('--effect', value.toFixed(4))
-      if (!settled) moving = true
+      const effect = Math.max(targetsRef.current[i] || 0, activeRef.current === i ? 0.44 : 0)
+      el.style.setProperty('--effect', effect.toFixed(4))
     }
-
-    rafRef.current = moving ? requestAnimationFrame(frame) : null
   }, [])
-
-  const startLoop = useCallback(() => {
-    if (rafRef.current != null) return
-    lastRef.current = performance.now()
-    rafRef.current = requestAnimationFrame(runFrame)
-  }, [runFrame])
 
   const handlePointerMove = useCallback((event) => {
     const list = listRef.current
@@ -80,13 +56,13 @@ export default function LineSidebar({
       const distance = Math.abs(pointerY - center)
       targetsRef.current[i] = ease(Math.max(0, 1 - distance / proximityRadius))
     }
-    startLoop()
-  }, [falloff, proximityRadius, startLoop])
+    applyEffects()
+  }, [applyEffects, falloff, proximityRadius])
 
   const handlePointerLeave = useCallback(() => {
     targetsRef.current = targetsRef.current.map(() => 0)
-    startLoop()
-  }, [startLoop])
+    applyEffects()
+  }, [applyEffects])
 
   const handleClick = useCallback((index, label) => {
     setActiveIndex(index)
@@ -99,16 +75,8 @@ export default function LineSidebar({
 
   useEffect(() => {
     activeRef.current = activeIndex
-    startLoop()
-  }, [activeIndex, startLoop])
-
-  useEffect(() => {
-    smoothingRef.current = smoothing
-  }, [smoothing])
-
-  useEffect(() => () => {
-    if (rafRef.current != null) cancelAnimationFrame(rafRef.current)
-  }, [])
+    applyEffects()
+  }, [activeIndex, applyEffects])
 
   return (
     <nav
