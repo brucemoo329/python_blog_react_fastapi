@@ -5,6 +5,7 @@ import {
   Car,
   CheckCircle2,
   Clock3,
+  ExternalLink,
   Flag,
   MapPin,
   MessageCircle,
@@ -30,6 +31,7 @@ import {
   getCurrentLngLat,
   loadAMap,
   MARKER_HTML,
+  openAmapAppNavigation,
   planRoute,
   geocodeAddress,
 } from '@/lib/amap'
@@ -41,6 +43,8 @@ const MODES = [
   { id: 'ride', label: '骑行', icon: Bike },
   { id: 'drive', label: '驾车', icon: Car },
 ]
+
+const MODE_LABEL = { walk: '步行', ride: '骑行', drive: '驾车', auto: '智能' }
 
 function fmtEta(seconds) {
   if (seconds == null) return '计算中…'
@@ -68,8 +72,13 @@ async function ensurePoint(label, existing) {
   }
 }
 
+function normalizeMode(value, fallback = 'ride') {
+  if (value === 'walk' || value === 'ride' || value === 'drive') return value
+  return fallback
+}
+
 /**
- * Full-screen Meituan-like errand navigation for runner & requester.
+ * Full-screen errand navigation for runner & requester.
  */
 export default function ErrandNavPage({
   taskId,
@@ -80,21 +89,25 @@ export default function ErrandNavPage({
   onMessage,
   onFinished,
 }) {
+  const initialMode = normalizeMode(initialTracking?.travel_mode, 'ride')
   const [tracking, setTracking] = useState(initialTracking || null)
-  const [mode, setMode] = useState(initialTracking?.travel_mode || 'ride')
+  const [mode, setMode] = useState(initialMode)
   const [busy, setBusy] = useState(false)
   const [routeInfo, setRouteInfo] = useState(null)
   const [myPos, setMyPos] = useState(null)
   const [desiredOpen, setDesiredOpen] = useState(false)
   const [desiredLocal, setDesiredLocal] = useState(defaultDesiredTime(1))
   const [statusText, setStatusText] = useState('正在规划路线…')
+  const [mapReady, setMapReady] = useState(false)
 
+  const modeRef = useRef(initialMode)
+  const myPosRef = useRef(null)
   const mapBoxRef = useRef(null)
   const mapRef = useRef(null)
   const AMapRef = useRef(null)
   const markersRef = useRef([])
   const polyRef = useRef(null)
-  const plannerRef = useRef(null)
+  const drawSeq = useRef(0)
 
   const role = tracking?.role
   const phase = tracking?.delivery_phase || 'pending'
@@ -108,12 +121,21 @@ export default function ErrandNavPage({
     return tracking?.phase_label || '配送导航'
   }, [phase, isRunner, tracking?.phase_label])
 
+  const setTravelMode = (next) => {
+    const m = normalizeMode(next, 'ride')
+    modeRef.current = m
+    setMode(m)
+  }
+
   const refresh = useCallback(async () => {
     if (!taskId) return null
     const response = await getTaskTracking(taskId)
     setTracking(response.item)
-    if (response.item?.travel_mode && response.item.travel_mode !== 'auto') {
-      setMode(response.item.travel_mode)
+    // Sync mode from server only if server has an explicit mode (do not force ride)
+    const serverMode = normalizeMode(response.item?.travel_mode, null)
+    if (serverMode) {
+      modeRef.current = serverMode
+      setMode(serverMode)
     }
     return response.item
   }, [taskId])
@@ -121,15 +143,13 @@ export default function ErrandNavPage({
   const clearOverlays = () => {
     const map = mapRef.current
     if (!map) return
-    markersRef.current.forEach((m) => map.remove(m))
+    markersRef.current.forEach((m) => {
+      try { map.remove(m) } catch { /* ignore */ }
+    })
     markersRef.current = []
     if (polyRef.current) {
-      map.remove(polyRef.current)
+      try { map.remove(polyRef.current) } catch { /* ignore */ }
       polyRef.current = null
-    }
-    if (plannerRef.current?.clear) {
-      try { plannerRef.current.clear() } catch { /* ignore */ }
-      plannerRef.current = null
     }
   }
 
@@ -137,6 +157,7 @@ export default function ErrandNavPage({
     const map = mapRef.current
     const AMap = AMapRef.current
     if (!map || !AMap || !track) return
+    const seq = ++drawSeq.current
 
     clearOverlays()
 
@@ -144,80 +165,85 @@ export default function ErrandNavPage({
     let delivery = toLngLat(track.delivery)
     if (!pickup) pickup = await ensurePoint(track.pickup_location || track.pickup?.label, track.pickup)
     if (!delivery) delivery = await ensurePoint(track.delivery_location || track.delivery?.label, track.delivery)
+    if (seq !== drawSeq.current) return
 
     const runner = livePos
       || (track.runner?.lat != null ? [Number(track.runner.lng), Number(track.runner.lat)] : null)
 
-    const addMarker = (position, html, title) => {
+    const addMarker = (position, html, title, zIndex = 150) => {
       if (!position) return
       const marker = new AMap.Marker({
         position,
         content: html,
         offset: new AMap.Pixel(-18, -18),
         title,
-        zIndex: 150,
+        zIndex,
       })
       map.add(marker)
       markersRef.current.push(marker)
     }
 
-    // Always show pickup + delivery for both roles
-    addMarker(pickup, MARKER_HTML.pickup, track.pickup_location || '取货点')
-    addMarker(delivery, MARKER_HTML.delivery, track.delivery_location || '送达点')
+    addMarker(pickup, MARKER_HTML.pickup, track.pickup_location || '取货点', 140)
+    addMarker(delivery, MARKER_HTML.delivery, track.delivery_location || '送达点', 140)
 
-    if (isRunner && runner) {
-      addMarker(runner, MARKER_HTML.me, '我（跑手）')
-    } else if (runner) {
-      addMarker(runner, MARKER_HTML.runner, '跑手位置')
-    }
+    if (isRunner && runner) addMarker(runner, MARKER_HTML.me, '我（跑手）', 160)
+    else if (runner) addMarker(runner, MARKER_HTML.runner, '跑手位置', 160)
 
-    // Requester also sees "送达点=我的收货地址" label already; optional self marker at delivery
     if (isRequester && delivery) {
-      addMarker(delivery, MARKER_HTML.me, '我的收货地址')
+      // 发布者自己的送达点强调
+      addMarker(delivery, MARKER_HTML.me, '我的收货地址', 155)
     }
 
-    const origin = phase === 'delivering' || phase === 'picked_up'
-      ? (runner || pickup)
-      : (runner || pickup)
-    const dest = phase === 'delivering' || phase === 'picked_up' ? delivery : pickup
+    const currentPhase = track.delivery_phase || phase
+    // 取货阶段：当前位置 → 取货点；配送阶段：当前位置 → 送达点
+    const origin = runner || (currentPhase === 'to_pickup' ? null : pickup)
+    const dest = currentPhase === 'to_pickup' || currentPhase === 'pending'
+      ? pickup
+      : delivery
 
-    if (origin && dest && ['to_pickup', 'delivering', 'picked_up'].includes(phase)) {
-      setStatusText(phase === 'to_pickup' ? '规划：当前位置 → 取货点' : '规划：取货点 → 送达点')
+    if (origin && dest && ['to_pickup', 'delivering', 'picked_up'].includes(currentPhase)) {
+      const useMode = normalizeMode(travelMode || modeRef.current, 'ride')
+      setStatusText(currentPhase === 'to_pickup' ? '规划：当前位置 → 取货点' : '规划：当前位置 → 送达点')
       try {
-        const route = await planRoute(origin, dest, travelMode || mode || 'ride', { map: null })
-        plannerRef.current = route.planner
-        if (route.path?.length) {
+        const route = await planRoute(origin, dest, useMode, { map: null })
+        if (seq !== drawSeq.current) return
+        if (route.path?.length >= 2) {
           polyRef.current = new AMap.Polyline({
             path: route.path,
-            strokeColor: phase === 'to_pickup' ? '#a78bfa' : '#34d399',
-            strokeWeight: 7,
+            strokeColor: currentPhase === 'to_pickup' ? '#c084fc' : '#34d399',
+            strokeWeight: 8,
             strokeOpacity: 0.95,
             lineJoin: 'round',
+            lineCap: 'round',
             showDir: true,
+            zIndex: 50,
           })
           map.add(polyRef.current)
           markersRef.current.push(polyRef.current)
         }
         setRouteInfo(route)
+        const modeText = MODE_LABEL[useMode] || useMode
+        const approx = route.approximate ? '（近似）' : ''
         setStatusText(
-          phase === 'to_pickup'
-            ? `去取货 · ${route.mode === 'walk' ? '步行' : route.mode === 'drive' ? '驾车' : '骑行'} · ${fmtEta(route.duration)} · ${route.distance}米`
-            : `配送中 · ${route.mode === 'walk' ? '步行' : route.mode === 'drive' ? '驾车' : '骑行'} · ${fmtEta(route.duration)} · ${route.distance}米`,
+          currentPhase === 'to_pickup'
+            ? `去取货 · ${modeText} · ${fmtEta(route.duration)} · ${route.distance}米${approx}`
+            : `配送中 · ${modeText} · ${fmtEta(route.duration)} · ${route.distance}米${approx}`,
         )
-        map.setFitView(null, false, [60, 60, 60, 60])
+        try {
+          map.setFitView(null, false, [70, 70, 70, 70])
+        } catch { /* ignore */ }
       } catch (error) {
         setStatusText(error.message || '路线规划失败')
       }
-    } else if (phase === 'delivered') {
+    } else if (currentPhase === 'delivered') {
       setStatusText('订单已完成')
-      map.setFitView(null, false, [60, 60, 60, 60])
+      try { map.setFitView(null, false, [70, 70, 70, 70]) } catch { /* ignore */ }
     } else {
-      const pts = [pickup, delivery, runner].filter(Boolean)
-      if (pts.length) map.setFitView(null, false, [60, 60, 60, 60])
+      try { map.setFitView(null, false, [70, 70, 70, 70]) } catch { /* ignore */ }
     }
-  }, [isRunner, isRequester, mode, phase])
+  }, [isRunner, isRequester, phase])
 
-  // Init map
+  // Init map once
   useEffect(() => {
     let disposed = false
     loadAMap().then((AMap) => {
@@ -230,7 +256,8 @@ export default function ErrandNavPage({
         resizeEnable: true,
       })
       mapRef.current.addControl(new AMap.Scale())
-      mapRef.current.addControl(new AMap.ToolBar({ position: { right: '12px', bottom: '80px' } }))
+      mapRef.current.addControl(new AMap.ToolBar({ position: { right: '12px', bottom: '100px' } }))
+      setMapReady(true)
     }).catch(() => setStatusText('地图加载失败，请检查高德 Key / HTTPS'))
     return () => {
       disposed = true
@@ -242,32 +269,50 @@ export default function ErrandNavPage({
     }
   }, [])
 
-  // Poll tracking + runner location push
+  // Poll tracking + push runner location (mode from modeRef — never force ride)
   useEffect(() => {
-    if (!taskId) return undefined
+    if (!taskId || !mapReady) return undefined
     let cancelled = false
 
     const tick = async () => {
       try {
-        const item = await refresh()
-        if (cancelled) return
-        let live = null
-        if (item?.role === 'runner' && ['to_pickup', 'delivering', 'picked_up'].includes(item.delivery_phase)) {
+        const item = await getTaskTracking(taskId).then((r) => r.item)
+        if (cancelled || !item) return
+        setTracking(item)
+
+        // Only adopt server mode if valid; never overwrite local selection with auto
+        const serverMode = normalizeMode(item.travel_mode, null)
+        if (serverMode && serverMode !== modeRef.current) {
+          // Prefer server as source of truth after location/mode API saves
+          modeRef.current = serverMode
+          setMode(serverMode)
+        }
+
+        const useMode = modeRef.current
+        let live = myPosRef.current
+
+        if (item.role === 'runner' && ['to_pickup', 'delivering', 'picked_up'].includes(item.delivery_phase)) {
           try {
             const pos = await getCurrentLngLat()
             live = [pos.lng, pos.lat]
+            myPosRef.current = live
             setMyPos(live)
-            const target = item.delivery_phase === 'to_pickup'
-              ? toLngLat(item.pickup)
-              : toLngLat(item.delivery)
+
+            let pickup = toLngLat(item.pickup)
+            let delivery = toLngLat(item.delivery)
+            if (!pickup && item.pickup_location) pickup = await ensurePoint(item.pickup_location, item.pickup)
+            if (!delivery && item.delivery_location) delivery = await ensurePoint(item.delivery_location, item.delivery)
+
+            const target = item.delivery_phase === 'to_pickup' ? pickup : delivery
             let eta = null
             let dist = null
-            const useMode = mode || item.travel_mode || 'ride'
             if (target && live) {
               const route = await planRoute(live, target, useMode)
               eta = route.duration
               dist = route.distance
+              if (!cancelled) setRouteInfo(route)
             }
+
             const response = await updateTaskRunnerLocation(taskId, {
               latitude: pos.lat,
               longitude: pos.lng,
@@ -275,52 +320,74 @@ export default function ErrandNavPage({
               distance_meters: dist,
               travel_mode: useMode,
             })
-            if (!cancelled) {
-              setTracking(response.tracking)
-              await drawMap(response.tracking, live, useMode)
-            }
+            if (cancelled) return
+            setTracking(response.tracking)
+            await drawMap(response.tracking, live, useMode)
             return
           } catch {
-            /* keep polling tracking only */
+            /* fall through to draw only */
           }
         }
-        if (!cancelled && item) await drawMap(item, live || myPos, mode || item.travel_mode)
+
+        if (!cancelled) await drawMap(item, live, useMode)
       } catch {
-        /* ignore */
+        /* ignore poll errors */
       }
     }
 
     tick()
-    const timer = window.setInterval(tick, 10000)
+    const timer = window.setInterval(tick, 12000)
     return () => {
       cancelled = true
       window.clearInterval(timer)
     }
-  }, [taskId, mode, refresh, drawMap])
+  }, [taskId, mapReady, drawMap])
 
   const onChangeMode = async (nextMode) => {
-    setMode(nextMode)
+    const m = normalizeMode(nextMode, 'ride')
+    setTravelMode(m)
     if (!isRunner || !taskId) return
     setBusy(true)
+    setStatusText(`已选择${MODE_LABEL[m]}，正在重算路线…`)
     try {
+      let origin = myPosRef.current
+      if (!origin) {
+        try {
+          const pos = await getCurrentLngLat()
+          origin = [pos.lng, pos.lat]
+          myPosRef.current = origin
+          setMyPos(origin)
+        } catch { /* ignore */ }
+      }
+      if (!origin && tracking?.runner?.lat != null) {
+        origin = [Number(tracking.runner.lng), Number(tracking.runner.lat)]
+      }
+
+      let pickup = toLngLat(tracking?.pickup)
+      let delivery = toLngLat(tracking?.delivery)
+      if (!pickup) pickup = await ensurePoint(tracking?.pickup_location, tracking?.pickup)
+      if (!delivery) delivery = await ensurePoint(tracking?.delivery_location, tracking?.delivery)
+
+      const dest = phase === 'to_pickup' ? pickup : delivery
       let eta = null
       let dist = null
-      const origin = myPos || (tracking?.runner?.lat != null ? [tracking.runner.lng, tracking.runner.lat] : null)
-      const dest = phase === 'to_pickup' ? toLngLat(tracking?.pickup) : toLngLat(tracking?.delivery)
       if (origin && dest) {
-        const route = await planRoute(origin, dest, nextMode)
+        const route = await planRoute(origin, dest, m)
         eta = route.duration
         dist = route.distance
         setRouteInfo(route)
       }
+
       const response = await updateTaskTravelMode(taskId, {
-        travel_mode: nextMode,
+        travel_mode: m,
         eta_seconds: eta,
         distance_meters: dist,
       })
-      setTracking(response.tracking)
-      onNotice?.(response.message)
-      await drawMap(response.tracking, origin, nextMode)
+      // Force local mode to selected (server might echo)
+      setTravelMode(m)
+      setTracking({ ...response.tracking, travel_mode: m, travel_mode_label: MODE_LABEL[m] })
+      onNotice?.(`已切换为${MODE_LABEL[m]}`)
+      await drawMap({ ...response.tracking, travel_mode: m }, origin, m)
     } catch (error) {
       onNotice?.(error.response?.data?.detail || error.message || '切换出行方式失败')
     } finally {
@@ -328,40 +395,85 @@ export default function ErrandNavPage({
     }
   }
 
+  const openExternalNav = async () => {
+    try {
+      let origin = myPosRef.current
+      if (!origin) {
+        try {
+          const pos = await getCurrentLngLat()
+          origin = [pos.lng, pos.lat]
+          myPosRef.current = origin
+          setMyPos(origin)
+        } catch { /* optional */ }
+      }
+      let pickup = toLngLat(tracking?.pickup)
+      let delivery = toLngLat(tracking?.delivery)
+      if (!pickup) pickup = await ensurePoint(tracking?.pickup_location, tracking?.pickup)
+      if (!delivery) delivery = await ensurePoint(tracking?.delivery_location, tracking?.delivery)
+
+      const dest = phase === 'to_pickup' || phase === 'pending' ? pickup : delivery
+      const destName = phase === 'to_pickup' || phase === 'pending'
+        ? (tracking?.pickup_location || '取货点')
+        : (tracking?.delivery_location || '送达点')
+
+      if (!dest) {
+        onNotice?.('暂无目的地坐标，请稍后重试')
+        return
+      }
+
+      openAmapAppNavigation({
+        fromLng: origin?.[0],
+        fromLat: origin?.[1],
+        fromName: '我的位置',
+        toLng: dest[0],
+        toLat: dest[1],
+        toName: destName,
+        mode: modeRef.current,
+      })
+      onNotice?.(`正在打开高德地图导航到「${destName}」`)
+    } catch (error) {
+      onNotice?.(error.message || '打开高德导航失败')
+    }
+  }
+
   const onPickedUp = async () => {
     setBusy(true)
     try {
-      let pos = myPos
+      let pos = myPosRef.current
       if (!pos) {
         const cur = await getCurrentLngLat()
         pos = [cur.lng, cur.lat]
+        myPosRef.current = pos
         setMyPos(pos)
       }
-      const pickup = toLngLat(tracking?.pickup)
+      let pickup = toLngLat(tracking?.pickup)
+      if (!pickup) pickup = await ensurePoint(tracking?.pickup_location, tracking?.pickup)
       const dist = pickup ? distanceMeters(pos, pickup) : null
       if (dist != null && dist > (tracking?.pickup_radius_m || 280)) {
         onNotice?.(`距离取货点约 ${dist} 米，请靠近后再点「已取到货」`)
         setBusy(false)
         return
       }
-      const dest = toLngLat(tracking?.delivery)
+      let delivery = toLngLat(tracking?.delivery)
+      if (!delivery) delivery = await ensurePoint(tracking?.delivery_location, tracking?.delivery)
       let eta = null
       let d = null
-      if (pos && dest) {
-        const route = await planRoute(pos, dest, mode)
+      if (pos && delivery) {
+        const route = await planRoute(pos, delivery, modeRef.current)
         eta = route.duration
         d = route.distance
+        setRouteInfo(route)
       }
       const response = await markTaskPickedUp(taskId, {
         latitude: pos[1],
         longitude: pos[0],
         eta_seconds: eta,
         distance_meters: d,
-        travel_mode: mode,
+        travel_mode: modeRef.current,
       })
       setTracking(response.tracking)
-      onNotice?.(response.message)
-      await drawMap(response.tracking, pos, mode)
+      onNotice?.('已取货，正在规划到送达点的路线')
+      await drawMap(response.tracking, pos, modeRef.current)
     } catch (error) {
       onNotice?.(error.response?.data?.detail || '确认取货失败')
     } finally {
@@ -372,7 +484,7 @@ export default function ErrandNavPage({
   const onComplete = async () => {
     setBusy(true)
     try {
-      let pos = myPos
+      let pos = myPosRef.current
       if (!pos && isRunner) {
         const cur = await getCurrentLngLat()
         pos = [cur.lng, cur.lat]
@@ -418,6 +530,7 @@ export default function ErrandNavPage({
   }
 
   const peer = isRunner ? tracking?.requester : tracking?.runner?.user
+  const displayMode = MODE_LABEL[mode] || mode
 
   return (
     <section className="errand-nav-page">
@@ -428,7 +541,12 @@ export default function ErrandNavPage({
           <h1>{tracking?.title || '跑腿配送'}</h1>
           <p>{statusText}</p>
         </div>
-        <Button variant="ghost" size="icon" onClick={() => refresh().then((item) => drawMap(item, myPos, mode))} aria-label="刷新">
+        <Button
+          variant="ghost"
+          size="icon"
+          onClick={() => refresh().then((item) => drawMap(item, myPosRef.current, modeRef.current))}
+          aria-label="刷新"
+        >
           <RefreshCw />
         </Button>
       </header>
@@ -445,6 +563,7 @@ export default function ErrandNavPage({
         <span><i className="lg-delivery" />送达点</span>
         <span><i className="lg-runner" />跑手</span>
         <span><i className="lg-me" />我</span>
+        <span className="errand-mode-pill">当前：{displayMode}</span>
       </div>
 
       <div ref={mapBoxRef} className="errand-nav-map" aria-label="配送导航地图" />
@@ -472,7 +591,10 @@ export default function ErrandNavPage({
             <Clock3 />
             <div>
               <strong>{fmtEta(routeInfo?.duration ?? tracking?.eta_seconds)}</strong>
-              <small>{routeInfo?.distance || tracking?.distance_meters || '—'} 米 · {tracking?.travel_mode_label || mode}</small>
+              <small>
+                {routeInfo?.distance || tracking?.distance_meters || '—'} 米 · {displayMode}
+                {routeInfo?.approximate ? ' · 近似路径' : ' · 道路路径'}
+              </small>
             </div>
           </div>
           {tracking?.desired_delivery_at ? (
@@ -499,6 +621,13 @@ export default function ErrandNavPage({
           </div>
         ) : null}
 
+        {/* 高德 App 导航跳转 */}
+        {phase !== 'delivered' && phase !== 'pending' ? (
+          <Button className="errand-amap-btn" variant="secondary" disabled={busy} onClick={openExternalNav}>
+            <ExternalLink /> 打开高德 App 导航到{phase === 'to_pickup' ? '取货点' : '送达点'}
+          </Button>
+        ) : null}
+
         {peer ? (
           <div className="errand-nav-peer">
             <Avatar className="size-9">
@@ -507,7 +636,7 @@ export default function ErrandNavPage({
             </Avatar>
             <div>
               <strong>{peer.nickname || peer.username}</strong>
-              <small>{isRunner ? '发布者 / 买家' : '跑手'}</small>
+              <small>{isRunner ? '发布者 / 买家' : `跑手 · ${displayMode}`}</small>
             </div>
             <Button size="sm" variant="outline" onClick={() => onMessage?.({ user: peer, type: 'service', id: taskId })}>
               <MessageCircle /> 联系
@@ -550,11 +679,15 @@ export default function ErrandNavPage({
           </div>
         ) : null}
 
-        {isRunner && phase === 'to_pickup' && tracking?.distance_to_pickup_m != null && !tracking.can_confirm_pickup ? (
-          <p className="errand-nav-hint">靠近取货点（约 {tracking.pickup_radius_m || 280} 米内）后，「已取到货」才会生效；发布者将实时看到你的位置与路线。</p>
+        {isRunner && phase === 'to_pickup' ? (
+          <p className="errand-nav-hint">
+            ① 选择步行/骑行/驾车 ② 点「打开高德 App」开始真实导航到取货点 ③ 靠近后点「已取到货」④ 再导航到送达点。
+          </p>
         ) : null}
         {isRequester ? (
-          <p className="errand-nav-hint">地图：橙色=取货点，蓝色=你的送达地址，紫色=跑手实时位置。跑手确认取货后会自动改规划「取货点→你」的路线。</p>
+          <p className="errand-nav-hint">
+            地图：橙=取货点，蓝=你的送达地址，紫/绿=跑手。跑手切换驾车/步行后会同步到这里；取货后自动改规划到你。
+          </p>
         ) : null}
       </div>
     </section>

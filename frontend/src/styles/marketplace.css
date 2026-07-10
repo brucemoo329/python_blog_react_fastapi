@@ -4042,3 +4042,19 @@
   .errand-nav-page { min-height: calc(100vh - 64px); }
   .errand-nav-map { min-height: 42vh; }
 }
+
+.errand-mode-pill {
+  margin-left: auto;
+  padding: 2px 8px;
+  border-radius: 999px;
+  background: rgba(167, 139, 250, 0.2);
+  color: #e9d5ff;
+  font-weight: 700;
+}
+.errand-amap-btn {
+  width: 100%;
+  margin-bottom: 10px;
+  height: 42px;
+  font-weight: 700;
+  gap: 8px;
+}

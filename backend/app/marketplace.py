@@ -1370,8 +1370,9 @@ def update_runner_location(
         task.eta_seconds = data.eta_seconds
     if data.distance_meters is not None:
         task.distance_meters = data.distance_meters
-    if data.travel_mode and data.travel_mode != "auto":
-        task.travel_mode = data.travel_mode
+    # Always persist explicit mode so publisher UI stays in sync (walk/ride/drive)
+    if data.travel_mode:
+        task.travel_mode = data.travel_mode if data.travel_mode != "auto" else (task.travel_mode or "ride")
     db.commit()
     db.refresh(task)
     task = db.query(models.ServiceTask).options(

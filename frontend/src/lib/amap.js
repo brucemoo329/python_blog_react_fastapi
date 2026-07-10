@@ -256,86 +256,195 @@ export function resolveSchoolLocation(schoolName, timeoutMs = 5000) {
     }))
 }
 
+function pushLngLat(path, point) {
+  if (!point) return
+  if (Array.isArray(point) && point.length >= 2) {
+    const lng = Number(point[0])
+    const lat = Number(point[1])
+    if (Number.isFinite(lng) && Number.isFinite(lat)) path.push([lng, lat])
+    return
+  }
+  if (typeof point.getLng === 'function') {
+    path.push([point.getLng(), point.getLat()])
+    return
+  }
+  if (point.lng != null && point.lat != null) {
+    path.push([Number(point.lng), Number(point.lat)])
+  }
+}
+
+/** Extract real road geometry from AMap Walking / Riding / Driving results. */
+export function extractRoutePath(route) {
+  const path = []
+  if (!route) return path
+  if (Array.isArray(route.path)) route.path.forEach((p) => pushLngLat(path, p))
+  if (Array.isArray(route.steps)) {
+    route.steps.forEach((step) => {
+      if (Array.isArray(step.path) && step.path.length) {
+        step.path.forEach((p) => pushLngLat(path, p))
+      } else if (typeof step.path === 'string' && step.path.includes(',')) {
+        // rare string form
+        step.path.split(';').forEach((pair) => {
+          const [lng, lat] = pair.split(',').map(Number)
+          if (Number.isFinite(lng) && Number.isFinite(lat)) path.push([lng, lat])
+        })
+      }
+      if (typeof step.polyline === 'string') {
+        step.polyline.split(';').forEach((pair) => {
+          const [lng, lat] = pair.split(',').map(Number)
+          if (Number.isFinite(lng) && Number.isFinite(lat)) path.push([lng, lat])
+        })
+      }
+    })
+  }
+  return path
+}
+
 /**
- * Plan route with AMap Walking / Riding / Driving.
- * @returns {{ mode, distance, duration, path, steps }}
- */
-/**
- * Plan route. Optional map draws the route via AMap planner.
+ * Plan route with real road path (not straight line when AMap succeeds).
  * @param {[lng,lat]} origin
  * @param {[lng,lat]} destination
  * @param {'walk'|'ride'|'drive'|'auto'} preferredMode
- * @param {{ map?: any }} options
+ * @param {{ map?: any }} options — if map is set, AMap also draws the route layer
  */
 export function planRoute(origin, destination, preferredMode = 'auto', options = {}) {
   return loadAMap().then((AMap) => {
     if (!origin || !destination) {
       return Promise.reject(new Error('缺少起点或终点'))
     }
-    const meters = distanceMeters(origin, destination)
-    const mode = preferredMode === 'auto' ? suggestTravelMode(meters) : preferredMode
+    const start = Array.isArray(origin) ? origin : [origin.lng, origin.lat]
+    const end = Array.isArray(destination) ? destination : [destination.lng, destination.lat]
+    const meters = distanceMeters(start, end)
+    // Never force auto→ride after user picked a mode
+    const mode = preferredMode === 'auto' || !preferredMode
+      ? suggestTravelMode(meters)
+      : preferredMode
     const map = options.map || null
-    const policyMap = {
-      walk: () => new AMap.Walking({ map, hideMarkers: true, autoFitView: Boolean(map) }),
-      ride: () => new AMap.Riding({ map, hideMarkers: true, autoFitView: Boolean(map) }),
-      drive: () => new AMap.Driving({
-        policy: AMap.DrivingPolicy?.LEAST_TIME,
-        map,
-        hideMarkers: true,
-        autoFitView: Boolean(map),
-      }),
-    }
-    const planner = (policyMap[mode] || policyMap.ride)()
 
-    return new Promise((resolve) => {
-      const fallback = () => {
-        const dist = meters || 800
-        const speed = mode === 'walk' ? 1.3 : mode === 'drive' ? 8 : 4
-        resolve({
-          mode,
-          distance: dist,
-          duration: Math.max(60, Math.round(dist / speed)),
-          path: [origin, destination],
-          approximate: true,
-          planner,
+    const createPlanner = (kind) => {
+      if (kind === 'walk') return new AMap.Walking({ map, hideMarkers: true, autoFitView: false })
+      if (kind === 'drive') {
+        return new AMap.Driving({
+          policy: AMap.DrivingPolicy?.LEAST_TIME ?? 0,
+          map,
+          hideMarkers: true,
+          autoFitView: false,
+          ferry: 1,
         })
       }
+      return new AMap.Riding({ map, hideMarkers: true, autoFitView: false })
+    }
+
+    const searchOnce = (kind) => new Promise((resolve) => {
+      let planner
       try {
-        planner.search(origin, destination, (status, result) => {
+        planner = createPlanner(kind)
+      } catch {
+        resolve(null)
+        return
+      }
+      const done = (payload) => resolve(payload)
+      try {
+        planner.search(start, end, (status, result) => {
           if (status !== 'complete' || !result) {
-            fallback()
+            done(null)
             return
           }
           const route = result.routes?.[0] || result.route
           if (!route) {
-            fallback()
+            done(null)
             return
           }
-          let path = []
-          if (route.steps?.length) {
-            route.steps.forEach((step) => {
-              if (step.path?.length) {
-                path = path.concat(step.path.map((p) => (Array.isArray(p) ? p : [p.lng, p.lat])))
-              }
-            })
-          }
-          if (!path.length) path = [origin, destination]
-          resolve({
-            mode,
-            distance: Number(route.distance) || meters || 0,
-            // AMap Walking/Riding often use `time` (seconds)
-            duration: Number(route.time) || Number(route.duration) || Math.max(60, Math.round((meters || 800) / 4)),
-            path,
-            approximate: false,
+          const path = extractRoutePath(route)
+          const distance = Number(route.distance) || meters || 0
+          const duration = Number(route.time) || Number(route.duration) || Math.max(60, Math.round(distance / 4))
+          done({
+            mode: kind,
+            distance,
+            duration,
+            path: path.length >= 2 ? path : null,
+            approximate: path.length < 2,
             planner,
             raw: result,
           })
         })
       } catch {
-        fallback()
+        done(null)
       }
     })
+
+    return (async () => {
+      // Prefer requested mode; if geometry fails, try other modes for path only
+      let best = await searchOnce(mode)
+      if (!best?.path || best.path.length < 2) {
+        for (const alt of ['drive', 'ride', 'walk']) {
+          if (alt === mode) continue
+          const tryAlt = await searchOnce(alt)
+          if (tryAlt?.path && tryAlt.path.length >= 2) {
+            // Keep user-selected mode label/ETA preference, but use real geometry
+            best = {
+              ...tryAlt,
+              mode, // report selected mode
+              // re-estimate duration for selected mode from distance
+              duration: Math.max(
+                60,
+                Math.round((tryAlt.distance || meters || 800) / (mode === 'walk' ? 1.3 : mode === 'drive' ? 8 : 4)),
+              ),
+              approximate: false,
+              geometryMode: alt,
+            }
+            break
+          }
+        }
+      }
+      if (best?.path && best.path.length >= 2) return best
+
+      const dist = meters || 800
+      const speed = mode === 'walk' ? 1.3 : mode === 'drive' ? 8 : 4
+      return {
+        mode,
+        distance: dist,
+        duration: Math.max(60, Math.round(dist / speed)),
+        path: [start, end],
+        approximate: true,
+        planner: null,
+      }
+    })()
   })
+}
+
+/**
+ * Open 高德地图 App (or H5) for turn-by-turn navigation.
+ * mode: walk | ride | drive
+ */
+export function openAmapAppNavigation({
+  fromLng,
+  fromLat,
+  fromName = '我的位置',
+  toLng,
+  toLat,
+  toName = '目的地',
+  mode = 'ride',
+}) {
+  if (toLng == null || toLat == null) {
+    throw new Error('缺少目的地坐标，无法打开高德导航')
+  }
+  const modeMap = { walk: 'walk', ride: 'ride', drive: 'car', car: 'car', auto: 'ride' }
+  const m = modeMap[mode] || 'ride'
+  const hasFrom = fromLng != null && fromLat != null && Number.isFinite(Number(fromLng))
+  const fromPart = hasFrom
+    ? `${Number(fromLng)},${Number(fromLat)},${encodeURIComponent(fromName)}`
+    : ''
+  const toPart = `${Number(toLng)},${Number(toLat)},${encodeURIComponent(toName)}`
+  // callnative=1 tries to open the installed Amap app
+  const url = hasFrom
+    ? `https://uri.amap.com/navigation?from=${fromPart}&to=${toPart}&mode=${m}&coordinate=gaode&callnative=1`
+    : `https://uri.amap.com/navigation?to=${toPart}&mode=${m}&coordinate=gaode&callnative=1`
+  const opened = window.open(url, '_blank')
+  if (!opened) {
+    window.location.href = url
+  }
+  return url
 }
 
 export function getCurrentLngLat() {
