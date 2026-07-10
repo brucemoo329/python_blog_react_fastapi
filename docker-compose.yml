@@ -35,6 +35,18 @@ services:
     environment:
       DATABASE_URL: ${DATABASE_URL:?请在 .env 中设置 DATABASE_URL}
       TZ: Asia/Shanghai
+      # 邮箱验证码（QQ/Gmail/Outlook 等任意邮箱）：配置 SMTP 后真实发信
+      SMTP_HOST: ${SMTP_HOST:-}
+      SMTP_PORT: ${SMTP_PORT:-587}
+      SMTP_USER: ${SMTP_USER:-}
+      SMTP_PASSWORD: ${SMTP_PASSWORD:-}
+      SMTP_FROM: ${SMTP_FROM:-}
+      SMTP_USE_TLS: ${SMTP_USE_TLS:-1}
+      SMTP_USE_SSL: ${SMTP_USE_SSL:-0}
+      EMAIL_DEV_MODE: ${EMAIL_DEV_MODE:-}
+      EMAIL_REQUIRE_CODE_ON_REGISTER: ${EMAIL_REQUIRE_CODE_ON_REGISTER:-1}
+      EMAIL_CODE_TTL_MINUTES: ${EMAIL_CODE_TTL_MINUTES:-10}
+      EMAIL_SEND_COOLDOWN_SECONDS: ${EMAIL_SEND_COOLDOWN_SECONDS:-60}
     depends_on:
       mysql:
         condition: service_healthy

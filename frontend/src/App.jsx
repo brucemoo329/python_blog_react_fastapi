@@ -49,7 +49,7 @@ function App() {
   }
 
   if (route === 'register') {
-    return <Register onNavigateLogin={() => navigate('login')} />;
+    return <Register onNavigateLogin={() => navigate('login')} onLogin={handleLogin} />;
   }
 
   return <Login onLogin={handleLogin} onNavigateRegister={() => navigate('register')} />;

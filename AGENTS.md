@@ -67,7 +67,20 @@ VITE_AMAP_NAV_KEY=4b55da0f36567be611f6b7add4520610
 - 前端调用：`frontend/src/api/auth.js`
 - 后端处理：`backend/app/main.py`
 - 是否需要 token：否
-- 说明：Nginx 将 `/api/login` 转发到后端 `/login`。
+- 说明：Nginx 将 `/api/login` 转发到后端 `/login`。账号可为用户名或邮箱 + 密码。
+
+### 邮箱验证码登录 / 注册
+
+- 发送验证码：`POST /auth/email/send-code`（`email`、`purpose=login|register|reset`）
+- 邮箱验证码登录：`POST /login/email`（`email`、`verify_code`）
+- 邮箱验证码注册：`POST /users/email`（`username`、`email`、`password`、`verify_code`、可选 `school`/`phone`）
+- 邮箱重置密码：`POST /auth/email/reset-password`（`email`、`verify_code`、`new_password`）
+- 前端：`Login.jsx`（密码 / 邮箱验证码 Tab）、`Register.jsx`（获取验证码）
+- 后端：`main.py`、`email_service.py`；验证码表 `email_verification_codes`
+- 支持任意邮箱域名（QQ / Gmail / Outlook / 校园邮箱等），通过 SMTP 发信
+- 环境变量：`SMTP_HOST`、`SMTP_PORT`、`SMTP_USER`、`SMTP_PASSWORD`、`SMTP_FROM`、`SMTP_USE_TLS`/`SMTP_USE_SSL`
+- 未配置 SMTP 时进入开发模式：接口返回 `dev_code`，便于联调（生产务必配置 SMTP）
+- 是否需要 token：否
 
 ### 注册
 
@@ -76,6 +89,7 @@ VITE_AMAP_NAV_KEY=4b55da0f36567be611f6b7add4520610
 - 前端调用：`frontend/src/api/auth.js`
 - 后端处理：`backend/app/main.py`
 - 是否需要 token：否
+- 说明：默认要求 `verify_code`（可用 `EMAIL_REQUIRE_CODE_ON_REGISTER=0` 关闭）；推荐使用 `/users/email`
 
 ### 后端健康检查
 

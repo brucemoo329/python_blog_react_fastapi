@@ -30,11 +30,27 @@ class User(Base):
     can_comment = Column(Boolean, default=True)
     can_post = Column(Boolean, default=True)
     ban_reason = Column(String(240), nullable=True)
+    email_verified = Column(Boolean, default=False, index=True)
     created_at = Column(DateTime(timezone=True), server_default=func.now())
 
     # 建立与 Post 的双向关系
     posts = relationship("Post", back_populates="owner")
     profile = relationship("UserProfile", back_populates="user", uselist=False, cascade="all, delete-orphan")
+
+
+class EmailVerificationCode(Base):
+    """邮箱验证码（登录 / 注册 / 重置密码），任意邮箱均可。"""
+    __tablename__ = "email_verification_codes"
+
+    id = Column(Integer, primary_key=True, index=True)
+    email = Column(String(120), nullable=False, index=True)
+    code = Column(String(12), nullable=False)
+    purpose = Column(String(20), nullable=False, index=True)  # login / register / reset
+    expires_at = Column(DateTime(timezone=True), nullable=False, index=True)
+    used = Column(Boolean, default=False, index=True)
+    attempts = Column(Integer, default=0)
+    created_at = Column(DateTime(timezone=True), server_default=func.now(), index=True)
+    client_ip = Column(String(64), nullable=True)
 
 
 class Post(Base):

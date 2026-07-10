@@ -1,35 +1,68 @@
-import { useState } from 'react';
+import { useEffect, useState } from 'react';
 import { Eye, EyeOff } from 'lucide-react';
 import AnimatedAuthShowcase, { CharacterAuthBrand } from '../components/AnimatedAuthShowcase.jsx';
-import { register } from '../api/auth.js';
+import { registerWithEmailCode, sendEmailCode } from '../api/auth.js';
 import '../styles/animated-login.css';
 
 function getErrorMessage(error) {
   if (!error.response) return '服务器连接失败，请确认后端已启动';
-  if (error.response.status === 404) return '注册接口不存在，请检查后端路由 /users/';
+  const detail = error.response.data?.detail || error.response.data?.message;
+  if (detail) return typeof detail === 'string' ? detail : JSON.stringify(detail);
+  if (error.response.status === 404) return '注册接口不存在，请检查后端路由';
   if (error.response.status === 422) return '请求格式错误，请检查注册字段';
-  return error.response.data?.detail || error.response.data?.message || '注册失败，请稍后再试';
+  return '注册失败，请稍后再试';
 }
 
-export default function Register({ onNavigateLogin }) {
+export default function Register({ onNavigateLogin, onLogin }) {
   const [form, setForm] = useState({
     username: '',
     email: '',
+    code: '',
     password: '',
     confirmPassword: '',
-    school: '',
+    school: '南通理工学院',
     phone: '',
   });
   const [focusedField, setFocusedField] = useState(null);
   const [showPassword, setShowPassword] = useState(false);
   const [showConfirmPassword, setShowConfirmPassword] = useState(false);
   const [loading, setLoading] = useState(false);
+  const [codeLoading, setCodeLoading] = useState(false);
+  const [cooldown, setCooldown] = useState(0);
   const [message, setMessage] = useState({ type: '', text: '' });
 
   const update = (key, value) => setForm((current) => ({ ...current, [key]: value }));
   const passwordFocused = focusedField === 'password' || focusedField === 'confirmPassword';
   const activePasswordVisible = focusedField === 'confirmPassword' ? showConfirmPassword : showPassword;
   const accountFocused = Boolean(focusedField && !passwordFocused);
+
+  useEffect(() => {
+    if (cooldown <= 0) return undefined;
+    const timer = window.setTimeout(() => setCooldown((v) => v - 1), 1000);
+    return () => window.clearTimeout(timer);
+  }, [cooldown]);
+
+  const handleSendCode = async () => {
+    const email = form.email.trim();
+    if (!email) {
+      setMessage({ type: 'error', text: '请先填写邮箱' });
+      return;
+    }
+    setCodeLoading(true);
+    setMessage({ type: '', text: '' });
+    try {
+      const response = await sendEmailCode({ email, purpose: 'register' });
+      const hint = response.dev_code
+        ? `${response.message || '验证码已发送'}（开发码 ${response.dev_code}）`
+        : (response.message || '验证码已发送，请查收邮件（QQ/Gmail/Outlook 等均可）');
+      setMessage({ type: 'success', text: hint });
+      setCooldown(response.cooldown || 60);
+    } catch (error) {
+      setMessage({ type: 'error', text: getErrorMessage(error) });
+    } finally {
+      setCodeLoading(false);
+    }
+  };
 
   const handleSubmit = async (event) => {
     event.preventDefault();
@@ -44,8 +77,13 @@ export default function Register({ onNavigateLogin }) {
       return;
     }
 
-    if (form.password.length < 3) {
-      setMessage({ type: 'error', text: '密码长度不能太短' });
+    if (!form.code.trim()) {
+      setMessage({ type: 'error', text: '请输入邮箱验证码' });
+      return;
+    }
+
+    if (form.password.length < 6) {
+      setMessage({ type: 'error', text: '密码至少 6 位' });
       return;
     }
 
@@ -63,6 +101,7 @@ export default function Register({ onNavigateLogin }) {
       username: form.username.trim(),
       email: form.email.trim(),
       password: form.password,
+      verify_code: form.code.trim(),
       school: form.school.trim(),
       phone: form.phone.trim() || null,
     };
@@ -71,9 +110,15 @@ export default function Register({ onNavigateLogin }) {
     setMessage({ type: '', text: '' });
 
     try {
-      await register(data);
-      setMessage({ type: 'success', text: '注册成功，请登录。' });
-      window.setTimeout(onNavigateLogin, 900);
+      const response = await registerWithEmailCode(data);
+      const token = response.access_token || response.token;
+      if (token) localStorage.setItem('token', token);
+      setMessage({ type: 'success', text: response.message || '注册成功' });
+      if (onLogin && response.user && token) {
+        window.setTimeout(() => onLogin(response.user), 400);
+      } else {
+        window.setTimeout(onNavigateLogin, 900);
+      }
     } catch (error) {
       setMessage({ type: 'error', text: getErrorMessage(error) });
     } finally {
@@ -95,7 +140,7 @@ export default function Register({ onNavigateLogin }) {
 
           <header className="character-login-heading character-register-heading">
             <h2>立即注册</h2>
-            <p>创建你的校园集市账号</p>
+            <p>邮箱验证码注册 · 支持 QQ / Gmail / Outlook 等</p>
           </header>
 
           <form className="character-login-form character-register-form" onSubmit={handleSubmit}>
@@ -119,9 +164,31 @@ export default function Register({ onNavigateLogin }) {
                 onChange={(event) => update('email', event.target.value)}
                 onFocus={() => setFocusedField('email')}
                 onBlur={() => setFocusedField(null)}
-                placeholder="you@school.edu"
+                placeholder="you@qq.com / Gmail / Outlook…"
                 autoComplete="email"
               />
+            </label>
+            <label className="character-login-field character-register-code-field">
+              <span>邮箱验证码</span>
+              <div className="character-login-code-row">
+                <input
+                  value={form.code}
+                  onChange={(event) => update('code', event.target.value)}
+                  onFocus={() => setFocusedField('code')}
+                  onBlur={() => setFocusedField(null)}
+                  placeholder="6 位验证码"
+                  autoComplete="one-time-code"
+                  inputMode="numeric"
+                />
+                <button
+                  type="button"
+                  className="character-login-code-btn"
+                  disabled={codeLoading || cooldown > 0}
+                  onClick={handleSendCode}
+                >
+                  {codeLoading ? '发送中…' : cooldown > 0 ? `${cooldown}s` : '获取验证码'}
+                </button>
+              </div>
             </label>
             <label className="character-login-field">
               <span>密码</span>
@@ -132,7 +199,7 @@ export default function Register({ onNavigateLogin }) {
                   onChange={(event) => update('password', event.target.value)}
                   onFocus={() => setFocusedField('password')}
                   onBlur={() => setFocusedField(null)}
-                  placeholder="请输入密码"
+                  placeholder="至少 6 位"
                   autoComplete="new-password"
                 />
                 <button

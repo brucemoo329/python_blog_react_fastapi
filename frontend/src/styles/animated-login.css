@@ -391,6 +391,37 @@
   box-shadow: 0 0 0 3px rgba(95, 67, 233, 0.11);
 }
 
+.character-login-code-row {
+  display: flex;
+  gap: 8px;
+  align-items: stretch;
+}
+.character-login-code-row input {
+  flex: 1;
+  min-width: 0;
+}
+.character-login-code-btn {
+  flex-shrink: 0;
+  border: 1px solid rgba(148, 163, 184, 0.35);
+  background: rgba(15, 23, 42, 0.55);
+  color: #e2e8f0;
+  border-radius: 12px;
+  padding: 0 12px;
+  font-size: 13px;
+  cursor: pointer;
+  white-space: nowrap;
+}
+.character-login-code-btn:disabled {
+  opacity: 0.55;
+  cursor: not-allowed;
+}
+.character-login-code-btn:not(:disabled):hover {
+  border-color: rgba(167, 139, 250, 0.55);
+  color: #fff;
+}
+.character-register-code-field {
+  grid-column: 1 / -1;
+}
 .character-login-password {
   position: relative;
 }

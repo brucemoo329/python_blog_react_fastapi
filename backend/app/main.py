@@ -1,4 +1,4 @@
-from fastapi import FastAPI, Depends, HTTPException
+from fastapi import FastAPI, Depends, HTTPException, Request
 from sqlalchemy.orm import Session
 from sqlalchemy import or_, text
 from app import models
@@ -73,6 +73,7 @@ def ensure_runtime_schema():
         "ALTER TABLE marketplace_service_tasks ADD COLUMN picked_up_at DATETIME NULL",
         "ALTER TABLE marketplace_service_tasks ADD COLUMN completed_at DATETIME NULL",
         "ALTER TABLE marketplace_service_tasks ADD COLUMN late_complaint_at DATETIME NULL",
+        "ALTER TABLE users ADD COLUMN email_verified TINYINT(1) DEFAULT 0",
     ]
     with engine.begin() as conn:
         for statement in statements:
@@ -159,12 +160,38 @@ class UserCreate(BaseModel):
     password: str
     school: Optional[str] = None
     phone: Optional[str] = None
+    verify_code: Optional[str] = None  # 邮箱验证码（推荐）；未配置强制校验时可选
 
 class LoginRequest(BaseModel):
     account: Optional[str] = None
     username: Optional[str] = None
     email: Optional[str] = None
     password: str
+
+
+class EmailSendCodeRequest(BaseModel):
+    email: str
+    purpose: str = "login"  # login / register / reset
+
+
+class EmailLoginRequest(BaseModel):
+    email: str
+    verify_code: str
+
+
+class EmailRegisterRequest(BaseModel):
+    username: str
+    email: str
+    password: str
+    verify_code: str
+    school: Optional[str] = None
+    phone: Optional[str] = None
+
+
+class EmailResetPasswordRequest(BaseModel):
+    email: str
+    verify_code: str
+    new_password: str
 
 def public_user(user: models.User, db: Optional[Session] = None):
     payload = {
@@ -228,23 +255,153 @@ def login(user_data: LoginRequest, db: Session = Depends(get_db)):
     token = f"campus-token-{db_user.id}"
     return {"message": "登录成功", "access_token": token, "token_type": "bearer", "user": public_user(db_user, db)}
 
+
+@app.post("/auth/email/send-code")
+def send_email_verify_code(
+    data: EmailSendCodeRequest,
+    request: Request,
+    db: Session = Depends(get_db),
+):
+    """发送邮箱验证码。purpose: login | register | reset。支持任意邮箱域名。"""
+    from app.email_service import create_and_send_code
+
+    purpose = (data.purpose or "login").strip().lower()
+    if purpose not in {"login", "register", "reset"}:
+        raise HTTPException(status_code=400, detail="purpose 仅支持 login / register / reset")
+    client_ip = request.client.host if request.client else None
+    return create_and_send_code(db, data.email, purpose, client_ip=client_ip)
+
+
+@app.post("/login/email")
+def login_with_email_code(data: EmailLoginRequest, db: Session = Depends(get_db)):
+    """邮箱 + 邮件验证码登录（对齐开放平台 email-verify-code 流程，任意邮箱可用）。"""
+    from app.email_service import consume_code, normalize_email
+
+    email = normalize_email(data.email)
+    consume_code(db, email, data.verify_code, "login")
+    db_user = db.query(models.User).filter(models.User.email == email).first()
+    if not db_user:
+        raise HTTPException(status_code=404, detail="该邮箱尚未注册，请先注册")
+    if not db_user.is_active:
+        raise HTTPException(status_code=403, detail="账号已停用，请联系管理员")
+    db_user.email_verified = True
+    db.commit()
+    db.refresh(db_user)
+    token = f"campus-token-{db_user.id}"
+    return {
+        "message": "邮箱验证码登录成功",
+        "access_token": token,
+        "token_type": "bearer",
+        "user": public_user(db_user, db),
+    }
+
+
+@app.post("/users/email")
+def register_with_email_code(data: EmailRegisterRequest, db: Session = Depends(get_db)):
+    """邮箱验证码注册：验证邮箱后创建账号，支持 QQ / Gmail / Outlook 等。"""
+    from app.email_service import consume_code, normalize_email, validate_email_format
+
+    username = (data.username or "").strip()
+    if not username or len(username) < 2:
+        raise HTTPException(status_code=400, detail="用户名至少 2 个字符")
+    if len(data.password or "") < 6:
+        raise HTTPException(status_code=400, detail="密码至少 6 位")
+    email = validate_email_format(data.email)
+    consume_code(db, email, data.verify_code, "register")
+
+    existing_username = db.query(models.User).filter(models.User.username == username).first()
+    if existing_username:
+        raise HTTPException(status_code=409, detail="用户名已存在")
+    existing_email = db.query(models.User).filter(models.User.email == email).first()
+    if existing_email:
+        raise HTTPException(status_code=409, detail="邮箱已注册")
+
+    try:
+        db_user = models.User(
+            username=username,
+            email=email,
+            hashed_password=data.password,
+            email_verified=True,
+        )
+        db.add(db_user)
+        db.commit()
+        db.refresh(db_user)
+        db.add(models.UserProfile(
+            user_id=db_user.id,
+            nickname=db_user.username,
+            school=data.school or "南通理工学院",
+            signature="在校园里认真交易，也认真生活。",
+        ))
+        db.commit()
+        db.refresh(db_user)
+        token = f"campus-token-{db_user.id}"
+        return {
+            "message": "邮箱注册成功",
+            "access_token": token,
+            "token_type": "bearer",
+            "user": public_user(db_user, db),
+        }
+    except HTTPException:
+        raise
+    except Exception as e:
+        db.rollback()
+        raise HTTPException(status_code=400, detail=f"注册失败: {str(e)}")
+
+
+@app.post("/auth/email/reset-password")
+def reset_password_with_email(data: EmailResetPasswordRequest, db: Session = Depends(get_db)):
+    """邮箱验证码重置密码。"""
+    from app.email_service import consume_code, normalize_email
+
+    if len(data.new_password or "") < 6:
+        raise HTTPException(status_code=400, detail="新密码至少 6 位")
+    email = normalize_email(data.email)
+    consume_code(db, email, data.verify_code, "reset")
+    db_user = db.query(models.User).filter(models.User.email == email).first()
+    if not db_user:
+        raise HTTPException(status_code=404, detail="该邮箱尚未注册")
+    db_user.hashed_password = data.new_password
+    db_user.email_verified = True
+    db.commit()
+    return {"message": "密码已重置，请使用新密码登录"}
+
+
 # --- 新增：写入数据 (创建用户) ---
 @app.post("/users/")
 def create_user(user_data: UserCreate, db: Session = Depends(get_db)):
+    from app.email_service import consume_code, normalize_email, validate_email_format
+    import os
+
     existing_username = db.query(models.User).filter(models.User.username == user_data.username).first()
     if existing_username:
         raise HTTPException(status_code=409, detail="用户名已存在")
 
-    existing_email = db.query(models.User).filter(models.User.email == user_data.email).first()
+    email = validate_email_format(user_data.email)
+    existing_email = db.query(models.User).filter(models.User.email == email).first()
     if existing_email:
         raise HTTPException(status_code=409, detail="邮箱已注册")
+
+    # 默认要求邮箱验证码；EMAIL_REQUIRE_CODE_ON_REGISTER=0 时可兼容旧客户端
+    require_code = (os.getenv("EMAIL_REQUIRE_CODE_ON_REGISTER") or "1").strip().lower() not in {
+        "0", "false", "no", "off"
+    }
+    email_verified = False
+    if require_code:
+        if not user_data.verify_code:
+            raise HTTPException(status_code=400, detail="请先获取并填写邮箱验证码")
+        consume_code(db, email, user_data.verify_code, "register")
+        email_verified = True
+    elif user_data.verify_code:
+        consume_code(db, email, user_data.verify_code, "register")
+        email_verified = True
 
     # 1. 创建数据库模型实例
     # 注意：这里 hashed_password 对应数据库字段，暂用明文演示（实际建议加密）
     db_user = models.User(
-        username=user_data.username, 
-        email=user_data.email, 
-        hashed_password=user_data.password 
+        username=user_data.username,
+        email=email,
+        hashed_password=user_data.password,
+        email_verified=email_verified,
     )
     
     # 2. 提交到数据库
