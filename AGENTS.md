@@ -41,7 +41,34 @@ DATABASE_URL=mysql+pymysql://campus_user:你的URL编码密码@mysql:3306/blog_d
 VITE_AMAP_KEY=867422fb5b0f48f834d8baaf639f7f3f
 VITE_AMAP_SECURITY_CODE=ebc94e6142ced0c3f23716f816fdd9d9
 VITE_AMAP_NAV_KEY=4b55da0f36567be611f6b7add4520610
+
+# 邮箱验证码 SMTP（真实授权码只写服务器本地 .env，禁止提交 Git）
+SMTP_HOST=smtp.qq.com
+SMTP_PORT=465
+SMTP_USE_SSL=1
+SMTP_USE_TLS=0
+SMTP_USER=
+SMTP_PASSWORD=
+SMTP_FROM=
+EMAIL_DEV_MODE=0
+EMAIL_REQUIRE_CODE_ON_REGISTER=1
 ```
+
+### 邮箱发信账号（服务器 .env 已配置，授权码勿写入仓库）
+
+当前发信采用 **QQ 邮箱 SMTP** 作为主通道（国内送达稳定）。备用账号如下，需要切换时改服务器 `.env` 后重建 `backend`：
+
+| 用途 | 邮箱账号 | SMTP | 授权码存放位置 |
+|------|----------|------|----------------|
+| 主发信（当前） | `2752432684@qq.com` | `smtp.qq.com:465` SSL | 仅服务器 `/opt/python_blog_react_fastapi/.env` 的 `SMTP_PASSWORD` |
+| 备用 Outlook | `mo2752432684@outlook.com` | `smtp.office365.com:587` STARTTLS | 同上（切换时改 HOST/USER/PASSWORD） |
+| 备用 Gmail | `mobruce329@gmail.com` | `smtp.gmail.com:587` STARTTLS | 同上；Gmail 应用密码填写时去掉空格 |
+
+说明：
+
+- 用户可用 **任意邮箱** 注册/登录（QQ/Gmail/Outlook/校园邮箱…），验证码由上述 SMTP 账号发出。
+- **不要**把邮箱授权码、数据库密码提交到 GitHub；本文件只记账号与字段名。
+- 切换发信通道示例见服务器 `.env` 内注释块。
 
 高德控制台需把服务器域名/IP（含 `https://公网IP`）加入 Key 白名单。定位需 **HTTPS**（或 localhost）。
 
