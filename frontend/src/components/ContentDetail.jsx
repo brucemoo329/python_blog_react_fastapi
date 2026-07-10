@@ -94,7 +94,7 @@ function CommentNode({ comment, onReply, onReact, onDelete, onOpenUser, depth = 
         <p>{comment.content}</p>
         <div className="x-comment-actions">
           <button type="button" onClick={() => setReplying((value) => !value)}><MessageCircle /> {comment.replies?.length || 0}</button>
-          <button type="button" className={cn(comment.reaction === 'like' && 'is-like')} onClick={() => onReact('comment', comment.id, 'like')}><Heart className={cn(comment.reaction === 'like' && 'fill-current')} /> {comment.likes || 0}</button>
+          <button type="button" className={cn(comment.reaction === 'like' && 'is-like')} onClick={() => onReact('comment', comment.id, 'like')} aria-pressed={comment.reaction === 'like'}><Heart className={cn(comment.reaction === 'like' && 'fill-current')} /> {comment.likes || 0}</button>
           <button type="button" className={cn(comment.reaction === 'dislike' && 'is-dislike')} onClick={() => onReact('comment', comment.id, 'dislike')}><ThumbsDown /> {comment.dislikes || 0}</button>
           {comment.replies?.length ? <button type="button" onClick={() => setExpanded((value) => !value)}>{expanded ? <ChevronUp /> : <ChevronDown />}{expanded ? '收起' : '展开'}</button> : null}
         </div>
@@ -164,11 +164,21 @@ export default function ContentDetail({
         if (targetType === 'comment') {
           return { ...current, comments: mapCommentTree(current.comments || [], targetId, (node) => ({ ...node, likes: response.likes, dislikes: response.dislikes, reaction: response.my_reaction })) }
         }
-        const nextItem = { ...current.item, reaction: response, like_count: response.likes, dislike_count: response.dislikes }
+        const reaction = {
+          likes: response.likes,
+          dislikes: response.dislikes,
+          my_reaction: response.my_reaction,
+        }
+        const nextItem = { ...current.item, reaction, like_count: reaction.likes, dislike_count: reaction.dislikes }
         return { ...current, item: nextItem }
       })
       if (targetType !== 'comment') {
-        pushItemChange({ reaction: response, like_count: response.likes, dislike_count: response.dislikes })
+        const reaction = {
+          likes: response.likes,
+          dislikes: response.dislikes,
+          my_reaction: response.my_reaction,
+        }
+        pushItemChange({ reaction, like_count: reaction.likes, dislike_count: reaction.dislikes })
       }
     } catch (error) {
       onNotice?.(error.response?.data?.detail || '操作失败')
@@ -352,7 +362,15 @@ export default function ContentDetail({
         <div className="x-post-actions">
           <button type="button" onClick={() => document.querySelector('.x-reply-composer textarea')?.focus()}><MessageCircle /> <span>{item.comment_count || 0}</span></button>
           <button type="button" onClick={() => setShareOpen((value) => !value)}><Repeat2 /> <span>{item.repost_count || 0}</span></button>
-          <button type="button" className={cn(item.reaction?.my_reaction === 'like' && 'is-like', reactBurst.includes(`${item.type}-${item.id}-like`) && 'is-burst')} onClick={() => react(item.type, item.id, 'like')}><Heart className={cn(item.reaction?.my_reaction === 'like' && 'fill-current')} /> <span>{item.reaction?.likes || 0}</span></button>
+          <button
+            type="button"
+            className={cn(item.reaction?.my_reaction === 'like' && 'is-like', reactBurst.startsWith(`${item.type}-${item.id}-like`) && 'is-burst')}
+            onClick={() => react(item.type, item.id, 'like')}
+            aria-pressed={item.reaction?.my_reaction === 'like'}
+          >
+            <Heart className={cn(item.reaction?.my_reaction === 'like' && 'fill-current')} />
+            <span>{item.reaction?.likes || item.like_count || 0}</span>
+          </button>
           <button type="button" className={cn(item.reaction?.my_reaction === 'dislike' && 'is-dislike')} onClick={() => react(item.type, item.id, 'dislike')}><ThumbsDown /> <span>{item.reaction?.dislikes || 0}</span></button>
           <button type="button" className={cn(item.favorited && 'is-saved')} onClick={favorite}><Bookmark className={cn(item.favorited && 'fill-current')} /></button>
         </div>

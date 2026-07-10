@@ -148,11 +148,24 @@ function relativeTime(value) {
   return `${Math.floor(minutes / 1440)} 天前`
 }
 
-function FeedCard({ item, saved, onOpen, onOpenUser, onSave, onReact, onShare, onMessage, onPurchase, onTopic, onPreviewImage }) {
+function isLikedReaction(reaction) {
+  if (!reaction) return false
+  if (typeof reaction === 'string') return reaction === 'like'
+  return reaction.my_reaction === 'like'
+}
+
+function likeCountOf(item) {
+  if (typeof item?.reaction?.likes === 'number') return item.reaction.likes
+  return item?.like_count || 0
+}
+
+function FeedCard({ item, saved, onOpen, onOpenUser, onSave, onReact, onShare, onMessage, onPurchase, onTopic, onPreviewImage, reactBurst }) {
   const meta = TYPE_META[item.type] || TYPE_META.listing
   const Icon = meta.icon
   const author = item.seller || item.author || item.requester || {}
   const price = item.type === 'service' ? item.reward : item.type === 'wanted' ? item.budget_max : item.price
+  const liked = isLikedReaction(item.reaction)
+  const likeKey = `${item.type}-${item.id}-like`
   const stop = (handler) => (event) => { event.stopPropagation(); handler?.() }
 
   return (
@@ -190,7 +203,15 @@ function FeedCard({ item, saved, onOpen, onOpenUser, onSave, onReact, onShare, o
         <div className="x-feed-actions">
           <button type="button" onClick={stop(() => onOpen(item))}><MessageCircle /><span>{item.comment_count || 0}</span></button>
           <button type="button" onClick={stop(() => onShare(item))}><Repeat2 /><span>{item.repost_count || 0}</span></button>
-          <button type="button" className={cn(item.reaction?.my_reaction === 'like' && 'is-like')} onClick={stop(() => onReact(item, 'like'))}><Heart className={cn(item.reaction?.my_reaction === 'like' && 'fill-current')} /><span>{item.reaction?.likes || item.like_count || 0}</span></button>
+          <button
+            type="button"
+            className={cn(liked && 'is-like', reactBurst === likeKey && 'is-burst')}
+            onClick={stop(() => onReact(item, 'like'))}
+            aria-pressed={liked}
+          >
+            <Heart className={cn(liked && 'fill-current')} />
+            <span>{likeCountOf(item)}</span>
+          </button>
           <button type="button" className={cn(saved && 'is-saved')} onClick={stop(() => onSave(item))}><Bookmark className={cn(saved && 'fill-current')} /></button>
           {item.type !== 'community' ? <Button size="sm" onClick={stop(() => onPurchase(item))}>{item.type === 'service' ? '接单' : item.type === 'wanted' ? '我有货' : '购买'}</Button> : null}
           <Button variant="ghost" size="icon" aria-label="私信发布者" onClick={stop(() => onMessage(item))}><MessageCircle /></Button>
@@ -224,6 +245,7 @@ export default function MarketplaceHome({ user, onLogout, onUserUpdate }) {
   const [initialConversationId, setInitialConversationId] = useState(null)
   const [selectedOrder, setSelectedOrder] = useState(null)
   const [feedLightbox, setFeedLightbox] = useState({ open: false, images: [], index: 0 })
+  const [feedReactBurst, setFeedReactBurst] = useState('')
 
   const language = currentUser?.profile?.language || localStorage.getItem('campus_language') || 'zh-CN'
   const isAdmin = Boolean(currentUser?.is_admin)
@@ -326,7 +348,18 @@ export default function MarketplaceHome({ user, onLogout, onUserUpdate }) {
   const handleFeedReact = async (item, reactionType) => {
     try {
       const response = await toggleReaction({ target_type: item.type, target_id: item.id, reaction_type: reactionType })
-      setFeed((current) => current.map((entry) => itemKey(entry) === itemKey(item) ? { ...entry, reaction: response, like_count: response.likes, dislike_count: response.dislikes } : entry))
+      const reaction = {
+        likes: response.likes,
+        dislikes: response.dislikes,
+        my_reaction: response.my_reaction,
+      }
+      setFeedReactBurst(`${item.type}-${item.id}-${reactionType}`)
+      setFeed((current) => current.map((entry) => (
+        itemKey(entry) === itemKey(item)
+          ? { ...entry, reaction, like_count: reaction.likes, dislike_count: reaction.dislikes }
+          : entry
+      )))
+      window.setTimeout(() => setFeedReactBurst((current) => (current === `${item.type}-${item.id}-${reactionType}` ? '' : current)), 450)
     } catch (error) {
       setNotice(error.response?.data?.detail || '点赞失败')
     }
@@ -725,7 +758,7 @@ export default function MarketplaceHome({ user, onLogout, onUserUpdate }) {
             <div className="campus-center">
               <Card className="pulse-composer"><CardContent><Avatar className="size-10"><AvatarImage src={displayAvatar || undefined} alt={displayName} /><AvatarFallback>{displayName.slice(0, 1)}</AvatarFallback></Avatar><button type="button" onClick={() => openPublish('community')}>分享校园动态、发布商品、服务或求助...</button><Button variant="secondary" onClick={() => openPublish('community')}><PenLine /> 发布</Button></CardContent><div className="pulse-quick-actions"><button type="button" onClick={() => openPublish('listing')}><ShoppingBag /> 发布二手</button><button type="button" onClick={() => { setView('radar'); setActiveNav('service') }}><Bike /> 跑腿代取</button><button type="button" onClick={() => openPublish('wanted')}><Search /> 发求购</button><button type="button" onClick={() => openPublish('community')}><MessageCircle /> 发话题</button></div></Card>
               <div className="pulse-view-switch"><div><button type="button" className={cn(view === 'pulse' && 'is-active')} onClick={() => setView('pulse')}><Compass /> 校园脉动</button><button type="button" className={cn(view === 'radar' && 'is-active')} onClick={() => setView('radar')}><Map /> 校园雷达</button></div><Badge variant="secondary"><span className="status-dot" /> 实时在线</Badge></div>
-              {view === 'radar' ? <CampusRadar tasks={tasks} onAcceptTask={handleAcceptTask} onOpenTask={handleAction} onLocate={(address) => setNotice(`定位成功：${address}`)} /> : <><Tabs value={filter} onValueChange={(value) => { setFilter(value); setTopicFilter('') }} className="pulse-filters"><TabsList><TabsTrigger value="all">全部</TabsTrigger><TabsTrigger value="listing">二手</TabsTrigger><TabsTrigger value="service">跑腿</TabsTrigger><TabsTrigger value="game">游戏</TabsTrigger><TabsTrigger value="wanted">求购</TabsTrigger><TabsTrigger value="community">社区</TabsTrigger></TabsList></Tabs>{topicFilter ? <div className="active-topic-filter"><span>#{topicFilter}</span><button type="button" onClick={() => setTopicFilter('')}>查看全部社区内容</button></div> : null}<div className="pulse-feed">{loading ? Array.from({ length: 3 }, (_, index) => <div key={index} className="x-feed-post"><Skeleton className="size-11 shrink-0 rounded-full" /><div className="flex flex-1 flex-col gap-3"><Skeleton className="h-5 w-2/3" /><Skeleton className="h-4 w-full" /><Skeleton className="h-28 w-full" /></div></div>) : filteredFeed.length ? filteredFeed.map((item) => <FeedCard key={itemKey(item)} item={item} saved={savedKeys.has(itemKey(item)) || item.favorited} onOpen={handleAction} onOpenUser={openUser} onSave={handleSave} onReact={handleFeedReact} onShare={handleFeedShare} onMessage={openChat} onPurchase={(entry) => setCheckoutItem(entry)} onTopic={openTopic} onPreviewImage={(src) => setFeedLightbox({ open: true, images: [src], index: 0 })} />) : <Card className="pulse-empty"><Search /><h3>没有找到相关内容</h3><p>换个关键词，或者成为第一个发布的人。</p><Button onClick={() => openPublish('listing')}>立即发布</Button></Card>}</div></>}
+              {view === 'radar' ? <CampusRadar tasks={tasks} onAcceptTask={handleAcceptTask} onOpenTask={handleAction} onLocate={(address) => setNotice(`定位成功：${address}`)} /> : <><Tabs value={filter} onValueChange={(value) => { setFilter(value); setTopicFilter('') }} className="pulse-filters"><TabsList><TabsTrigger value="all">全部</TabsTrigger><TabsTrigger value="listing">二手</TabsTrigger><TabsTrigger value="service">跑腿</TabsTrigger><TabsTrigger value="game">游戏</TabsTrigger><TabsTrigger value="wanted">求购</TabsTrigger><TabsTrigger value="community">社区</TabsTrigger></TabsList></Tabs>{topicFilter ? <div className="active-topic-filter"><span>#{topicFilter}</span><button type="button" onClick={() => setTopicFilter('')}>查看全部社区内容</button></div> : null}<div className="pulse-feed">{loading ? Array.from({ length: 3 }, (_, index) => <div key={index} className="x-feed-post"><Skeleton className="size-11 shrink-0 rounded-full" /><div className="flex flex-1 flex-col gap-3"><Skeleton className="h-5 w-2/3" /><Skeleton className="h-4 w-full" /><Skeleton className="h-28 w-full" /></div></div>) : filteredFeed.length ? filteredFeed.map((item) => <FeedCard key={itemKey(item)} item={item} saved={savedKeys.has(itemKey(item)) || item.favorited} onOpen={handleAction} onOpenUser={openUser} onSave={handleSave} onReact={handleFeedReact} reactBurst={feedReactBurst} onShare={handleFeedShare} onMessage={openChat} onPurchase={(entry) => setCheckoutItem(entry)} onTopic={openTopic} onPreviewImage={(src) => setFeedLightbox({ open: true, images: [src], index: 0 })} />) : <Card className="pulse-empty"><Search /><h3>没有找到相关内容</h3><p>换个关键词，或者成为第一个发布的人。</p><Button onClick={() => openPublish('listing')}>立即发布</Button></Card>}</div></>}
             </div>
 
             <aside className="campus-right-rail">
