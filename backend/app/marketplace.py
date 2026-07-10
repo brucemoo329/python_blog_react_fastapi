@@ -4,7 +4,7 @@ from decimal import Decimal
 from typing import Any, Literal, Optional
 from uuid import uuid4
 
-from fastapi import APIRouter, Depends, Header, HTTPException, Query, Request
+from fastapi import APIRouter, Body, Depends, Header, HTTPException, Query, Request
 from pydantic import BaseModel, Field
 from sqlalchemy import func, or_
 from sqlalchemy.orm import Session, joinedload
@@ -181,9 +181,20 @@ class ConversationStart(BaseModel):
 
 class MessageCreate(BaseModel):
     content: str = Field(min_length=1, max_length=2000000)
-    message_type: Literal["text", "image", "location", "transfer"] = "text"
+    message_type: Literal["text", "image", "location", "transfer", "product", "order"] = "text"
     metadata: Optional[dict[str, Any]] = None
     reply_to_id: Optional[int] = None
+
+
+class OrderShipBody(BaseModel):
+    meeting_location: Optional[str] = Field(default=None, max_length=120)
+    seller_note: Optional[str] = Field(default=None, max_length=240)
+
+
+class OrderPayBody(BaseModel):
+    buyer_note: Optional[str] = Field(default=None, max_length=240)
+    delivery_method: Optional[str] = Field(default="campus_meet", max_length=30)
+    meeting_location: Optional[str] = Field(default=None, max_length=120)
 
 
 class MessageReactionCreate(BaseModel):
@@ -212,9 +223,38 @@ def user_payload(user):
         "avatar_url": profile.avatar_url if profile else None,
         "nickname": (profile.nickname if profile and profile.nickname else user.username),
         "school": profile.school if profile else None,
+        "signature": profile.signature if profile else None,
         "is_online": profile_is_online(profile),
         "last_active_at": profile.last_active_at if profile else None,
+        "is_admin": bool(getattr(user, "is_admin", False)),
+        "can_comment": bool(getattr(user, "can_comment", True)),
+        "can_post": bool(getattr(user, "can_post", True)),
     }
+
+
+def assert_can_post(user: models.User):
+    if not getattr(user, "can_post", True):
+        raise HTTPException(status_code=403, detail=getattr(user, "ban_reason", None) or "你的发帖权限已被限制，请联系管理员")
+
+
+def assert_can_comment(user: models.User):
+    if not getattr(user, "can_comment", True):
+        raise HTTPException(status_code=403, detail=getattr(user, "ban_reason", None) or "你的评论权限已被限制，请联系管理员")
+
+
+ORDER_STATUS_LABELS = {
+    "pending_payment": {"buyer": "等待我付款", "seller": "等待对方付款"},
+    "pending_ship": {"buyer": "等待卖家发货", "seller": "等待我方发货"},
+    "shipped": {"buyer": "卖家已发货", "seller": "已发货，待收货"},
+    "completed": {"buyer": "已收货完成", "seller": "交易完成"},
+    "cancelled": {"buyer": "已取消", "seller": "已取消"},
+    "pending_confirm": {"buyer": "待确认", "seller": "待确认"},
+}
+
+
+def order_status_label(status: str, role: str) -> str:
+    labels = ORDER_STATUS_LABELS.get(status) or {"buyer": status, "seller": status}
+    return labels.get(role, status)
 
 
 def content_owner_id(db: Session, target_type: str, target_id: int):
@@ -495,7 +535,7 @@ def compute_trust(db: Session, user_id: int):
 def compact_listing_payload(listing):
     return {
         "id": listing.id,
-        "type": "listing",
+        "type": "game" if listing.trade_type == "digital" else "listing",
         "title": listing.title,
         "status": listing.status,
         "price_label": f"¥{float(listing.price):.0f}",
@@ -520,6 +560,11 @@ def compact_content_payload(item):
 
 def compact_order_payload(order, role: str):
     title = order.listing.title if order.listing else (order.service_task.title if order.service_task else "校园交易订单")
+    image_url = None
+    if order.listing and getattr(order.listing, "images", None):
+        image_url = order.listing.images[0].image_url if order.listing.images else None
+    elif order.service_task:
+        image_url = order.service_task.image_url
     return {
         "id": order.id,
         "order_no": order.order_no,
@@ -527,9 +572,62 @@ def compact_order_payload(order, role: str):
         "role": role,
         "amount": float(order.amount),
         "status": order.status,
+        "status_label": order_status_label(order.status, role),
+        "image_url": image_url,
+        "listing_id": order.listing_id,
+        "delivery_method": order.delivery_method,
+        "meeting_location": order.meeting_location,
         "created_at": order.created_at,
+        "paid_at": getattr(order, "paid_at", None),
+        "shipped_at": getattr(order, "shipped_at", None),
+        "received_at": getattr(order, "received_at", None),
         "completed_at": order.completed_at,
     }
+
+
+def full_order_payload(db: Session, order: models.Order, user_id: int):
+    role = "buyer" if order.buyer_id == user_id else "seller"
+    payload = compact_order_payload(order, role)
+    payload.update({
+        "buyer": user_payload(order.buyer) if order.buyer else None,
+        "seller": user_payload(order.seller) if order.seller else None,
+        "buyer_note": getattr(order, "buyer_note", None),
+        "seller_note": getattr(order, "seller_note", None),
+        "cancel_reason": getattr(order, "cancel_reason", None),
+        "description": order.listing.description if order.listing else (order.service_task.description if order.service_task else None),
+        "actions": order_actions_for_role(order.status, role),
+    })
+    return payload
+
+
+def order_actions_for_role(status: str, role: str):
+    if status == "pending_payment":
+        return ["pay", "cancel"] if role == "buyer" else ["cancel"]
+    if status == "pending_ship":
+        return ["remind"] if role == "buyer" else ["ship", "cancel"]
+    if status == "shipped":
+        return ["receive"] if role == "buyer" else ["track"]
+    return []
+
+
+def send_order_system_message(db: Session, order: models.Order, sender_id: int, content: str, metadata: dict):
+    conversation = find_or_create_conversation(
+        db,
+        order.buyer_id,
+        order.seller_id,
+        context_type="listing" if order.listing_id else "order",
+        context_id=order.listing_id or order.id,
+    )
+    message = models.Message(
+        conversation_id=conversation.id,
+        sender_id=sender_id,
+        content=content,
+        message_type="order",
+        metadata_json=json.dumps(metadata, ensure_ascii=False),
+    )
+    conversation.updated_at = func.now()
+    db.add(message)
+    return conversation, message
 
 
 def default_category_id(db: Session) -> int:
@@ -850,6 +948,7 @@ def create_listing(
     db: Session = Depends(get_db),
     user: models.User = Depends(get_current_user),
 ):
+    assert_can_post(user)
     validate_amount(data.price, "价格")
     validate_amount(data.original_price, "原价")
     listing = models.Listing(
@@ -881,6 +980,7 @@ def create_task(
     db: Session = Depends(get_db),
     user: models.User = Depends(get_current_user),
 ):
+    assert_can_post(user)
     validate_amount(data.reward, "跑腿赏金")
     task = models.ServiceTask(requester_id=user.id, **data.model_dump())
     db.add(task)
@@ -940,6 +1040,7 @@ def create_community_post(
     db: Session = Depends(get_db),
     user: models.User = Depends(get_current_user),
 ):
+    assert_can_post(user)
     post = models.CommunityPost(author_id=user.id, **data.model_dump())
     db.add(post)
     db.commit()
@@ -952,6 +1053,7 @@ def create_wanted_post(
     db: Session = Depends(get_db),
     user: models.User = Depends(get_current_user),
 ):
+    assert_can_post(user)
     validate_amount(data.budget_min, "最低预算")
     validate_amount(data.budget_max, "最高预算")
     post = models.WantedPost(user_id=user.id, **data.model_dump())
@@ -1002,27 +1104,53 @@ def toggle_favorite(
 @router.post("/orders/listing/{listing_id}", status_code=201)
 def create_listing_order(
     listing_id: int,
+    data: Optional[OrderPayBody] = Body(default=None),
     db: Session = Depends(get_db),
     user: models.User = Depends(get_current_user),
 ):
-    listing = db.get(models.Listing, listing_id)
+    listing = db.query(models.Listing).options(joinedload(models.Listing.images)).filter_by(id=listing_id).first()
     if not listing:
         raise HTTPException(status_code=404, detail="商品不存在")
     if listing.seller_id == user.id:
         raise HTTPException(status_code=400, detail="不能购买自己发布的商品")
     if listing.status != "available":
         raise HTTPException(status_code=409, detail="商品当前不可购买")
+    body = data or OrderPayBody()
     order = models.Order(
         order_no=f"CM{datetime.now():%Y%m%d}{uuid4().hex[:10].upper()}",
         buyer_id=user.id,
         seller_id=listing.seller_id,
         listing_id=listing.id,
         amount=listing.price,
+        status="pending_payment",
+        delivery_method=body.delivery_method or "campus_meet",
+        meeting_location=body.meeting_location,
+        buyer_note=body.buyer_note,
     )
-    listing.status = "pending"
+    listing.status = "reserved"
     db.add(order)
+    db.flush()
+    create_notification(
+        db,
+        recipient_id=listing.seller_id,
+        actor_id=user.id,
+        notification_type="order",
+        title="有同学下单了你的商品",
+        content=f"「{listing.title}」待对方付款 · 订单 {order.order_no}",
+        target_type="order",
+        target_id=order.id,
+    )
     db.commit()
-    return {"message": "订单已创建，请与卖家确认线下交易", "order_no": order.order_no}
+    order = db.query(models.Order).options(
+        joinedload(models.Order.listing).joinedload(models.Listing.images),
+        joinedload(models.Order.buyer).joinedload(models.User.profile),
+        joinedload(models.Order.seller).joinedload(models.User.profile),
+    ).filter_by(id=order.id).first()
+    return {
+        "message": "订单已创建，请尽快完成校园支付确认",
+        "order_no": order.order_no,
+        "item": full_order_payload(db, order, user.id),
+    }
 
 
 @router.get("/detail/{item_type}/{item_id}")
@@ -1124,6 +1252,7 @@ def create_comment(
     db: Session = Depends(get_db),
     user: models.User = Depends(get_current_user),
 ):
+    assert_can_comment(user)
     detail_payload(db, data.target_type, data.target_id, user)
     parent = db.get(models.ContentComment, data.parent_id) if data.parent_id else None
     if data.parent_id and not parent:
@@ -1783,15 +1912,32 @@ def create_report(
         return {"message": "该举报已提交，正在等待平台核实", "id": duplicate.id}
     report = models.Report(reporter_id=user.id, **data.model_dump())
     db.add(report)
+    db.flush()
     create_notification(
         db,
         recipient_id=owner_id,
+        actor_id=user.id,
         notification_type="report_received",
         title="你的内容收到一条举报",
         content="平台会先核实事实，待处理举报不会直接影响信任分。",
         target_type=data.target_type,
         target_id=data.target_id,
     )
+    reporter_name = user.username
+    profile = getattr(user, "profile", None)
+    if profile and profile.nickname:
+        reporter_name = profile.nickname
+    for admin in db.query(models.User).filter(models.User.is_admin.is_(True), models.User.is_active.is_(True)).all():
+        create_notification(
+            db,
+            recipient_id=admin.id,
+            actor_id=user.id,
+            notification_type="admin_report",
+            title="【管理后台】收到新举报",
+            content=f"{reporter_name} 举报了 {data.target_type}#{data.target_id}，原因：{data.reason}",
+            target_type="report",
+            target_id=report.id,
+        )
     db.commit()
     return {"message": "举报已提交，平台核实前不会直接扣除对方信任分", "id": report.id}
 
@@ -1904,7 +2050,14 @@ def get_public_user_profile(
         "trust": compute_trust(db, target.id),
         "is_following": is_following(db, user.id, target.id),
         "is_me": user.id == target.id,
-        "published": published[:20],
+        "published": published[:40],
+        "published_groups": {
+            "listing": [item for item in published if item.get("type") == "listing"],
+            "game": [item for item in published if item.get("type") == "game"],
+            "service": [item for item in published if item.get("type") == "service"],
+            "wanted": [item for item in published if item.get("type") == "wanted"],
+            "community": [item for item in published if item.get("type") == "community"],
+        },
     }
 
 
@@ -2037,7 +2190,14 @@ def send_conversation_message(
         action="mute",
     ).first()
     if not muted:
-        preview = "发来一张图片" if data.message_type == "image" else data.content[:120]
+        if data.message_type == "image":
+            preview = "发来一张图片"
+        elif data.message_type == "product":
+            preview = "分享了一个商品卡片"
+        elif data.message_type == "order":
+            preview = data.content[:120]
+        else:
+            preview = data.content[:120]
         create_notification(
             db,
             recipient_id=recipient_id,
@@ -2078,3 +2238,339 @@ def toggle_message_reaction(
     db.commit()
     db.refresh(message)
     return {"message": "消息表情已更新", "item": message_payload(db, message, user.id)}
+
+
+@router.get("/orders")
+def list_my_orders(
+    role: str = Query(default="all"),
+    status: str = Query(default="all"),
+    db: Session = Depends(get_db),
+    user: models.User = Depends(get_current_user),
+):
+    query = db.query(models.Order).options(
+        joinedload(models.Order.listing).joinedload(models.Listing.images),
+        joinedload(models.Order.service_task),
+        joinedload(models.Order.buyer).joinedload(models.User.profile),
+        joinedload(models.Order.seller).joinedload(models.User.profile),
+    )
+    if role == "buyer":
+        query = query.filter(models.Order.buyer_id == user.id)
+    elif role == "seller":
+        query = query.filter(models.Order.seller_id == user.id)
+    else:
+        query = query.filter(or_(models.Order.buyer_id == user.id, models.Order.seller_id == user.id))
+    if status != "all":
+        query = query.filter(models.Order.status == status)
+    rows = query.order_by(models.Order.created_at.desc()).limit(100).all()
+    return {"items": [full_order_payload(db, row, user.id) for row in rows]}
+
+
+@router.get("/orders/{order_id}")
+def get_order_detail(
+    order_id: int,
+    db: Session = Depends(get_db),
+    user: models.User = Depends(get_current_user),
+):
+    order = db.query(models.Order).options(
+        joinedload(models.Order.listing).joinedload(models.Listing.images),
+        joinedload(models.Order.service_task),
+        joinedload(models.Order.buyer).joinedload(models.User.profile),
+        joinedload(models.Order.seller).joinedload(models.User.profile),
+    ).filter_by(id=order_id).first()
+    if not order or user.id not in {order.buyer_id, order.seller_id}:
+        raise HTTPException(status_code=404, detail="订单不存在")
+    return {"item": full_order_payload(db, order, user.id)}
+
+
+@router.post("/orders/{order_id}/pay")
+def pay_order(
+    order_id: int,
+    data: Optional[OrderPayBody] = Body(default=None),
+    db: Session = Depends(get_db),
+    user: models.User = Depends(get_current_user),
+):
+    order = db.query(models.Order).options(
+        joinedload(models.Order.listing).joinedload(models.Listing.images),
+        joinedload(models.Order.buyer).joinedload(models.User.profile),
+        joinedload(models.Order.seller).joinedload(models.User.profile),
+    ).filter_by(id=order_id).first()
+    if not order or order.buyer_id != user.id:
+        raise HTTPException(status_code=404, detail="订单不存在")
+    if order.status not in {"pending_payment", "pending_confirm"}:
+        raise HTTPException(status_code=409, detail="当前订单状态不可付款")
+    body = data or OrderPayBody()
+    order.status = "pending_ship"
+    order.paid_at = datetime.utcnow()
+    if body.buyer_note:
+        order.buyer_note = body.buyer_note
+    if body.meeting_location:
+        order.meeting_location = body.meeting_location
+    if body.delivery_method:
+        order.delivery_method = body.delivery_method
+    if order.listing:
+        order.listing.status = "sold_pending"
+    title = order.listing.title if order.listing else "校园订单"
+    amount = float(order.amount)
+    meta = {
+        "order_id": order.id,
+        "order_no": order.order_no,
+        "amount": amount,
+        "title": title,
+        "image_url": order.listing.images[0].image_url if order.listing and order.listing.images else None,
+        "status": order.status,
+        "event": "paid",
+    }
+    conversation, _ = send_order_system_message(
+        db,
+        order,
+        user.id,
+        f"我已完成付款 ¥{amount:.2f}，请尽快安排校内交付/发货。",
+        meta,
+    )
+    create_notification(
+        db,
+        recipient_id=order.seller_id,
+        actor_id=user.id,
+        notification_type="order",
+        title="买家已付款",
+        content=f"「{title}」已付款 ¥{amount:.2f}，请及时发货。",
+        target_type="order",
+        target_id=order.id,
+    )
+    create_notification(
+        db,
+        recipient_id=order.seller_id,
+        actor_id=user.id,
+        notification_type="message",
+        title="订单消息",
+        content=f"买家已付款 ¥{amount:.2f}",
+        target_type="conversation",
+        target_id=conversation.id,
+    )
+    db.commit()
+    db.refresh(order)
+    return {"message": "付款成功，已通知卖家", "item": full_order_payload(db, order, user.id)}
+
+
+@router.post("/orders/{order_id}/ship")
+def ship_order(
+    order_id: int,
+    data: Optional[OrderShipBody] = Body(default=None),
+    db: Session = Depends(get_db),
+    user: models.User = Depends(get_current_user),
+):
+    order = db.query(models.Order).options(
+        joinedload(models.Order.listing).joinedload(models.Listing.images),
+        joinedload(models.Order.buyer).joinedload(models.User.profile),
+        joinedload(models.Order.seller).joinedload(models.User.profile),
+    ).filter_by(id=order_id).first()
+    if not order or order.seller_id != user.id:
+        raise HTTPException(status_code=404, detail="订单不存在")
+    if order.status != "pending_ship":
+        raise HTTPException(status_code=409, detail="当前订单状态不可发货")
+    body = data or OrderShipBody()
+    order.status = "shipped"
+    order.shipped_at = datetime.utcnow()
+    if body.meeting_location:
+        order.meeting_location = body.meeting_location
+    if body.seller_note:
+        order.seller_note = body.seller_note
+    title = order.listing.title if order.listing else "校园订单"
+    meta = {
+        "order_id": order.id,
+        "order_no": order.order_no,
+        "amount": float(order.amount),
+        "title": title,
+        "image_url": order.listing.images[0].image_url if order.listing and order.listing.images else None,
+        "status": order.status,
+        "event": "shipped",
+        "meeting_location": order.meeting_location,
+    }
+    conversation, _ = send_order_system_message(
+        db,
+        order,
+        user.id,
+        f"订单已发货/安排交付：{order.meeting_location or '请到订单详情查看交付方式'}。",
+        meta,
+    )
+    create_notification(
+        db,
+        recipient_id=order.buyer_id,
+        actor_id=user.id,
+        notification_type="order",
+        title="卖家已发货",
+        content=f"「{title}」已发货，可在订单详情查看。",
+        target_type="order",
+        target_id=order.id,
+    )
+    create_notification(
+        db,
+        recipient_id=order.buyer_id,
+        actor_id=user.id,
+        notification_type="message",
+        title="订单消息",
+        content="卖家已发货，点击查看订单",
+        target_type="conversation",
+        target_id=conversation.id,
+    )
+    db.commit()
+    db.refresh(order)
+    return {"message": "已标记发货，已通知买家", "item": full_order_payload(db, order, user.id)}
+
+
+@router.post("/orders/{order_id}/receive")
+def receive_order(
+    order_id: int,
+    db: Session = Depends(get_db),
+    user: models.User = Depends(get_current_user),
+):
+    order = db.query(models.Order).options(
+        joinedload(models.Order.listing).joinedload(models.Listing.images),
+        joinedload(models.Order.buyer).joinedload(models.User.profile),
+        joinedload(models.Order.seller).joinedload(models.User.profile),
+    ).filter_by(id=order_id).first()
+    if not order or order.buyer_id != user.id:
+        raise HTTPException(status_code=404, detail="订单不存在")
+    if order.status != "shipped":
+        raise HTTPException(status_code=409, detail="当前订单状态不可确认收货")
+    order.status = "completed"
+    order.received_at = datetime.utcnow()
+    order.completed_at = datetime.utcnow()
+    if order.listing:
+        order.listing.status = "sold"
+    title = order.listing.title if order.listing else "校园订单"
+    meta = {
+        "order_id": order.id,
+        "order_no": order.order_no,
+        "amount": float(order.amount),
+        "title": title,
+        "status": order.status,
+        "event": "received",
+    }
+    send_order_system_message(db, order, user.id, "我已确认收货，本单交易完成，感谢本次校园交易。", meta)
+    create_notification(
+        db,
+        recipient_id=order.seller_id,
+        actor_id=user.id,
+        notification_type="order",
+        title="买家已确认收货",
+        content=f"「{title}」交易完成。",
+        target_type="order",
+        target_id=order.id,
+    )
+    db.commit()
+    db.refresh(order)
+    return {"message": "已确认收货，交易完成", "item": full_order_payload(db, order, user.id)}
+
+
+@router.post("/orders/{order_id}/cancel")
+def cancel_order(
+    order_id: int,
+    reason: str = Query(default="双方协商取消"),
+    db: Session = Depends(get_db),
+    user: models.User = Depends(get_current_user),
+):
+    order = db.query(models.Order).options(
+        joinedload(models.Order.listing).joinedload(models.Listing.images),
+        joinedload(models.Order.buyer).joinedload(models.User.profile),
+        joinedload(models.Order.seller).joinedload(models.User.profile),
+    ).filter_by(id=order_id).first()
+    if not order or user.id not in {order.buyer_id, order.seller_id}:
+        raise HTTPException(status_code=404, detail="订单不存在")
+    if order.status in {"completed", "cancelled", "shipped"}:
+        raise HTTPException(status_code=409, detail="当前订单状态不可取消")
+    order.status = "cancelled"
+    order.cancel_reason = reason[:240]
+    if order.listing and order.listing.status in {"reserved", "pending", "sold_pending"}:
+        order.listing.status = "available"
+    peer_id = order.seller_id if user.id == order.buyer_id else order.buyer_id
+    create_notification(
+        db,
+        recipient_id=peer_id,
+        actor_id=user.id,
+        notification_type="order",
+        title="订单已取消",
+        content=reason,
+        target_type="order",
+        target_id=order.id,
+    )
+    db.commit()
+    db.refresh(order)
+    return {"message": "订单已取消", "item": full_order_payload(db, order, user.id)}
+
+
+@router.delete("/conversations/{conversation_id}/messages")
+def clear_conversation_messages(
+    conversation_id: int,
+    db: Session = Depends(get_db),
+    user: models.User = Depends(get_current_user),
+):
+    conversation = get_conversation_for_user(db, conversation_id, user.id)
+    db.query(models.MessageReaction).filter(
+        models.MessageReaction.message_id.in_(
+            db.query(models.Message.id).filter_by(conversation_id=conversation.id)
+        )
+    ).delete(synchronize_session=False)
+    deleted = db.query(models.Message).filter_by(conversation_id=conversation.id).delete(synchronize_session=False)
+    db.commit()
+    return {"message": "聊天记录已清空", "deleted": deleted}
+
+
+@router.delete("/conversations/{conversation_id}")
+def delete_conversation(
+    conversation_id: int,
+    db: Session = Depends(get_db),
+    user: models.User = Depends(get_current_user),
+):
+    conversation = get_conversation_for_user(db, conversation_id, user.id)
+    db.delete(conversation)
+    db.commit()
+    return {"message": "会话已删除"}
+
+
+@router.delete("/notifications/{notification_id}")
+def delete_notification(
+    notification_id: int,
+    db: Session = Depends(get_db),
+    user: models.User = Depends(get_current_user),
+):
+    row = db.query(models.Notification).filter_by(id=notification_id, recipient_id=user.id).first()
+    if not row:
+        raise HTTPException(status_code=404, detail="通知不存在")
+    db.delete(row)
+    db.commit()
+    return {"message": "通知已删除"}
+
+
+@router.delete("/notifications")
+def clear_notifications(
+    db: Session = Depends(get_db),
+    user: models.User = Depends(get_current_user),
+):
+    deleted = db.query(models.Notification).filter_by(recipient_id=user.id).delete(synchronize_session=False)
+    db.commit()
+    return {"message": "通知已全部清除", "deleted": deleted}
+
+
+@router.get("/users/{target_user_id}/shop-items")
+def get_user_shop_items(
+    target_user_id: int,
+    db: Session = Depends(get_db),
+    user: models.User = Depends(get_current_user),
+):
+    rows = db.query(models.Listing).options(joinedload(models.Listing.images)).filter(
+        models.Listing.seller_id == target_user_id,
+        models.Listing.status == "available",
+    ).order_by(models.Listing.created_at.desc()).limit(40).all()
+    return {
+        "items": [{
+            "id": row.id,
+            "type": "game" if row.trade_type == "digital" else "listing",
+            "title": row.title,
+            "description": (row.description or "")[:120],
+            "price": float(row.price),
+            "price_label": f"¥{float(row.price):.0f}",
+            "image_url": row.images[0].image_url if row.images else None,
+            "status": row.status,
+        } for row in rows]
+    }

@@ -5,8 +5,10 @@ import {
   LocateFixed,
   MapPin,
   MessageCircle,
+  Package,
   Quote,
   Send,
+  ShoppingBag,
   SmilePlus,
   WalletCards,
   X,
@@ -17,6 +19,7 @@ import { Input } from '@/components/ui/input'
 import { Message, MessageAvatar, MessageContent, MessageFooter } from '@/components/ui/message'
 import {
   getConversationMessages,
+  getUserShopItems,
   sendConversationMessage,
   toggleMessageReaction,
 } from '@/api/marketplace'
@@ -51,7 +54,15 @@ function compressChatImage(file, maxSize = 1280, quality = 0.76) {
   })
 }
 
-export default function ChatThread({ conversation, currentUser, compact = false, onNotice, onConversationUpdate }) {
+export default function ChatThread({
+  conversation,
+  currentUser,
+  compact = false,
+  onNotice,
+  onConversationUpdate,
+  onOpenOrder,
+  onPurchase,
+}) {
   const [messages, setMessages] = useState([])
   const [text, setText] = useState('')
   const [loading, setLoading] = useState(true)
@@ -59,6 +70,8 @@ export default function ChatThread({ conversation, currentUser, compact = false,
   const [replyTo, setReplyTo] = useState(null)
   const [emojiOpen, setEmojiOpen] = useState(false)
   const [transferOpen, setTransferOpen] = useState(false)
+  const [shopOpen, setShopOpen] = useState(false)
+  const [shopItems, setShopItems] = useState([])
   const [transfer, setTransfer] = useState({ amount: '', note: '' })
   const [messageMenu, setMessageMenu] = useState(null)
   const albumRef = useRef(null)
@@ -80,7 +93,6 @@ export default function ChatThread({ conversation, currentUser, compact = false,
       setMessages((previous) => {
         const changed = previous.length !== items.length
           || previous[previous.length - 1]?.id !== items[items.length - 1]?.id
-        // Avoid refreshing the conversation list on every silent poll.
         if (!silent || changed) {
           queueMicrotask(() => conversationUpdateRef.current?.())
         }
@@ -96,6 +108,7 @@ export default function ChatThread({ conversation, currentUser, compact = false,
   useEffect(() => {
     setMessages([])
     previousCountRef.current = 0
+    setShopOpen(false)
     refresh()
     const timer = window.setInterval(() => refresh(true), 5000)
     return () => window.clearInterval(timer)
@@ -122,6 +135,7 @@ export default function ChatThread({ conversation, currentUser, compact = false,
       setText('')
       setReplyTo(null)
       setEmojiOpen(false)
+      setShopOpen(false)
       conversationUpdateRef.current?.()
     } catch (error) {
       noticeRef.current?.(error.response?.data?.detail || '消息发送失败')
@@ -179,6 +193,36 @@ export default function ChatThread({ conversation, currentUser, compact = false,
     setTransferOpen(false)
   }
 
+  const openShopPicker = async () => {
+    const sellerId = conversation?.user?.id
+    if (!sellerId) return
+    try {
+      const response = await getUserShopItems(sellerId)
+      setShopItems(response.items || [])
+      setShopOpen(true)
+      setTransferOpen(false)
+      setEmojiOpen(false)
+    } catch (error) {
+      onNotice?.(error.response?.data?.detail || '商品列表加载失败')
+    }
+  }
+
+  const sendProductCard = async (item) => {
+    await sendPayload({
+      content: `推荐商品：${item.title}`,
+      message_type: 'product',
+      metadata: {
+        listing_id: item.id,
+        type: item.type,
+        title: item.title,
+        description: item.description,
+        price: item.price,
+        price_label: item.price_label,
+        image_url: item.image_url,
+      },
+    })
+  }
+
   const reactToMessage = async (messageId, emoji) => {
     try {
       const response = await toggleMessageReaction(messageId, emoji)
@@ -194,7 +238,11 @@ export default function ChatThread({ conversation, currentUser, compact = false,
   return (
     <section className={compact ? 'chat-thread is-compact' : 'chat-thread'}>
       {conversation?.context ? (
-        <button type="button" className="chat-context-card" onClick={() => onNotice?.('可从原内容进入详情查看完整信息')}>
+        <button
+          type="button"
+          className="chat-context-card"
+          onClick={() => onPurchase?.(conversation.context)}
+        >
           <span>{conversation.context.image_url ? <img src={conversation.context.image_url} alt="" /> : <MessageCircle />}</span>
           <div><strong>{conversation.context.title}</strong><small>{conversation.context.price_label || conversation.context.status}</small></div>
         </button>
@@ -206,6 +254,7 @@ export default function ChatThread({ conversation, currentUser, compact = false,
         {messages.map((message) => {
           const mine = message.is_mine || message.sender?.id === currentUser?.id
           const sender = message.sender || (mine ? currentUser : other)
+          const meta = message.metadata || {}
           return (
             <Message
               key={message.id}
@@ -232,15 +281,55 @@ export default function ChatThread({ conversation, currentUser, compact = false,
                   {message.message_type === 'image' ? <img src={message.content} alt="聊天图片" /> : null}
                   {message.message_type === 'location' ? (
                     <a
-                      href={`https://uri.amap.com/marker?position=${message.metadata?.longitude},${message.metadata?.latitude}&name=${encodeURIComponent(message.metadata?.label || '共享位置')}`}
+                      href={`https://uri.amap.com/marker?position=${meta?.longitude},${meta?.latitude}&name=${encodeURIComponent(meta?.label || '共享位置')}`}
                       target="_blank"
                       rel="noreferrer"
                     >
-                      <MapPin /><span><strong>{message.metadata?.label || '共享位置'}</strong><small>点击在高德地图中查看</small></span>
+                      <MapPin /><span><strong>{meta?.label || '共享位置'}</strong><small>点击在高德地图中查看</small></span>
                     </a>
                   ) : null}
                   {message.message_type === 'transfer' ? (
-                    <div className="chat-transfer-card"><WalletCards /><span><strong>¥{Number(message.metadata?.amount || 0).toFixed(2)}</strong><small>{message.metadata?.note || '校园交易转账'} · 待接入支付</small></span></div>
+                    <div className="chat-transfer-card"><WalletCards /><span><strong>¥{Number(meta?.amount || 0).toFixed(2)}</strong><small>{meta?.note || '校园交易转账'} · 待接入支付</small></span></div>
+                  ) : null}
+                  {message.message_type === 'product' ? (
+                    <div className="chat-product-card">
+                      <div className="chat-product-card-main">
+                        {meta.image_url ? <img src={meta.image_url} alt="" /> : <span><Package /></span>}
+                        <div>
+                          <strong>{meta.title || '校园商品'}</strong>
+                          <small>{meta.description || '点击下方去购买查看详情'}</small>
+                          <em>¥{Number(meta.price || 0).toFixed(2)}</em>
+                        </div>
+                      </div>
+                      <button
+                        type="button"
+                        className="chat-product-buy"
+                        onClick={() => onPurchase?.({
+                          type: meta.type || 'listing',
+                          id: meta.listing_id,
+                          title: meta.title,
+                          description: meta.description,
+                          price: meta.price,
+                          image_url: meta.image_url,
+                          author: other,
+                        })}
+                      >
+                        去购买
+                      </button>
+                    </div>
+                  ) : null}
+                  {message.message_type === 'order' ? (
+                    <div className="chat-order-card">
+                      <Package />
+                      <div>
+                        <strong>{meta.event === 'paid' ? '付款成功' : meta.event === 'shipped' ? '订单已发货' : meta.event === 'received' ? '已确认收货' : '订单更新'}</strong>
+                        <small>{meta.title} · ¥{Number(meta.amount || 0).toFixed(2)}</small>
+                        <span>{message.content}</span>
+                      </div>
+                      <button type="button" onClick={() => onOpenOrder?.({ id: meta.order_id, order_no: meta.order_no, title: meta.title })}>
+                        查看订单
+                      </button>
+                    </div>
                   ) : null}
                   {message.message_type === 'text' ? message.content : null}
                 </div>
@@ -279,6 +368,23 @@ export default function ChatThread({ conversation, currentUser, compact = false,
             <Button size="sm" variant="ghost" onClick={() => setTransferOpen(false)}>取消</Button>
           </div>
         ) : null}
+        {shopOpen ? (
+          <div className="chat-shop-picker">
+            <header><strong>对方在售商品</strong><button type="button" onClick={() => setShopOpen(false)}><X /></button></header>
+            <div className="chat-shop-list">
+              {shopItems.length ? shopItems.map((item) => (
+                <button key={item.id} type="button" className="chat-shop-item" onClick={() => sendProductCard(item)}>
+                  {item.image_url ? <img src={item.image_url} alt="" /> : <span><Package /></span>}
+                  <div>
+                    <strong>{item.title}</strong>
+                    <small>{item.description}</small>
+                    <em>{item.price_label}</em>
+                  </div>
+                </button>
+              )) : <div className="chat-empty">对方暂无在售商品</div>}
+            </div>
+          </div>
+        ) : null}
         {emojiOpen ? <div className="chat-emoji-picker">{EMOJIS.map((emoji) => <button key={emoji} type="button" onClick={() => setText((value) => `${value}${emoji}`)}>{emoji}</button>)}</div> : null}
         <div className="chat-input-row">
           <Input
@@ -300,6 +406,7 @@ export default function ChatThread({ conversation, currentUser, compact = false,
           <button type="button" onClick={() => cameraRef.current?.click()}><Camera /> 拍摄</button>
           <button type="button" onClick={sendLocation}><LocateFixed /> 位置</button>
           <button type="button" onClick={() => setTransferOpen((value) => !value)}><WalletCards /> 转账</button>
+          <button type="button" onClick={openShopPicker}><ShoppingBag /> 商品</button>
           <input ref={albumRef} hidden type="file" accept="image/*" onChange={sendImage} />
           <input ref={cameraRef} hidden type="file" accept="image/*" capture="environment" onChange={sendImage} />
         </div>

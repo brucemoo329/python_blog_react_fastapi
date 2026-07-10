@@ -7,6 +7,7 @@ from pydantic import BaseModel # 用于接收前端发送的数据
 from fastapi.middleware.cors import CORSMiddleware
 from typing import Optional
 from app.marketplace import router as marketplace_router
+from app.admin_panel import router as admin_router
 
 
 
@@ -20,6 +21,10 @@ def ensure_runtime_schema():
         "ALTER TABLE user_profiles ADD COLUMN background_url LONGTEXT NULL",
         "ALTER TABLE user_profiles ADD COLUMN background_theme VARCHAR(40) DEFAULT 'teal'",
         "ALTER TABLE user_profiles ADD COLUMN last_active_at DATETIME NULL",
+        "ALTER TABLE users ADD COLUMN is_admin TINYINT(1) DEFAULT 0",
+        "ALTER TABLE users ADD COLUMN can_comment TINYINT(1) DEFAULT 1",
+        "ALTER TABLE users ADD COLUMN can_post TINYINT(1) DEFAULT 1",
+        "ALTER TABLE users ADD COLUMN ban_reason VARCHAR(240) NULL",
         "ALTER TABLE marketplace_listings MODIFY COLUMN category_id INT NULL",
         "ALTER TABLE marketplace_listing_images MODIFY COLUMN image_url LONGTEXT NOT NULL",
         "ALTER TABLE marketplace_service_tasks ADD COLUMN image_url LONGTEXT NULL",
@@ -37,6 +42,16 @@ def ensure_runtime_schema():
         "ALTER TABLE marketplace_messages ADD COLUMN message_type VARCHAR(20) DEFAULT 'text'",
         "ALTER TABLE marketplace_messages ADD COLUMN metadata_json LONGTEXT NULL",
         "ALTER TABLE marketplace_messages ADD COLUMN reply_to_id INT NULL",
+        "ALTER TABLE marketplace_orders ADD COLUMN buyer_note VARCHAR(240) NULL",
+        "ALTER TABLE marketplace_orders ADD COLUMN seller_note VARCHAR(240) NULL",
+        "ALTER TABLE marketplace_orders ADD COLUMN cancel_reason VARCHAR(240) NULL",
+        "ALTER TABLE marketplace_orders ADD COLUMN paid_at DATETIME NULL",
+        "ALTER TABLE marketplace_orders ADD COLUMN shipped_at DATETIME NULL",
+        "ALTER TABLE marketplace_orders ADD COLUMN received_at DATETIME NULL",
+        "ALTER TABLE marketplace_reports ADD COLUMN admin_note VARCHAR(500) NULL",
+        "ALTER TABLE marketplace_reports ADD COLUMN action_taken VARCHAR(40) NULL",
+        "ALTER TABLE marketplace_reports ADD COLUMN handled_by INT NULL",
+        "ALTER TABLE marketplace_reports ADD COLUMN handled_at DATETIME NULL",
     ]
     with engine.begin() as conn:
         for statement in statements:
@@ -48,8 +63,65 @@ def ensure_runtime_schema():
 
 ensure_runtime_schema()
 
+
+def ensure_admin_account():
+    """Create or refresh the platform admin account used by the console."""
+    db = SessionLocal()
+    try:
+        admin = db.query(models.User).filter(
+            or_(models.User.username == "admin", models.User.email == "admin@campus.local")
+        ).first()
+        if not admin:
+            admin = models.User(
+                username="admin",
+                email="admin@campus.local",
+                hashed_password="fabulous.Sg123",
+                is_active=True,
+                is_admin=True,
+                can_comment=True,
+                can_post=True,
+            )
+            db.add(admin)
+            db.flush()
+            db.add(models.UserProfile(
+                user_id=admin.id,
+                nickname="校园官方",
+                school="南通理工学院",
+                signature="校园交易平台官方管理账号",
+                background_theme="navy",
+            ))
+        else:
+            admin.username = "admin"
+            admin.email = "admin@campus.local"
+            admin.hashed_password = "fabulous.Sg123"
+            admin.is_active = True
+            admin.is_admin = True
+            admin.can_comment = True
+            admin.can_post = True
+            profile = db.query(models.UserProfile).filter_by(user_id=admin.id).first()
+            if not profile:
+                db.add(models.UserProfile(
+                    user_id=admin.id,
+                    nickname="校园官方",
+                    school="南通理工学院",
+                    signature="校园交易平台官方管理账号",
+                    background_theme="navy",
+                ))
+            else:
+                if not profile.nickname:
+                    profile.nickname = "校园官方"
+        db.commit()
+    except Exception:
+        db.rollback()
+    finally:
+        db.close()
+
+
+ensure_admin_account()
+
 app = FastAPI()
 app.include_router(marketplace_router)
+app.include_router(admin_router)
 
 app.add_middleware(
     CORSMiddleware,
@@ -79,6 +151,9 @@ def public_user(user: models.User, db: Optional[Session] = None):
         "username": user.username,
         "email": user.email,
         "is_active": user.is_active,
+        "is_admin": bool(getattr(user, "is_admin", False)),
+        "can_comment": bool(getattr(user, "can_comment", True)),
+        "can_post": bool(getattr(user, "can_post", True)),
         "created_at": user.created_at,
     }
     if db:
@@ -91,6 +166,7 @@ def public_user(user: models.User, db: Optional[Session] = None):
                 "language": profile.language,
                 "background_url": profile.background_url,
                 "background_theme": profile.background_theme,
+                "signature": profile.signature,
             }
     return payload
 

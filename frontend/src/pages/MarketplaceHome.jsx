@@ -22,6 +22,8 @@ import {
   Sparkles,
   Star,
   TrendingUp,
+  Shield,
+  Trash2,
   UserPlus,
   UserRound,
 } from 'lucide-react'
@@ -45,7 +47,9 @@ import CampusRadar from '@/components/CampusRadar'
 import CheckoutPlaceholder from '@/components/CheckoutPlaceholder'
 import ContentDetail from '@/components/ContentDetail'
 import LineSidebar from '@/components/LineSidebar'
+import AdminPanel from '@/components/AdminPanel'
 import MessagesCenter from '@/components/MessagesCenter'
+import OrdersCenter from '@/components/OrdersCenter'
 import Particles from '@/components/Particles'
 import ProfileCenter from '@/components/ProfileCenter'
 import PublicProfile from '@/components/PublicProfile'
@@ -55,10 +59,13 @@ import SpotlightCard from '@/components/SpotlightCard'
 import StarBorder from '@/components/StarBorder'
 import {
   acceptServiceTask,
+  clearAllNotifications,
+  deleteNotification,
   getMapTasks,
   getMarketplaceFeed,
   getMarketplaceSummary,
   getNotifications,
+  getOrderDetail,
   markAllNotificationsRead,
   markNotificationRead,
   recordBrowsingHistory,
@@ -202,8 +209,10 @@ export default function MarketplaceHome({ user, onLogout, onUserUpdate }) {
   const [publicUserId, setPublicUserId] = useState(null)
   const [quickChatRequest, setQuickChatRequest] = useState(null)
   const [initialConversationId, setInitialConversationId] = useState(null)
+  const [selectedOrder, setSelectedOrder] = useState(null)
 
   const language = currentUser?.profile?.language || localStorage.getItem('campus_language') || 'zh-CN'
+  const isAdmin = Boolean(currentUser?.is_admin)
   const langGroup = getLangGroup(language)
   const copy = UI_COPY[language] || UI_COPY['zh-CN']
   const displayProfile = currentUser?.profile || {}
@@ -387,6 +396,7 @@ export default function MarketplaceHome({ user, onLogout, onUserUpdate }) {
     setSelectedDetail(null)
     setCheckoutItem(null)
     setPublicUserId(null)
+    setSelectedOrder(null)
     setTopicFilter('')
     if (id === 'service') setView('radar')
     else setView('pulse')
@@ -408,9 +418,23 @@ export default function MarketplaceHome({ user, onLogout, onUserUpdate }) {
       setNotifications((current) => current.map((item) => item.id === notification.id ? { ...item, is_read: true } : item))
       setSummary((current) => ({ ...current, unread_notifications: Math.max(0, (current.unread_notifications || 0) - 1) }))
     }
+    if (notification.type === 'admin_report' || notification.type === 'official') {
+      if (isAdmin && (notification.type === 'admin_report' || notification.target_type === 'report')) {
+        selectNav('admin')
+        return
+      }
+    }
     if (notification.target_type === 'conversation') {
       setInitialConversationId(notification.target_id)
       selectNav('messages')
+    } else if (notification.target_type === 'order') {
+      try {
+        const response = await getOrderDetail(notification.target_id)
+        setSelectedOrder(response.item)
+        selectNav('orders')
+      } catch {
+        selectNav('orders')
+      }
     } else if (notification.target_type === 'user') {
       openUser(notification.target_id)
     } else if (notification.target_type && notification.target_id) {
@@ -424,6 +448,38 @@ export default function MarketplaceHome({ user, onLogout, onUserUpdate }) {
     setSummary((current) => ({ ...current, unread_notifications: 0 }))
   }
 
+  const removeNotification = async (event, notificationId) => {
+    event.stopPropagation()
+    try {
+      await deleteNotification(notificationId)
+      setNotifications((current) => current.filter((item) => item.id !== notificationId))
+      setSummary((current) => ({ ...current, unread_notifications: Math.max(0, (current.unread_notifications || 0) - 1) }))
+    } catch (error) {
+      setNotice(error.response?.data?.detail || '删除通知失败')
+    }
+  }
+
+  const clearNotifications = async () => {
+    try {
+      await clearAllNotifications()
+      setNotifications([])
+      setSummary((current) => ({ ...current, unread_notifications: 0 }))
+      setNotice('通知已全部清除')
+    } catch (error) {
+      setNotice(error.response?.data?.detail || '清除通知失败')
+    }
+  }
+
+  const openOrderDetail = async (order) => {
+    try {
+      const response = await getOrderDetail(order.id)
+      setSelectedOrder(response.item)
+      setActiveNav('orders')
+    } catch (error) {
+      setNotice(error.response?.data?.detail || '订单详情加载失败')
+    }
+  }
+
   const followBack = async (event, actor) => {
     event.stopPropagation()
     try {
@@ -434,7 +490,7 @@ export default function MarketplaceHome({ user, onLogout, onUserUpdate }) {
     }
   }
 
-  const showParticles = !selectedDetail && !checkoutItem && !publicUserId && activeNav !== 'messages' && view === 'pulse'
+  const showParticles = !selectedDetail && !checkoutItem && !publicUserId && !['messages', 'orders', 'admin'].includes(activeNav) && view === 'pulse'
 
   return (
     <main className="dark campus-shell">
@@ -457,24 +513,109 @@ export default function MarketplaceHome({ user, onLogout, onUserUpdate }) {
             <DropdownMenu>
               <DropdownMenuTrigger asChild><Button variant="ghost" size="icon" aria-label="通知" className="relative"><Bell />{summary.unread_notifications ? <span className="campus-unread">{summary.unread_notifications}</span> : null}</Button></DropdownMenuTrigger>
               <DropdownMenuContent align="end" className="notification-popover">
-                <div className="notification-header"><strong>通知</strong><button type="button" onClick={markAllRead}><CheckCheck /> 全部已读</button></div>
-                <div className="notification-list">{notifications.length ? notifications.map((notification) => <button key={notification.id} type="button" className={cn(!notification.is_read && 'is-unread')} onClick={() => openNotification(notification)}><Avatar className="size-9"><AvatarImage src={notification.actor?.avatar_url || undefined} alt="" /><AvatarFallback>{(notification.actor?.nickname || notification.actor?.username || '校').slice(0, 1)}</AvatarFallback></Avatar><span><strong>{notification.title}</strong><small>{notification.content}</small></span>{notification.type === 'follow' && notification.actor ? <em onClick={(event) => followBack(event, notification.actor)}><UserPlus /> 回关</em> : null}</button>) : <div className="notification-empty">暂时没有通知</div>}</div>
+                <div className="notification-header">
+                  <strong>通知</strong>
+                  <div className="notification-header-actions">
+                    <button type="button" onClick={markAllRead}><CheckCheck /> 全部已读</button>
+                    <button type="button" onClick={clearNotifications}><Trash2 /> 一键清除</button>
+                  </div>
+                </div>
+                <div className="notification-list">
+                  {notifications.length ? notifications.map((notification) => (
+                    <div key={notification.id} className={cn('notification-item', !notification.is_read && 'is-unread', notification.type === 'official' && 'is-official')}>
+                      <button type="button" className="notification-main" onClick={() => openNotification(notification)}>
+                        <Avatar className="size-9">
+                          <AvatarImage src={notification.actor?.avatar_url || undefined} alt="" />
+                          <AvatarFallback>{notification.type === 'official' ? '官' : (notification.actor?.nickname || notification.actor?.username || '校').slice(0, 1)}</AvatarFallback>
+                        </Avatar>
+                        <span>
+                          <strong>{notification.title}</strong>
+                          <small>{notification.content}</small>
+                        </span>
+                      </button>
+                      {notification.type === 'follow' && notification.actor ? (
+                        <em onClick={(event) => followBack(event, notification.actor)}><UserPlus /> 回关</em>
+                      ) : null}
+                      <button type="button" className="notification-delete" aria-label="删除通知" onClick={(event) => removeNotification(event, notification.id)}><Trash2 /></button>
+                    </div>
+                  )) : <div className="notification-empty">暂时没有通知</div>}
+                </div>
               </DropdownMenuContent>
             </DropdownMenu>
             <Button variant="ghost" size="icon" aria-label="消息" className="relative" onClick={() => selectNav('messages')}><MessageCircle />{summary.unread_messages ? <span className="campus-unread">{summary.unread_messages}</span> : null}</Button>
             <DropdownMenu>
               <DropdownMenuTrigger asChild><Button variant="ghost" className="campus-profile"><Avatar className="size-8"><AvatarImage src={displayAvatar || undefined} alt={displayName} /><AvatarFallback>{displayName.slice(0, 1)}</AvatarFallback></Avatar><span>{displayName}</span><ChevronDown /></Button></DropdownMenuTrigger>
-              <DropdownMenuContent align="end"><DropdownMenuLabel>{user?.email}</DropdownMenuLabel><DropdownMenuSeparator /><DropdownMenuGroup><DropdownMenuItem onClick={() => selectNav('profile')}><UserRound /> {copy.profile}</DropdownMenuItem><DropdownMenuItem onClick={onLogout}><LogOut /> {copy.logout}</DropdownMenuItem></DropdownMenuGroup></DropdownMenuContent>
+              <DropdownMenuContent align="end">
+                <DropdownMenuLabel>{user?.email}</DropdownMenuLabel>
+                <DropdownMenuSeparator />
+                <DropdownMenuGroup>
+                  <DropdownMenuItem onClick={() => selectNav('profile')}><UserRound /> {copy.profile}</DropdownMenuItem>
+                  <DropdownMenuItem onClick={() => selectNav('orders')}><Package /> 我的订单</DropdownMenuItem>
+                  {isAdmin ? <DropdownMenuItem onClick={() => selectNav('admin')}><Shield /> 管理后台</DropdownMenuItem> : null}
+                  <DropdownMenuItem onClick={onLogout}><LogOut /> {copy.logout}</DropdownMenuItem>
+                </DropdownMenuGroup>
+              </DropdownMenuContent>
             </DropdownMenu>
           </div>
         </header>
 
-        {checkoutItem ? <CheckoutPlaceholder item={checkoutItem} onBack={() => { setCheckoutItem(null); handleAction(checkoutItem) }} onMessage={openChat} onAcceptTask={handleAcceptTask} onNotice={setNotice} /> : selectedDetail ? (
+        {checkoutItem ? (
+          <CheckoutPlaceholder
+            item={checkoutItem}
+            onBack={() => { setCheckoutItem(null); handleAction(checkoutItem) }}
+            onMessage={openChat}
+            onAcceptTask={handleAcceptTask}
+            onNotice={setNotice}
+            onOrderCreated={(order) => { setCheckoutItem(null); setSelectedOrder(order); setActiveNav('orders') }}
+          />
+        ) : selectedDetail ? (
           <ContentDetail target={selectedDetail} currentUser={currentUser} onBack={() => setSelectedDetail(null)} onNotice={setNotice} onOpenTarget={setSelectedDetail} onOpenUser={openUser} onTopic={openTopic} onMessage={openChat} onPurchase={(item) => { setSelectedDetail(null); setCheckoutItem(item) }} onDeleted={() => { setSelectedDetail(null); loadData() }} />
-        ) : publicUserId ? <PublicProfile userId={publicUserId} onBack={() => setPublicUserId(null)} onOpenItem={handleAction} onMessage={(source) => openChat(source)} onNotice={setNotice} /> : activeNav === 'profile' ? (
+        ) : publicUserId ? (
+          <PublicProfile userId={publicUserId} onBack={() => setPublicUserId(null)} onOpenItem={handleAction} onMessage={(source) => openChat(source)} onNotice={setNotice} />
+        ) : activeNav === 'admin' && isAdmin ? (
+          <AdminPanel onBack={() => selectNav('home')} onNotice={setNotice} />
+        ) : activeNav === 'orders' ? (
+          selectedOrder ? (
+            <section className="order-detail-panel">
+              <Button variant="ghost" onClick={() => setSelectedOrder(null)}>返回订单列表</Button>
+              <article className="order-detail-card">
+                <header>
+                  <Badge>{selectedOrder.role === 'buyer' ? '买家视角' : '卖家视角'}</Badge>
+                  <h1>{selectedOrder.title}</h1>
+                  <strong>{selectedOrder.status_label}</strong>
+                </header>
+                <p>订单号 {selectedOrder.order_no}</p>
+                <p className="order-price">¥{Number(selectedOrder.amount || 0).toFixed(2)}</p>
+                <p>交付方式：{selectedOrder.meeting_location || '校内当面交易'}</p>
+                <p>{selectedOrder.role === 'buyer' ? `卖家：${selectedOrder.seller?.nickname || selectedOrder.seller?.username}` : `买家：${selectedOrder.buyer?.nickname || selectedOrder.buyer?.username}`}</p>
+                {selectedOrder.buyer_note ? <p>买家备注：{selectedOrder.buyer_note}</p> : null}
+                {selectedOrder.seller_note ? <p>卖家备注：{selectedOrder.seller_note}</p> : null}
+                <div className="order-detail-actions">
+                  <Button variant="outline" onClick={() => setSelectedOrder(null)}>返回列表操作</Button>
+                  {selectedOrder.role === 'buyer' && selectedOrder.seller ? (
+                    <Button onClick={() => openChat({ user: selectedOrder.seller, context: { type: 'listing', id: selectedOrder.listing_id, title: selectedOrder.title } })}>联系卖家</Button>
+                  ) : null}
+                  {selectedOrder.role === 'seller' && selectedOrder.buyer ? (
+                    <Button onClick={() => openChat({ user: selectedOrder.buyer, context: { type: 'listing', id: selectedOrder.listing_id, title: selectedOrder.title } })}>联系买家</Button>
+                  ) : null}
+                </div>
+              </article>
+            </section>
+          ) : (
+            <OrdersCenter onBack={() => selectNav('home')} onNotice={setNotice} onOpenOrder={openOrderDetail} onPurchase={(item) => setCheckoutItem(item)} />
+          )
+        ) : activeNav === 'profile' ? (
           <ProfileCenter user={currentUser} onLogout={onLogout} onNotice={setNotice} onProfileChange={handleProfileChange} onOpenItem={handleAction} onOpenUser={openUser} />
         ) : activeNav === 'messages' ? (
-          <MessagesCenter currentUser={currentUser} initialConversationId={initialConversationId} onBack={() => selectNav('home')} onNotice={setNotice} onUnreadChange={handleUnreadMessagesChange} />
+          <MessagesCenter
+            currentUser={currentUser}
+            initialConversationId={initialConversationId}
+            onBack={() => selectNav('home')}
+            onNotice={setNotice}
+            onUnreadChange={handleUnreadMessagesChange}
+            onOpenOrder={openOrderDetail}
+            onPurchase={(item) => { setActiveNav('home'); setCheckoutItem(item) }}
+          />
         ) : (
           <div className="campus-main">
             <div className="campus-center">
@@ -484,7 +625,7 @@ export default function MarketplaceHome({ user, onLogout, onUserUpdate }) {
             </div>
 
             <aside className="campus-right-rail">
-              <Card className="pulse-heat-card"><CardHeader><CardTitle><TrendingUp /> 今日校园热度</CardTitle></CardHeader><CardContent><button type="button" onClick={() => selectNav('listing')}><strong>{summary.active_listings.toLocaleString()}</strong><span>在售好物</span></button><button type="button" onClick={() => selectNav('community')}><strong>{summary.community_posts.toLocaleString()}</strong><span>活跃发布</span></button><button type="button" onClick={() => selectNav('service')}><strong>{summary.open_tasks}</strong><span>待接任务</span></button></CardContent></Card>
+              <Card className="pulse-heat-card"><CardHeader><CardTitle><TrendingUp /> 今日校园热度</CardTitle></CardHeader><CardContent><button type="button" className="heat-stat-btn" onClick={() => selectNav('listing')}><strong>{summary.active_listings.toLocaleString()}</strong><span>在售好物</span></button><button type="button" className="heat-stat-btn" onClick={() => selectNav('community')}><strong>{summary.community_posts.toLocaleString()}</strong><span>活跃发布</span></button><button type="button" className="heat-stat-btn" onClick={() => selectNav('service')}><strong>{summary.open_tasks}</strong><span>待接任务</span></button></CardContent></Card>
               <Card><CardHeader><CardTitle>热门话题</CardTitle><Button variant="ghost" size="sm" onClick={() => selectNav('community')}>更多</Button></CardHeader><CardContent className="pulse-topic-list">{summary.topics?.length ? summary.topics.map((topic) => <button key={topic.name} type="button" onClick={() => openTopic(topic.name)}><span>#</span> {topic.name} <small>{topic.count}</small></button>) : <div className="right-rail-empty">发布第一条校园话题</div>}</CardContent></Card>
               <Card><CardHeader><CardTitle>我的订单</CardTitle><Badge variant="secondary">{summary.my_orders} 笔</Badge></CardHeader><CardContent className="pulse-order">{summary.recent_order ? <button type="button" onClick={() => selectNav('orders')}><Package /><span><strong>{summary.recent_order.title}</strong><small>{summary.recent_order.status}</small></span></button> : <div className="right-rail-empty">暂无进行中的订单</div>}</CardContent></Card>
               <Card><CardHeader><CardTitle>附近靠谱同学</CardTitle><CheckCircle2 /></CardHeader><CardContent className="pulse-people">{summary.nearby_users?.length ? summary.nearby_users.map((person) => <div key={person.id}><button type="button" className="nearby-person" onClick={() => openUser(person.id)}><Avatar className="size-8"><AvatarImage src={person.avatar_url || undefined} alt={person.nickname || person.username} /><AvatarFallback>{(person.nickname || person.username || '同').slice(0, 1)}</AvatarFallback></Avatar><span className={person.is_online ? 'presence-dot is-online' : 'presence-dot'} /><span><strong>{person.nickname || person.username}</strong><small><Star /> 信任 {person.trust?.score ?? 800} · {person.is_online ? '在线' : '近期活跃'}</small></span></button><Button variant="outline" size="sm" onClick={() => openChat({ user: person })}>私信</Button></div>) : <div className="right-rail-empty">暂无其他活跃发布者</div>}</CardContent></Card>

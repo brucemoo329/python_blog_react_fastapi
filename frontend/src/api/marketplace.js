@@ -138,3 +138,87 @@ export function sendConversationMessage(conversationId, data) {
 export function toggleMessageReaction(messageId, emoji) {
   return request.post(`/marketplace/messages/${messageId}/reactions`, { emoji })
 }
+
+export function createListingOrder(listingId, data = {}) {
+  return request.post(`/marketplace/orders/listing/${listingId}`, data)
+}
+
+export function getMyOrders(params) {
+  return request.get('/marketplace/orders', { params })
+}
+
+export function getOrderDetail(orderId) {
+  return request.get(`/marketplace/orders/${orderId}`)
+}
+
+export function payOrder(orderId, data = {}) {
+  return request.post(`/marketplace/orders/${orderId}/pay`, data)
+}
+
+export function shipOrder(orderId, data = {}) {
+  return request.post(`/marketplace/orders/${orderId}/ship`, data)
+}
+
+export function receiveOrder(orderId) {
+  return request.post(`/marketplace/orders/${orderId}/receive`)
+}
+
+export function cancelOrder(orderId, reason = '双方协商取消') {
+  return request.post(`/marketplace/orders/${orderId}/cancel`, null, { params: { reason } })
+}
+
+export function clearConversationMessages(conversationId) {
+  return request.delete(`/marketplace/conversations/${conversationId}/messages`)
+}
+
+export function deleteConversation(conversationId) {
+  return request.delete(`/marketplace/conversations/${conversationId}`)
+}
+
+export function deleteNotification(notificationId) {
+  return request.delete(`/marketplace/notifications/${notificationId}`)
+}
+
+export function clearAllNotifications() {
+  return request.delete('/marketplace/notifications')
+}
+
+export function getUserShopItems(userId) {
+  return request.get(`/marketplace/users/${userId}/shop-items`)
+}
+
+export function getAdminOverview() {
+  return request.get('/marketplace/admin/overview')
+}
+
+export function getAdminContents(params) {
+  return request.get('/marketplace/admin/contents', { params })
+}
+
+export function updateAdminContent(type, id, data) {
+  return request.put(`/marketplace/admin/contents/${type}/${id}`, data)
+}
+
+export function deleteAdminContent(type, id) {
+  return request.delete(`/marketplace/admin/contents/${type}/${id}`)
+}
+
+export function getAdminReports(params) {
+  return request.get('/marketplace/admin/reports', { params })
+}
+
+export function handleAdminReport(reportId, data) {
+  return request.post(`/marketplace/admin/reports/${reportId}/handle`, data)
+}
+
+export function getAdminUsers(params) {
+  return request.get('/marketplace/admin/users', { params })
+}
+
+export function updateAdminUserPenalties(userId, data) {
+  return request.put(`/marketplace/admin/users/${userId}/penalties`, data)
+}
+
+export function sendOfficialNotice(data) {
+  return request.post('/marketplace/admin/notices', data)
+}

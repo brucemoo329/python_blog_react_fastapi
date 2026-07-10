@@ -26,6 +26,10 @@ class User(Base):
     email = Column(String(100), unique=True, index=True, nullable=False)
     hashed_password = Column(String(255), nullable=False)
     is_active = Column(Boolean, default=True)
+    is_admin = Column(Boolean, default=False, index=True)
+    can_comment = Column(Boolean, default=True)
+    can_post = Column(Boolean, default=True)
+    ban_reason = Column(String(240), nullable=True)
     created_at = Column(DateTime(timezone=True), server_default=func.now())
 
     # 建立与 Post 的双向关系
@@ -188,9 +192,15 @@ class Order(Base):
     listing_id = Column(Integer, ForeignKey("marketplace_listings.id", ondelete="SET NULL"), nullable=True)
     service_task_id = Column(Integer, ForeignKey("marketplace_service_tasks.id", ondelete="SET NULL"), nullable=True)
     amount = Column(Numeric(10, 2), nullable=False)
-    status = Column(String(30), default="pending_confirm", index=True)
+    status = Column(String(30), default="pending_payment", index=True)
     delivery_method = Column(String(30), default="campus_meet")
     meeting_location = Column(String(120), nullable=True)
+    buyer_note = Column(String(240), nullable=True)
+    seller_note = Column(String(240), nullable=True)
+    cancel_reason = Column(String(240), nullable=True)
+    paid_at = Column(DateTime(timezone=True), nullable=True)
+    shipped_at = Column(DateTime(timezone=True), nullable=True)
+    received_at = Column(DateTime(timezone=True), nullable=True)
     created_at = Column(DateTime(timezone=True), server_default=func.now(), index=True)
     completed_at = Column(DateTime(timezone=True), nullable=True)
 
@@ -265,7 +275,14 @@ class Report(Base):
     reason = Column(String(80), nullable=False)
     description = Column(Text, nullable=True)
     status = Column(String(20), default="pending", index=True)
+    admin_note = Column(String(500), nullable=True)
+    action_taken = Column(String(40), nullable=True)
+    handled_by = Column(Integer, ForeignKey("users.id", ondelete="SET NULL"), nullable=True)
+    handled_at = Column(DateTime(timezone=True), nullable=True)
     created_at = Column(DateTime(timezone=True), server_default=func.now(), index=True)
+
+    reporter = relationship("User", foreign_keys=[reporter_id])
+    handler = relationship("User", foreign_keys=[handled_by])
 
 
 class UserProfile(Base):

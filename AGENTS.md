@@ -199,13 +199,43 @@ VITE_AMAP_SECURITY_CODE=
 - 通知列表：`GET /marketplace/notifications`。
 - 全部已读：`POST /marketplace/notifications/read-all`。
 - 单条已读：`POST /marketplace/notifications/{notification_id}/read`。
+- 删除单条通知：`DELETE /marketplace/notifications/{notification_id}`。
+- 一键清除通知：`DELETE /marketplace/notifications`。
 - 发起会话：`POST /marketplace/conversations/start`。
 - 会话列表：`GET /marketplace/conversations`。
 - 消息列表：`GET /marketplace/conversations/{conversation_id}/messages`。
 - 发送消息：`POST /marketplace/conversations/{conversation_id}/messages`。
 - 消息表情：`POST /marketplace/messages/{message_id}/reactions`。
-- 消息支持文本、图片、位置、转账卡片、引用和 emoji 表态；记录持久化到 MySQL。
+- 清空会话消息：`DELETE /marketplace/conversations/{conversation_id}/messages`。
+- 删除会话：`DELETE /marketplace/conversations/{conversation_id}`。
+- 对方在售商品：`GET /marketplace/users/{user_id}/shop-items`。
+- 消息支持文本、图片、位置、转账、商品卡片、订单卡片；记录持久化到 MySQL。
 - 以上接口均需要 token。
+
+### 订单
+
+- 创建商品订单：`POST /marketplace/orders/listing/{listing_id}`
+- 我的订单：`GET /marketplace/orders`
+- 订单详情：`GET /marketplace/orders/{order_id}`
+- 付款：`POST /marketplace/orders/{order_id}/pay`（自动私信卖家）
+- 发货：`POST /marketplace/orders/{order_id}/ship`（自动私信买家）
+- 确认收货：`POST /marketplace/orders/{order_id}/receive`
+- 取消订单：`POST /marketplace/orders/{order_id}/cancel`
+- 状态：`pending_payment` / `pending_ship` / `shipped` / `completed` / `cancelled`
+- 前端：`OrdersCenter.jsx`、`CheckoutPlaceholder.jsx`
+- 后端：`backend/app/marketplace.py`
+- 需要 token
+
+### 管理后台（仅 is_admin）
+
+- 总览：`GET /marketplace/admin/overview`
+- 内容列表/改/删：`GET|PUT|DELETE /marketplace/admin/contents...`
+- 举报列表/处理：`GET /marketplace/admin/reports`、`POST /marketplace/admin/reports/{id}/handle`
+- 用户与处罚：`GET /marketplace/admin/users`、`PUT /marketplace/admin/users/{id}/penalties`
+- 官方通知：`POST /marketplace/admin/notices`
+- 前端：`AdminPanel.jsx`
+- 后端：`backend/app/admin_panel.py`
+- 启动时自动确保管理员账号 `admin` 存在
 
 ## 数据库记录规则
 
@@ -284,7 +314,17 @@ VITE_AMAP_SECURITY_CODE=
 
 - 用途：持久化私信会话、文本或富媒体消息、引用消息和 emoji 表态。
 - 关联：会话关联双方用户；消息关联会话、发送者和可选引用消息。
-- 使用 API：帖子快捷私信、完整消息中心、消息轮询与表态。
+- 使用 API：帖子快捷私信、完整消息中心、消息轮询与表态、清空/删除会话、商品/订单卡片。
+
+### users 管理字段
+
+- 新增：`is_admin`、`can_comment`、`can_post`、`ban_reason`
+- 使用 API：登录返回、管理后台处罚、发帖/评论权限校验
+
+### marketplace_orders 扩展
+
+- 新增：`paid_at`、`shipped_at`、`received_at`、`buyer_note`、`seller_note`、`cancel_reason`
+- 默认状态：`pending_payment`
 
 ### marketplace_listing_images / marketplace_service_tasks.image_url / marketplace_wanted_posts.image_url / marketplace_community_posts.image_url
 
