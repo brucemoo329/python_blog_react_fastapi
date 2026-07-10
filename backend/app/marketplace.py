@@ -122,6 +122,18 @@ class OrderReviewBody(BaseModel):
     is_complaint: bool = False
 
 
+class OrderAppealBody(BaseModel):
+    reason: str = Field(min_length=4, max_length=500)
+    review_id: Optional[int] = None
+
+
+class SupportTicketBody(BaseModel):
+    title: str = Field(min_length=2, max_length=120)
+    content: str = Field(min_length=4, max_length=2000)
+    category: str = Field(default="general", max_length=40)
+    order_id: Optional[int] = None
+
+
 class CommunityPostCreate(BaseModel):
     content: str = Field(min_length=2, max_length=3000)
     title: Optional[str] = Field(default=None, max_length=120)
@@ -853,6 +865,13 @@ def compact_order_payload(order, role: str):
     }
 
 
+def peer_role_label(is_service: bool, peer_is_buyer: bool) -> str:
+    """评价对象角色文案：跑腿区分发布者/跑手，商品区分买家/卖家。"""
+    if is_service:
+        return "发布者" if peer_is_buyer else "跑手"
+    return "买家" if peer_is_buyer else "卖家"
+
+
 def full_order_payload(db: Session, order: models.Order, user_id: int):
     role = "buyer" if order.buyer_id == user_id else "seller"
     is_service = bool(order.service_task_id)
@@ -866,6 +885,41 @@ def full_order_payload(db: Session, order: models.Order, user_id: int):
         and order.cancelled_by_id != user_id
         and my_review is None
     )
+    peer_user = order.seller if role == "buyer" else order.buyer
+    peer_role = peer_role_label(is_service, peer_is_buyer=(role != "buyer"))
+    my_role_label = peer_role_label(is_service, peer_is_buyer=(role == "buyer"))
+    received = db.query(models.Review).filter_by(order_id=order.id, reviewed_user_id=user_id).all()
+    received_payload = [{
+        "id": r.id,
+        "rating": r.rating,
+        "content": r.content,
+        "is_complaint": bool(getattr(r, "is_complaint", False) or (r.rating or 0) <= 2),
+        "created_at": r.created_at,
+    } for r in received]
+    complaints_against_me = [r for r in received_payload if r["is_complaint"]]
+    appeals = db.query(models.OrderAppeal).filter_by(order_id=order.id, appellant_id=user_id).order_by(
+        models.OrderAppeal.created_at.desc()
+    ).all()
+    appeal_payload = [{
+        "id": a.id,
+        "review_id": a.review_id,
+        "reason": a.reason,
+        "status": a.status,
+        "admin_note": a.admin_note,
+        "created_at": a.created_at,
+        "handled_at": a.handled_at,
+    } for a in appeals]
+    has_pending_appeal = any(a.status == "pending" for a in appeals)
+    approved_review_ids = {a.review_id for a in appeals if a.status == "approved" and a.review_id}
+    open_complaints = [c for c in complaints_against_me if c["id"] not in approved_review_ids]
+    can_appeal = bool(open_complaints) and not has_pending_appeal
+
+    deleted_for_me = bool(
+        (role == "buyer" and getattr(order, "buyer_deleted", False))
+        or (role == "seller" and getattr(order, "seller_deleted", False))
+    )
+    can_delete_record = order.status in {"completed", "cancelled"} and not deleted_for_me
+
     payload.update({
         "buyer": user_payload(order.buyer) if order.buyer else None,
         "seller": user_payload(order.seller) if order.seller else None,
@@ -876,10 +930,25 @@ def full_order_payload(db: Session, order: models.Order, user_id: int):
         "actions": order_actions_for_role(order.status, role, is_service=is_service),
         "can_review": can_review,
         "peer_cancelled": peer_cancelled,
+        "my_role_label": my_role_label,
+        "review_target": {
+            "user": user_payload(peer_user) if peer_user else None,
+            "role_label": peer_role,
+            "hint": f"你正在评价对方（{peer_role}）" + (
+                f"：{(peer_user.profile.nickname if peer_user and peer_user.profile and peer_user.profile.nickname else None) or (peer_user.username if peer_user else '')}"
+            ),
+        },
         "my_review": {
+            "id": my_review.id,
             "rating": my_review.rating,
             "content": my_review.content,
+            "is_complaint": bool(getattr(my_review, "is_complaint", False) or (my_review.rating or 0) <= 2),
         } if my_review else None,
+        "received_reviews": received_payload,
+        "complaints_against_me": complaints_against_me,
+        "can_appeal": can_appeal,
+        "my_appeals": appeal_payload,
+        "can_delete_record": can_delete_record,
         "service_task": service_task_tracking_payload(order.service_task, user_id, db=db, order_id=order.id) if order.service_task else None,
     })
     return payload
@@ -2949,11 +3018,16 @@ def list_my_orders(
         joinedload(models.Order.seller).joinedload(models.User.profile),
     )
     if role == "buyer":
-        query = query.filter(models.Order.buyer_id == user.id)
+        query = query.filter(models.Order.buyer_id == user.id, models.Order.buyer_deleted.is_(False))
     elif role == "seller":
-        query = query.filter(models.Order.seller_id == user.id)
+        query = query.filter(models.Order.seller_id == user.id, models.Order.seller_deleted.is_(False))
     else:
-        query = query.filter(or_(models.Order.buyer_id == user.id, models.Order.seller_id == user.id))
+        query = query.filter(
+            or_(
+                (models.Order.buyer_id == user.id) & (models.Order.buyer_deleted.is_(False)),
+                (models.Order.seller_id == user.id) & (models.Order.seller_deleted.is_(False)),
+            )
+        )
     if status != "all":
         query = query.filter(models.Order.status == status)
     rows = query.order_by(models.Order.created_at.desc()).limit(100).all()
@@ -3232,16 +3306,18 @@ def review_order(
     rating = data.rating
     if data.is_complaint:
         rating = min(rating, 2)
+    is_complaint = bool(data.is_complaint or rating <= 2)
     review = models.Review(
         order_id=order.id,
         reviewer_id=user.id,
         reviewed_user_id=reviewed_user_id,
         rating=rating,
-        content=(data.content or ("投诉本次交易" if data.is_complaint else "好评")).strip()[:500],
+        content=(data.content or ("投诉本次交易" if is_complaint else "好评")).strip()[:500],
+        is_complaint=is_complaint,
     )
     db.add(review)
     # 信任分事件：好评 +8，投诉/差评 -20
-    if data.is_complaint or rating <= 2:
+    if is_complaint:
         db.add(models.TrustScoreEvent(
             user_id=reviewed_user_id,
             event_type=f"order_complaint_{order.id}"[:40],
@@ -3257,7 +3333,7 @@ def review_order(
             actor_id=user.id,
             notification_type="order_review",
             title="你收到一则交易投诉",
-            content=review.content or "对方对本次订单提出投诉，信任分 -20",
+            content=(review.content or "对方对本次订单提出投诉，信任分 -20") + "。若觉得不公，可在订单中申诉。",
             target_type="order",
             target_id=order.id,
         )
@@ -3320,6 +3396,7 @@ def skip_order_review(
         reviewed_user_id=reviewed_user_id,
         rating=3,
         content="不投诉/暂不评价",
+        is_complaint=False,
     ))
     db.commit()
     order = db.query(models.Order).options(
@@ -3329,6 +3406,202 @@ def skip_order_review(
         joinedload(models.Order.seller).joinedload(models.User.profile),
     ).filter_by(id=order_id).first()
     return {"message": "已选择不投诉", "item": full_order_payload(db, order, user.id)}
+
+
+@router.post("/orders/{order_id}/delete-record")
+def delete_order_record(
+    order_id: int,
+    db: Session = Depends(get_db),
+    user: models.User = Depends(get_current_user),
+):
+    """软删除：仅对自己隐藏已完成/已取消订单记录，不影响对方。"""
+    order = db.get(models.Order, order_id)
+    if not order or user.id not in {order.buyer_id, order.seller_id}:
+        raise HTTPException(status_code=404, detail="订单不存在")
+    if order.status not in {"completed", "cancelled"}:
+        raise HTTPException(status_code=409, detail="仅已完成或已取消订单可删除记录")
+    if user.id == order.buyer_id:
+        order.buyer_deleted = True
+    if user.id == order.seller_id:
+        order.seller_deleted = True
+    db.commit()
+    return {"message": "订单记录已删除", "id": order.id}
+
+
+@router.post("/orders/{order_id}/appeal")
+def create_order_appeal(
+    order_id: int,
+    data: OrderAppealBody,
+    db: Session = Depends(get_db),
+    user: models.User = Depends(get_current_user),
+):
+    """被投诉方对投诉提出申诉，由管理员处理。"""
+    order = db.query(models.Order).options(
+        joinedload(models.Order.listing).joinedload(models.Listing.images),
+        joinedload(models.Order.service_task),
+        joinedload(models.Order.buyer).joinedload(models.User.profile),
+        joinedload(models.Order.seller).joinedload(models.User.profile),
+    ).filter_by(id=order_id).first()
+    if not order or user.id not in {order.buyer_id, order.seller_id}:
+        raise HTTPException(status_code=404, detail="订单不存在")
+    complaint = None
+    if data.review_id:
+        complaint = db.query(models.Review).filter_by(
+            id=data.review_id, order_id=order.id, reviewed_user_id=user.id
+        ).first()
+    if not complaint:
+        complaint = (
+            db.query(models.Review)
+            .filter(
+                models.Review.order_id == order.id,
+                models.Review.reviewed_user_id == user.id,
+                or_(models.Review.is_complaint.is_(True), models.Review.rating <= 2),
+            )
+            .order_by(models.Review.created_at.desc())
+            .first()
+        )
+    if not complaint:
+        raise HTTPException(status_code=409, detail="当前订单没有可申诉的投诉")
+    pending = db.query(models.OrderAppeal).filter_by(
+        order_id=order.id, appellant_id=user.id, status="pending"
+    ).first()
+    if pending:
+        raise HTTPException(status_code=409, detail="你已有待处理的申诉，请等待客服处理")
+    already = db.query(models.OrderAppeal).filter_by(
+        order_id=order.id, review_id=complaint.id, appellant_id=user.id, status="approved"
+    ).first()
+    if already:
+        raise HTTPException(status_code=409, detail="该投诉已申诉成功，无需重复提交")
+    appeal = models.OrderAppeal(
+        order_id=order.id,
+        review_id=complaint.id,
+        appellant_id=user.id,
+        reason=data.reason.strip()[:500],
+        status="pending",
+    )
+    db.add(appeal)
+    # 同步一条客服工单，方便管理后台统一查看
+    db.add(models.SupportTicket(
+        user_id=user.id,
+        order_id=order.id,
+        category="appeal",
+        title=f"订单申诉 {order.order_no}",
+        content=f"针对投诉评价#{complaint.id}：{data.reason.strip()[:500]}",
+        status="pending",
+    ))
+    # 通知管理员（is_admin 用户）
+    admins = db.query(models.User).filter(models.User.is_admin.is_(True)).all()
+    for admin in admins:
+        create_notification(
+            db,
+            recipient_id=admin.id,
+            actor_id=user.id,
+            notification_type="support",
+            title="新的订单申诉待处理",
+            content=f"订单 {order.order_no}：{data.reason.strip()[:120]}",
+            target_type="order_appeal",
+            target_id=order.id,
+        )
+    create_notification(
+        db,
+        recipient_id=user.id,
+        actor_id=user.id,
+        notification_type="support",
+        title="申诉已提交",
+        content="客服将尽快处理你的订单申诉，请留意通知。",
+        target_type="order",
+        target_id=order.id,
+    )
+    db.commit()
+    db.refresh(appeal)
+    order = db.query(models.Order).options(
+        joinedload(models.Order.listing).joinedload(models.Listing.images),
+        joinedload(models.Order.service_task),
+        joinedload(models.Order.buyer).joinedload(models.User.profile),
+        joinedload(models.Order.seller).joinedload(models.User.profile),
+    ).filter_by(id=order_id).first()
+    return {
+        "message": "申诉已提交，等待客服处理",
+        "appeal_id": appeal.id,
+        "item": full_order_payload(db, order, user.id),
+    }
+
+
+@router.post("/support/tickets", status_code=201)
+def create_support_ticket(
+    data: SupportTicketBody,
+    db: Session = Depends(get_db),
+    user: models.User = Depends(get_current_user),
+):
+    """用户联系客服，工单进入管理员后台。"""
+    order_id = data.order_id
+    if order_id:
+        order = db.get(models.Order, order_id)
+        if not order or user.id not in {order.buyer_id, order.seller_id}:
+            raise HTTPException(status_code=404, detail="关联订单不存在")
+    ticket = models.SupportTicket(
+        user_id=user.id,
+        order_id=order_id,
+        category=(data.category or "general")[:40],
+        title=data.title.strip()[:120],
+        content=data.content.strip()[:2000],
+        status="pending",
+    )
+    db.add(ticket)
+    db.flush()
+    admins = db.query(models.User).filter(models.User.is_admin.is_(True)).all()
+    for admin in admins:
+        create_notification(
+            db,
+            recipient_id=admin.id,
+            actor_id=user.id,
+            notification_type="support",
+            title="新的客服工单",
+            content=f"{data.title.strip()[:80]}",
+            target_type="support_ticket",
+            target_id=ticket.id,
+        )
+    db.commit()
+    db.refresh(ticket)
+    return {
+        "message": "已提交客服，管理员会尽快回复",
+        "item": {
+            "id": ticket.id,
+            "title": ticket.title,
+            "content": ticket.content,
+            "category": ticket.category,
+            "status": ticket.status,
+            "order_id": ticket.order_id,
+            "created_at": ticket.created_at,
+        },
+    }
+
+
+@router.get("/support/tickets")
+def list_my_support_tickets(
+    db: Session = Depends(get_db),
+    user: models.User = Depends(get_current_user),
+):
+    rows = (
+        db.query(models.SupportTicket)
+        .filter_by(user_id=user.id)
+        .order_by(models.SupportTicket.created_at.desc())
+        .limit(50)
+        .all()
+    )
+    return {
+        "items": [{
+            "id": row.id,
+            "title": row.title,
+            "content": row.content,
+            "category": row.category,
+            "status": row.status,
+            "order_id": row.order_id,
+            "admin_reply": row.admin_reply,
+            "created_at": row.created_at,
+            "handled_at": row.handled_at,
+        } for row in rows]
+    }
 
 
 @router.delete("/conversations/{conversation_id}/messages")

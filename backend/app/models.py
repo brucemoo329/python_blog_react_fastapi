@@ -218,6 +218,8 @@ class Order(Base):
     seller_note = Column(String(240), nullable=True)
     cancel_reason = Column(String(240), nullable=True)
     cancelled_by_id = Column(Integer, ForeignKey("users.id", ondelete="SET NULL"), nullable=True)
+    buyer_deleted = Column(Boolean, default=False, index=True)
+    seller_deleted = Column(Boolean, default=False, index=True)
     paid_at = Column(DateTime(timezone=True), nullable=True)
     shipped_at = Column(DateTime(timezone=True), nullable=True)
     received_at = Column(DateTime(timezone=True), nullable=True)
@@ -282,7 +284,50 @@ class Review(Base):
     reviewed_user_id = Column(Integer, ForeignKey("users.id", ondelete="CASCADE"), nullable=False, index=True)
     rating = Column(Integer, nullable=False)
     content = Column(Text, nullable=True)
+    is_complaint = Column(Boolean, default=False, index=True)
     created_at = Column(DateTime(timezone=True), server_default=func.now())
+
+
+class OrderAppeal(Base):
+    """被投诉方对评价/投诉提出申诉，由管理员处理。"""
+    __tablename__ = "marketplace_order_appeals"
+
+    id = Column(Integer, primary_key=True)
+    order_id = Column(Integer, ForeignKey("marketplace_orders.id", ondelete="CASCADE"), nullable=False, index=True)
+    review_id = Column(Integer, ForeignKey("marketplace_reviews.id", ondelete="SET NULL"), nullable=True, index=True)
+    appellant_id = Column(Integer, ForeignKey("users.id", ondelete="CASCADE"), nullable=False, index=True)
+    reason = Column(String(500), nullable=False)
+    status = Column(String(20), default="pending", index=True)  # pending / approved / rejected
+    admin_note = Column(String(500), nullable=True)
+    handled_by = Column(Integer, ForeignKey("users.id", ondelete="SET NULL"), nullable=True)
+    handled_at = Column(DateTime(timezone=True), nullable=True)
+    created_at = Column(DateTime(timezone=True), server_default=func.now(), index=True)
+
+    order = relationship("Order")
+    review = relationship("Review")
+    appellant = relationship("User", foreign_keys=[appellant_id])
+    handler = relationship("User", foreign_keys=[handled_by])
+
+
+class SupportTicket(Base):
+    """用户联系客服工单，对接管理员后台。"""
+    __tablename__ = "marketplace_support_tickets"
+
+    id = Column(Integer, primary_key=True)
+    user_id = Column(Integer, ForeignKey("users.id", ondelete="CASCADE"), nullable=False, index=True)
+    order_id = Column(Integer, ForeignKey("marketplace_orders.id", ondelete="SET NULL"), nullable=True, index=True)
+    category = Column(String(40), default="general", index=True)  # general / appeal / order
+    title = Column(String(120), nullable=False)
+    content = Column(Text, nullable=False)
+    status = Column(String(20), default="pending", index=True)  # pending / replied / closed
+    admin_reply = Column(Text, nullable=True)
+    handled_by = Column(Integer, ForeignKey("users.id", ondelete="SET NULL"), nullable=True)
+    handled_at = Column(DateTime(timezone=True), nullable=True)
+    created_at = Column(DateTime(timezone=True), server_default=func.now(), index=True)
+
+    user = relationship("User", foreign_keys=[user_id])
+    order = relationship("Order")
+    handler = relationship("User", foreign_keys=[handled_by])
 
 
 class Report(Base):

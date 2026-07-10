@@ -42,7 +42,9 @@ import { Textarea } from '@/components/ui/textarea'
 import {
   checkInProfile,
   createPaymentMethod,
+  createSupportTicket,
   createUserAddress,
+  getMySupportTickets,
   getUserProfile,
   updateAccountSecurity,
   updateUserProfile,
@@ -201,6 +203,13 @@ export default function ProfileCenter({ user, language = 'zh-CN', onLogout, onNo
     current_password: '',
     new_password: '',
   })
+  const [supportForm, setSupportForm] = useState({
+    title: '',
+    content: '',
+    category: 'general',
+  })
+  const [supportTickets, setSupportTickets] = useState([])
+  const [supportLoading, setSupportLoading] = useState(false)
   const refreshProfileRef = useRef(null)
 
   const syncProfile = (nextProfile, nextTrust) => {
@@ -382,12 +391,43 @@ export default function ProfileCenter({ user, language = 'zh-CN', onLogout, onNo
     }
   }
 
+  const loadSupportTickets = async () => {
+    setSupportLoading(true)
+    try {
+      const response = await getMySupportTickets()
+      setSupportTickets(response.items || [])
+    } catch {
+      setSupportTickets([])
+    } finally {
+      setSupportLoading(false)
+    }
+  }
+
+  const submitSupport = async () => {
+    if (!supportForm.title.trim() || !supportForm.content.trim()) {
+      onNotice?.('请填写标题和问题描述')
+      return
+    }
+    try {
+      const response = await createSupportTicket({
+        title: supportForm.title.trim(),
+        content: supportForm.content.trim(),
+        category: supportForm.category || 'general',
+      })
+      onNotice?.(response?.message || '已提交客服')
+      setSupportForm({ title: '', content: '', category: 'general' })
+      await loadSupportTickets()
+    } catch (error) {
+      onNotice?.(error.response?.data?.detail || '提交失败')
+    }
+  }
+
   const chooseSetting = (key) => {
     if (key === 'share') return shareProfile()
-    if (key === 'support') return onNotice?.('客服入口已准备好，后续可接入工单或在线消息')
     if (key === 'profile') return setEditOpen(true)
     setActivePanel(key)
     setSettingsOpen(true)
+    if (key === 'support') loadSupportTickets()
   }
 
   return (
@@ -589,6 +629,47 @@ export default function ProfileCenter({ user, language = 'zh-CN', onLogout, onNo
                       <button key={theme.value} type="button" data-theme={theme.value} onClick={() => saveProfile({ background_theme: theme.value, background_url: '' }, `已切换背景：${theme.label}`)}>
                         {theme.label}
                       </button>
+                    ))}
+                  </div>
+                </div>
+              )}
+              {activePanel === 'support' && (
+                <div className="settings-form profile-support-form">
+                  <p className="profile-support-hint">问题会提交给平台管理员（客服）处理，订单申诉也可在「我的订单」中发起。</p>
+                  <Label>问题类型</Label>
+                  <select
+                    value={supportForm.category}
+                    onChange={(event) => setSupportForm({ ...supportForm, category: event.target.value })}
+                  >
+                    <option value="general">一般咨询</option>
+                    <option value="order">订单相关</option>
+                    <option value="appeal">投诉/申诉</option>
+                    <option value="account">账号安全</option>
+                  </select>
+                  <Label>标题</Label>
+                  <Input
+                    value={supportForm.title}
+                    onChange={(event) => setSupportForm({ ...supportForm, title: event.target.value })}
+                    placeholder="简要说明问题"
+                  />
+                  <Label>详细描述</Label>
+                  <Textarea
+                    value={supportForm.content}
+                    onChange={(event) => setSupportForm({ ...supportForm, content: event.target.value })}
+                    placeholder="请描述遇到的问题，可附上订单号"
+                    rows={4}
+                  />
+                  <Button onClick={submitSupport}><MessageCircleQuestion /> 提交给客服</Button>
+                  <div className="profile-support-history">
+                    <strong>我的工单</strong>
+                    {supportLoading ? <span>加载中…</span> : null}
+                    {!supportLoading && !supportTickets.length ? <span className="profile-empty-line">暂无工单</span> : null}
+                    {supportTickets.map((ticket) => (
+                      <div key={ticket.id} className="profile-setting-chip">
+                        <strong>{ticket.title} · {ticket.status === 'pending' ? '待处理' : ticket.status === 'replied' ? '已回复' : '已关闭'}</strong>
+                        <span>{ticket.content}</span>
+                        {ticket.admin_reply ? <span className="profile-support-reply">客服：{ticket.admin_reply}</span> : null}
+                      </div>
                     ))}
                   </div>
                 </div>

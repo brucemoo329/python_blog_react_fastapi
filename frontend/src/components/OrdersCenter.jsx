@@ -1,9 +1,11 @@
 import { useCallback, useEffect, useMemo, useState } from 'react'
-import { ArrowLeft, Bike, Package, Star, Truck, Wallet, CheckCircle2, XCircle, Navigation } from 'lucide-react'
+import { ArrowLeft, Bike, Package, Star, Truck, Wallet, CheckCircle2, XCircle, Navigation, Trash2, Scale } from 'lucide-react'
 import { Badge } from '@/components/ui/badge'
 import { Button } from '@/components/ui/button'
 import {
+  appealOrder,
   cancelOrder,
+  deleteOrderRecord,
   getMyOrders,
   payOrder,
   receiveOrder,
@@ -23,6 +25,20 @@ const CANCEL_REASONS = [
   '其他原因',
 ]
 
+function reviewTargetText(order) {
+  const hint = order?.review_target?.hint
+  if (hint) return hint
+  const roleLabel = order?.review_target?.role_label
+  const name = order?.review_target?.user?.nickname || order?.review_target?.user?.username
+  if (roleLabel && name) return `你正在评价对方（${roleLabel}）：${name}`
+  if (roleLabel) return `你正在评价对方（${roleLabel}）`
+  const isService = order?.kind === 'service' || order?.service_task_id
+  if (isService) {
+    return order?.role === 'buyer' ? '你正在评价跑手（接单配送的同学）' : '你正在评价发布者（发任务的同学）'
+  }
+  return order?.role === 'buyer' ? '你正在评价卖家' : '你正在评价买家'
+}
+
 export default function OrdersCenter({
   language = 'zh-CN',
   onBack,
@@ -41,6 +57,8 @@ export default function OrdersCenter({
   const [reviewFor, setReviewFor] = useState(null)
   const [rating, setRating] = useState(5)
   const [reviewText, setReviewText] = useState('')
+  const [appealFor, setAppealFor] = useState(null)
+  const [appealReason, setAppealReason] = useState('')
   const t = (key, fallback = '') => translate(language, key, fallback)
 
   const tabs = useMemo(() => [
@@ -138,13 +156,50 @@ export default function OrdersCenter({
     }
   }
 
+  const submitAppeal = async () => {
+    if (!appealFor || !appealReason.trim()) {
+      onNotice?.('请填写申诉理由')
+      return
+    }
+    setBusyId(appealFor.id)
+    try {
+      const complaintId = appealFor.complaints_against_me?.[0]?.id
+      const response = await appealOrder(appealFor.id, {
+        reason: appealReason.trim(),
+        review_id: complaintId || undefined,
+      })
+      onNotice?.(response?.message || '申诉已提交')
+      setAppealFor(null)
+      setAppealReason('')
+      await load()
+    } catch (error) {
+      onNotice?.(error.response?.data?.detail || '申诉提交失败')
+    } finally {
+      setBusyId(null)
+    }
+  }
+
+  const removeRecord = async (order) => {
+    if (!window.confirm('删除后仅对自己隐藏该订单记录，对方仍可见。确认删除？')) return
+    setBusyId(order.id)
+    try {
+      const response = await deleteOrderRecord(order.id)
+      onNotice?.(response?.message || '记录已删除')
+      await load()
+    } catch (error) {
+      onNotice?.(error.response?.data?.detail || '删除失败')
+    } finally {
+      setBusyId(null)
+    }
+  }
+
   return (
     <section className="orders-center">
       <header className="orders-center-header">
         <Button variant="ghost" onClick={onBack}><ArrowLeft /> {t('detail.back')}</Button>
         <div>
           <h1>{t('orders.title')}</h1>
-          <p>商品订单与跑腿订单都会显示在这里</p>
+          <p>商品订单与跑腿订单都会显示在这里。跑腿单：发布者可评价/投诉跑手，跑手可评价/投诉发布者。</p>
         </div>
       </header>
 
@@ -171,6 +226,8 @@ export default function OrdersCenter({
         {orders.map((order) => {
           const isService = order.kind === 'service' || order.service_task_id
           const actions = order.actions || []
+          const peerName = order.review_target?.user?.nickname || order.review_target?.user?.username
+          const peerRole = order.review_target?.role_label
           return (
             <article key={order.id} className={cn('order-card', `role-${order.role}`, isService && 'is-service')}>
               <header>
@@ -181,6 +238,7 @@ export default function OrdersCenter({
                   </div>
                   <strong>{order.title}</strong>
                   <small>{t('orders.orderNo', '订单号')} {order.order_no}</small>
+                  {peerRole ? <small className="order-peer-line">对方：{peerRole}{peerName ? ` · ${peerName}` : ''}</small> : null}
                 </div>
                 <em>{order.status_label || order.status}</em>
               </header>
@@ -190,6 +248,15 @@ export default function OrdersCenter({
                   <p>{order.description || (isService ? '校园跑腿订单' : t('orders.campusOrder', '校园交易订单'))}</p>
                   <span>{t('orders.delivery', '交付')}：{order.meeting_location || t('orders.campusMeet', '校内当面交易')}</span>
                   {order.cancel_reason ? <span className="order-cancel-reason">取消原因：{order.cancel_reason}</span> : null}
+                  {order.complaints_against_me?.length ? (
+                    <span className="order-complaint-hint">你收到对方投诉，可申诉至客服</span>
+                  ) : null}
+                  {order.my_appeals?.[0] ? (
+                    <span className="order-appeal-status">
+                      申诉状态：{order.my_appeals[0].status === 'pending' ? '客服处理中' : order.my_appeals[0].status === 'approved' ? '已通过' : '已驳回'}
+                      {order.my_appeals[0].admin_note ? ` · ${order.my_appeals[0].admin_note}` : ''}
+                    </span>
+                  ) : null}
                   <strong className="order-price">¥{Number(order.amount || 0).toFixed(2)}</strong>
                 </div>
               </div>
@@ -219,11 +286,24 @@ export default function OrdersCenter({
                 ) : null}
                 {order.can_review ? (
                   <Button size="sm" variant="secondary" onClick={() => { setReviewFor(order); setRating(5); setReviewText('') }}>
-                    <Star /> {order.peer_cancelled ? '投诉或不投诉' : '好评/投诉'}
+                    <Star /> {order.peer_cancelled ? '投诉或不投诉' : `好评/投诉${peerRole ? `（${peerRole}）` : ''}`}
                   </Button>
                 ) : null}
                 {order.my_review ? (
-                  <span className="order-reviewed">已评价 {order.my_review.rating} 星</span>
+                  <span className="order-reviewed">
+                    {order.my_review.is_complaint ? '已投诉' : `已评价 ${order.my_review.rating} 星`}
+                    {peerRole ? ` · 对象：${peerRole}` : ''}
+                  </span>
+                ) : null}
+                {order.can_appeal ? (
+                  <Button size="sm" variant="outline" onClick={() => { setAppealFor(order); setAppealReason('') }}>
+                    <Scale /> 申诉客服
+                  </Button>
+                ) : null}
+                {order.can_delete_record ? (
+                  <Button size="sm" variant="ghost" disabled={busyId === order.id} onClick={() => removeRecord(order)}>
+                    <Trash2 /> 删除记录
+                  </Button>
                 ) : null}
               </footer>
             </article>
@@ -255,13 +335,21 @@ export default function OrdersCenter({
         <div className="order-modal-mask">
           <div className="order-modal">
             <h3>{reviewFor.peer_cancelled ? '对方取消了订单' : '订单评价'}</h3>
-            <p>{reviewFor.peer_cancelled ? '你可以选择投诉对方，或选择不投诉。' : '完成后可给对方好评或投诉，将影响信任分。'}</p>
+            <p className="order-review-target">{reviewTargetText(reviewFor)}</p>
+            <p>
+              {reviewFor.peer_cancelled
+                ? '你可以投诉对方，或选择不投诉。投诉将影响对方信任分。'
+                : '星级与投诉对象均为对方，不是自己。好评加分，投诉扣对方信任分。'}
+            </p>
             {!reviewFor.peer_cancelled ? (
               <div className="order-star-row">
                 {[1, 2, 3, 4, 5].map((n) => (
                   <button key={n} type="button" className={cn(rating >= n && 'is-on')} onClick={() => setRating(n)}>★</button>
                 ))}
               </div>
+            ) : null}
+            {!reviewFor.peer_cancelled ? (
+              <small className="order-star-hint">当前将给「{reviewFor.review_target?.role_label || '对方'}」打 {rating} 星</small>
             ) : null}
             <textarea
               className="order-review-text"
@@ -275,10 +363,40 @@ export default function OrdersCenter({
               {reviewFor.peer_cancelled || reviewFor.status === 'cancelled' ? (
                 <Button variant="outline" disabled={busyId === reviewFor.id} onClick={() => submitSkip(reviewFor)}>不投诉</Button>
               ) : null}
-              <Button variant="destructive" disabled={busyId === reviewFor.id} onClick={() => submitReview(true)}>投诉 -20</Button>
+              <Button variant="destructive" disabled={busyId === reviewFor.id} onClick={() => submitReview(true)}>
+                投诉{reviewFor.review_target?.role_label ? `（${reviewFor.review_target.role_label}）` : ''} -20
+              </Button>
               {!reviewFor.peer_cancelled ? (
-                <Button disabled={busyId === reviewFor.id} onClick={() => submitReview(false)}>提交好评</Button>
+                <Button disabled={busyId === reviewFor.id} onClick={() => submitReview(false)}>
+                  提交好评给{reviewFor.review_target?.role_label || '对方'}
+                </Button>
               ) : null}
+            </div>
+          </div>
+        </div>
+      ) : null}
+
+      {appealFor ? (
+        <div className="order-modal-mask">
+          <div className="order-modal">
+            <h3>订单申诉</h3>
+            <p>你认为对方的投诉不公？说明理由后将提交给平台客服（管理员）处理。通过后可恢复被扣信任分。</p>
+            {appealFor.complaints_against_me?.[0] ? (
+              <div className="order-complaint-box">
+                <strong>对方投诉内容</strong>
+                <p>{appealFor.complaints_against_me[0].content || '（无文字）'}</p>
+              </div>
+            ) : null}
+            <textarea
+              className="order-review-text"
+              rows={4}
+              placeholder="请说明申诉理由，例如：对方未按约定取货/恶意取消/描述不符…"
+              value={appealReason}
+              onChange={(e) => setAppealReason(e.target.value)}
+            />
+            <div className="order-modal-actions">
+              <Button variant="outline" onClick={() => setAppealFor(null)}>取消</Button>
+              <Button disabled={busyId === appealFor.id} onClick={submitAppeal}>提交申诉</Button>
             </div>
           </div>
         </div>

@@ -225,22 +225,38 @@ VITE_AMAP_NAV_KEY=4b55da0f36567be611f6b7add4520610
 ### 订单
 
 - 创建商品订单：`POST /marketplace/orders/listing/{listing_id}`
-- 我的订单：`GET /marketplace/orders`
+- 我的订单：`GET /marketplace/orders`（过滤各自 `buyer_deleted` / `seller_deleted` 软删除）
 - 订单详情：`GET /marketplace/orders/{order_id}`
 - 付款：`POST /marketplace/orders/{order_id}/pay`（自动私信卖家）
 - 发货：`POST /marketplace/orders/{order_id}/ship`（自动私信买家）
 - 确认收货：`POST /marketplace/orders/{order_id}/receive`
-- 取消订单：`POST /marketplace/orders/{order_id}/cancel`
+- 取消订单：`POST /marketplace/orders/{order_id}/cancel`（可填原因；跑腿单进行中也可双方取消）
+- 评价/投诉：`POST /marketplace/orders/{order_id}/review`（`rating`、`content`、`is_complaint`；对象始终是对方）
+  - 跑腿：发布者（buyer）评价/投诉跑手（seller）；跑手评价/投诉发布者
+  - 好评 ≥4 星对方信任分 +8；投诉/差评对方 -20
+- 不投诉：`POST /marketplace/orders/{order_id}/skip-review`
+- 删除记录：`POST /marketplace/orders/{order_id}/delete-record`（仅已完成/已取消，软删除对自己隐藏）
+- 订单申诉：`POST /marketplace/orders/{order_id}/appeal`（被投诉方可申诉，同步客服工单与管理员通知）
 - 状态：`pending_payment` / `pending_ship` / `shipped` / `completed` / `cancelled`
-- 前端：`OrdersCenter.jsx`、`CheckoutPlaceholder.jsx`
+- 前端：`OrdersCenter.jsx`、`CheckoutPlaceholder.jsx`；手机底栏含「我的订单」
 - 后端：`backend/app/marketplace.py`
+- 需要 token
+
+### 客服工单
+
+- 提交工单：`POST /marketplace/support/tickets`（`title`、`content`、`category`、可选 `order_id`）
+- 我的工单：`GET /marketplace/support/tickets`
+- 前端：`ProfileCenter.jsx` 联系客服
+- 后端：`marketplace.py`；管理员处理见管理后台
 - 需要 token
 
 ### 管理后台（仅 is_admin）
 
-- 总览：`GET /marketplace/admin/overview`
+- 总览：`GET /marketplace/admin/overview`（含 `pending_appeals`、`pending_tickets`）
 - 内容列表/改/删：`GET|PUT|DELETE /marketplace/admin/contents...`
 - 举报列表/处理：`GET /marketplace/admin/reports`、`POST /marketplace/admin/reports/{id}/handle`
+- 订单申诉：`GET /marketplace/admin/appeals`、`POST /marketplace/admin/appeals/{id}/handle`（`approved` 恢复信任分 / `rejected` 驳回）
+- 客服工单：`GET /marketplace/admin/support-tickets`、`POST /marketplace/admin/support-tickets/{id}/handle`
 - 用户与处罚：`GET /marketplace/admin/users`、`PUT /marketplace/admin/users/{id}/penalties`
 - 官方通知：`POST /marketplace/admin/notices`
 - 前端：`AdminPanel.jsx`
@@ -333,8 +349,25 @@ VITE_AMAP_NAV_KEY=4b55da0f36567be611f6b7add4520610
 
 ### marketplace_orders 扩展
 
-- 新增：`paid_at`、`shipped_at`、`received_at`、`buyer_note`、`seller_note`、`cancel_reason`
+- 新增：`paid_at`、`shipped_at`、`received_at`、`buyer_note`、`seller_note`、`cancel_reason`、`cancelled_by_id`、`buyer_deleted`、`seller_deleted`、`service_task_id`
 - 默认状态：`pending_payment`
+- 跑腿订单：`buyer_id`=发布者，`seller_id`=跑手
+
+### marketplace_reviews 扩展
+
+- 新增：`is_complaint`；评价对象为 `reviewed_user_id`（始终是交易对方）
+
+### marketplace_order_appeals
+
+- 用途：被投诉方对订单投诉提出申诉，管理员同意/驳回
+- 字段：`order_id`、`review_id`、`appellant_id`、`reason`、`status`、`admin_note`、`handled_by`、`handled_at`
+- 使用 API：订单申诉、管理后台申诉处理
+
+### marketplace_support_tickets
+
+- 用途：用户联系客服工单，对接管理员账户
+- 字段：`user_id`、`order_id`、`category`、`title`、`content`、`status`、`admin_reply`、`handled_by`、`handled_at`
+- 使用 API：个人中心联系客服、管理后台客服工单
 
 ### marketplace_listing_images / marketplace_service_tasks.image_url / marketplace_wanted_posts.image_url / marketplace_community_posts.image_url
 

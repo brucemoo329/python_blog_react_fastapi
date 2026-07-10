@@ -57,6 +57,17 @@ class OfficialNoticeCreate(BaseModel):
     broadcast: bool = False
 
 
+class AppealHandle(BaseModel):
+    status: Literal["approved", "rejected"] = "approved"
+    admin_note: Optional[str] = Field(default=None, max_length=500)
+    restore_trust: bool = True
+
+
+class SupportTicketHandle(BaseModel):
+    status: Literal["replied", "closed", "pending"] = "replied"
+    admin_reply: str = Field(min_length=1, max_length=2000)
+
+
 CONTENT_LABELS = {
     "listing": "二手商品",
     "service": "跑腿任务",
@@ -160,6 +171,10 @@ def admin_overview(
         "tasks_completed": db.query(models.ServiceTask).filter(models.ServiceTask.status == "completed").count(),
         "pending_reports": db.query(models.Report).filter(models.Report.status == "pending").count(),
         "reports_total": db.query(models.Report).count(),
+        "pending_appeals": db.query(models.OrderAppeal).filter(models.OrderAppeal.status == "pending").count(),
+        "appeals_total": db.query(models.OrderAppeal).count(),
+        "pending_tickets": db.query(models.SupportTicket).filter(models.SupportTicket.status == "pending").count(),
+        "tickets_total": db.query(models.SupportTicket).count(),
         "orders": db.query(models.Order).count(),
         "community_posts": db.query(models.CommunityPost).count(),
         "wanted_posts": db.query(models.WantedPost).count(),
@@ -566,3 +581,193 @@ def admin_send_official_notice(
         )
     db.commit()
     return {"message": f"已发送官方通知（{len(recipients)} 人）", "count": len(recipients)}
+
+
+@router.get("/appeals")
+def admin_list_appeals(
+    status: str = Query(default="all"),
+    limit: int = Query(default=80, ge=1, le=200),
+    db: Session = Depends(get_db),
+    admin: models.User = Depends(require_admin),
+):
+    query = db.query(models.OrderAppeal).options(
+        joinedload(models.OrderAppeal.appellant).joinedload(models.User.profile),
+        joinedload(models.OrderAppeal.order).joinedload(models.Order.listing),
+        joinedload(models.OrderAppeal.order).joinedload(models.Order.service_task),
+        joinedload(models.OrderAppeal.review),
+    ).order_by(models.OrderAppeal.created_at.desc())
+    if status != "all":
+        query = query.filter(models.OrderAppeal.status == status)
+    rows = query.limit(limit).all()
+    items = []
+    for row in rows:
+        order = row.order
+        title = "订单"
+        if order:
+            if getattr(order, "listing", None):
+                title = order.listing.title
+            elif getattr(order, "service_task", None):
+                title = order.service_task.title
+            else:
+                title = order.order_no
+        review = row.review
+        items.append({
+            "id": row.id,
+            "order_id": row.order_id,
+            "order_no": order.order_no if order else None,
+            "order_title": title,
+            "reason": row.reason,
+            "status": row.status,
+            "admin_note": row.admin_note,
+            "created_at": row.created_at,
+            "handled_at": row.handled_at,
+            "appellant": user_payload(row.appellant) if row.appellant else None,
+            "review": {
+                "id": review.id,
+                "rating": review.rating,
+                "content": review.content,
+                "is_complaint": bool(getattr(review, "is_complaint", False)),
+                "reviewer_id": review.reviewer_id,
+            } if review else None,
+        })
+    return {"items": items}
+
+
+@router.post("/appeals/{appeal_id}/handle")
+def admin_handle_appeal(
+    appeal_id: int,
+    data: AppealHandle,
+    db: Session = Depends(get_db),
+    admin: models.User = Depends(require_admin),
+):
+    appeal = db.query(models.OrderAppeal).options(
+        joinedload(models.OrderAppeal.order),
+        joinedload(models.OrderAppeal.review),
+    ).filter_by(id=appeal_id).first()
+    if not appeal:
+        raise HTTPException(status_code=404, detail="申诉不存在")
+    if appeal.status != "pending":
+        raise HTTPException(status_code=409, detail="该申诉已处理")
+    appeal.status = data.status
+    appeal.admin_note = data.admin_note
+    appeal.handled_by = admin.id
+    appeal.handled_at = datetime.utcnow()
+
+    order = appeal.order
+    order_no = order.order_no if order else str(appeal.order_id)
+
+    if data.status == "approved" and data.restore_trust:
+        # 撤销投诉扣分：+20 补偿
+        db.add(models.TrustScoreEvent(
+            user_id=appeal.appellant_id,
+            event_type=f"appeal_restore_{appeal.id}"[:40],
+            points_delta=20,
+            reason=data.admin_note or f"申诉通过，恢复信任分：{order_no}"[:160],
+            related_type="order_appeal",
+            related_id=appeal.id,
+            occurred_on=None,
+        ))
+        # 标记投诉评价不再计为有效投诉（保留记录但取消投诉标记）
+        if appeal.review:
+            appeal.review.is_complaint = False
+            if (appeal.review.rating or 0) <= 2:
+                appeal.review.rating = 3
+            appeal.review.content = (appeal.review.content or "") + "【客服认定申诉成立】"
+
+    note = data.admin_note or ("申诉成立，已恢复信任分" if data.status == "approved" else "申诉未通过，投诉仍有效")
+    create_notification(
+        db,
+        recipient_id=appeal.appellant_id,
+        actor_id=admin.id,
+        notification_type="official",
+        title="【客服】订单申诉处理结果",
+        content=f"订单 {order_no}：{note}",
+        target_type="order",
+        target_id=appeal.order_id,
+    )
+    # 同步关闭关联的 appeal 类工单
+    tickets = db.query(models.SupportTicket).filter(
+        models.SupportTicket.user_id == appeal.appellant_id,
+        models.SupportTicket.order_id == appeal.order_id,
+        models.SupportTicket.category == "appeal",
+        models.SupportTicket.status == "pending",
+    ).all()
+    for ticket in tickets:
+        ticket.status = "closed"
+        ticket.admin_reply = note
+        ticket.handled_by = admin.id
+        ticket.handled_at = datetime.utcnow()
+
+    if data.status == "approved" and appeal.review:
+        create_notification(
+            db,
+            recipient_id=appeal.review.reviewer_id,
+            actor_id=admin.id,
+            notification_type="official",
+            title="【客服】你的投诉经申诉后被调整",
+            content=f"订单 {order_no} 的投诉经客服复核，对方申诉成立。{data.admin_note or ''}".strip(),
+            target_type="order",
+            target_id=appeal.order_id,
+        )
+
+    db.commit()
+    return {"message": "申诉已处理", "id": appeal.id, "status": appeal.status}
+
+
+@router.get("/support-tickets")
+def admin_list_support_tickets(
+    status: str = Query(default="all"),
+    limit: int = Query(default=80, ge=1, le=200),
+    db: Session = Depends(get_db),
+    admin: models.User = Depends(require_admin),
+):
+    query = db.query(models.SupportTicket).options(
+        joinedload(models.SupportTicket.user).joinedload(models.User.profile),
+        joinedload(models.SupportTicket.order),
+    ).order_by(models.SupportTicket.created_at.desc())
+    if status != "all":
+        query = query.filter(models.SupportTicket.status == status)
+    rows = query.limit(limit).all()
+    return {
+        "items": [{
+            "id": row.id,
+            "title": row.title,
+            "content": row.content,
+            "category": row.category,
+            "status": row.status,
+            "order_id": row.order_id,
+            "order_no": row.order.order_no if row.order else None,
+            "admin_reply": row.admin_reply,
+            "created_at": row.created_at,
+            "handled_at": row.handled_at,
+            "user": user_payload(row.user) if row.user else None,
+        } for row in rows]
+    }
+
+
+@router.post("/support-tickets/{ticket_id}/handle")
+def admin_handle_support_ticket(
+    ticket_id: int,
+    data: SupportTicketHandle,
+    db: Session = Depends(get_db),
+    admin: models.User = Depends(require_admin),
+):
+    ticket = db.get(models.SupportTicket, ticket_id)
+    if not ticket:
+        raise HTTPException(status_code=404, detail="工单不存在")
+    ticket.status = data.status
+    ticket.admin_reply = data.admin_reply.strip()[:2000]
+    ticket.handled_by = admin.id
+    ticket.handled_at = datetime.utcnow()
+    create_notification(
+        db,
+        recipient_id=ticket.user_id,
+        actor_id=admin.id,
+        notification_type="official",
+        title="【客服回复】" + (ticket.title or "你的工单"),
+        content=ticket.admin_reply,
+        target_type="support_ticket",
+        target_id=ticket.id,
+    )
+    db.commit()
+    return {"message": "工单已回复", "id": ticket.id, "status": ticket.status}

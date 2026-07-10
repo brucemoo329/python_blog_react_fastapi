@@ -3,8 +3,10 @@ import {
   ArrowLeft,
   BadgeCheck,
   Flag,
+  Headset,
   Megaphone,
   Package,
+  Scale,
   Search,
   Shield,
   Trash2,
@@ -18,11 +20,15 @@ import { Textarea } from '@/components/ui/textarea'
 import MagicBento from '@/components/MagicBento'
 import {
   deleteAdminContent,
+  getAdminAppeals,
   getAdminContents,
   getAdminOverview,
   getAdminReports,
+  getAdminSupportTickets,
   getAdminUsers,
+  handleAdminAppeal,
   handleAdminReport,
+  handleAdminSupportTicket,
   sendOfficialNotice,
   updateAdminUserPenalties,
 } from '@/api/marketplace'
@@ -32,6 +38,8 @@ const TABS = [
   { id: 'overview', label: '总览', icon: Shield },
   { id: 'contents', label: '内容管理', icon: Package },
   { id: 'reports', label: '举报中心', icon: Flag },
+  { id: 'appeals', label: '订单申诉', icon: Scale },
+  { id: 'tickets', label: '客服工单', icon: Headset },
   { id: 'users', label: '用户与信誉', icon: Users },
   { id: 'notices', label: '官方通知', icon: Megaphone },
 ]
@@ -44,6 +52,8 @@ const OVERVIEW_CARDS = [
   { key: 'wanted_posts', label: '求购帖子', tab: 'contents', contentType: 'wanted', hint: '点击查看求购内容' },
   { key: 'game_listings', label: '游戏交易', tab: 'contents', contentType: 'game', hint: '点击查看游戏内容' },
   { key: 'pending_reports', label: '待处理举报', tab: 'reports', reportStatus: 'pending', hint: '点击处理举报' },
+  { key: 'pending_appeals', label: '待处理申诉', tab: 'appeals', appealStatus: 'pending', hint: '订单投诉申诉' },
+  { key: 'pending_tickets', label: '待回复工单', tab: 'tickets', ticketStatus: 'pending', hint: '用户联系客服' },
   { key: 'orders', label: '订单总数', tab: 'contents', contentType: 'all', hint: '平台订单总量' },
 ]
 
@@ -55,6 +65,11 @@ export default function AdminPanel({ onBack, onNotice }) {
   const [keyword, setKeyword] = useState('')
   const [reports, setReports] = useState([])
   const [reportStatus, setReportStatus] = useState('all')
+  const [appeals, setAppeals] = useState([])
+  const [appealStatus, setAppealStatus] = useState('pending')
+  const [tickets, setTickets] = useState([])
+  const [ticketStatus, setTicketStatus] = useState('pending')
+  const [ticketReplies, setTicketReplies] = useState({})
   const [users, setUsers] = useState([])
   const [userKeyword, setUserKeyword] = useState('')
   const [noticeForm, setNoticeForm] = useState({ title: '', content: '', broadcast: false })
@@ -79,6 +94,16 @@ export default function AdminPanel({ onBack, onNotice }) {
     setReports(data.items || [])
   }, [reportStatus])
 
+  const loadAppeals = useCallback(async () => {
+    const data = await getAdminAppeals({ status: appealStatus })
+    setAppeals(data.items || [])
+  }, [appealStatus])
+
+  const loadTickets = useCallback(async () => {
+    const data = await getAdminSupportTickets({ status: ticketStatus })
+    setTickets(data.items || [])
+  }, [ticketStatus])
+
   const loadUsers = useCallback(async () => {
     const data = await getAdminUsers({ keyword: userKeyword })
     setUsers(data.items || [])
@@ -92,6 +117,8 @@ export default function AdminPanel({ onBack, onNotice }) {
         if (tab === 'overview') await loadOverview()
         if (tab === 'contents') await loadContents()
         if (tab === 'reports') await loadReports()
+        if (tab === 'appeals') await loadAppeals()
+        if (tab === 'tickets') await loadTickets()
         if (tab === 'users') await loadUsers()
       } catch (error) {
         if (!cancelled) onNotice?.(error.response?.data?.detail || '管理后台加载失败')
@@ -100,11 +127,13 @@ export default function AdminPanel({ onBack, onNotice }) {
       }
     })()
     return () => { cancelled = true }
-  }, [tab, loadOverview, loadContents, loadReports, loadUsers, onNotice])
+  }, [tab, loadOverview, loadContents, loadReports, loadAppeals, loadTickets, loadUsers, onNotice])
 
   const openOverviewCard = (card) => {
     if (card.contentType) setContentType(card.contentType)
     if (card.reportStatus) setReportStatus(card.reportStatus)
+    if (card.appealStatus) setAppealStatus(card.appealStatus)
+    if (card.ticketStatus) setTicketStatus(card.ticketStatus)
     if (card.tab === 'users') setUserKeyword('')
     setTab(card.tab)
   }
@@ -133,6 +162,61 @@ export default function AdminPanel({ onBack, onNotice }) {
       await loadReports()
     } catch (error) {
       onNotice?.(error.response?.data?.detail || '处理失败')
+    }
+  }
+
+  const resolveAppeal = async (appeal, status) => {
+    const note = window.prompt(
+      status === 'approved' ? '同意申诉的备注（可选）' : '驳回申诉的原因（可选）',
+      status === 'approved' ? '经核实投诉不公，已恢复信任分' : '经核实投诉成立，维持原处罚',
+    )
+    if (note === null) return
+    try {
+      const response = await handleAdminAppeal(appeal.id, {
+        status,
+        admin_note: note || undefined,
+        restore_trust: status === 'approved',
+      })
+      onNotice?.(response.message || '申诉已处理')
+      await loadAppeals()
+      await loadOverview()
+    } catch (error) {
+      onNotice?.(error.response?.data?.detail || '处理失败')
+    }
+  }
+
+  const replyTicket = async (ticket) => {
+    const reply = (ticketReplies[ticket.id] || '').trim()
+    if (!reply) {
+      onNotice?.('请填写回复内容')
+      return
+    }
+    try {
+      const response = await handleAdminSupportTicket(ticket.id, {
+        status: 'replied',
+        admin_reply: reply,
+      })
+      onNotice?.(response.message || '已回复用户')
+      setTicketReplies((current) => ({ ...current, [ticket.id]: '' }))
+      await loadTickets()
+      await loadOverview()
+    } catch (error) {
+      onNotice?.(error.response?.data?.detail || '回复失败')
+    }
+  }
+
+  const closeTicket = async (ticket) => {
+    const reply = (ticketReplies[ticket.id] || ticket.admin_reply || '已结案').trim()
+    try {
+      const response = await handleAdminSupportTicket(ticket.id, {
+        status: 'closed',
+        admin_reply: reply,
+      })
+      onNotice?.(response.message || '工单已关闭')
+      await loadTickets()
+      await loadOverview()
+    } catch (error) {
+      onNotice?.(error.response?.data?.detail || '关闭失败')
     }
   }
 
@@ -335,6 +419,94 @@ export default function AdminPanel({ onBack, onNotice }) {
               </article>
             ))}
             {!reports.length ? <div className="chat-empty">暂无举报</div> : null}
+          </div>
+        ) : null}
+
+        {!loading && tab === 'appeals' ? (
+          <div className="admin-section admin-reports">
+            <div className="admin-toolbar">
+              <select value={appealStatus} onChange={(event) => setAppealStatus(event.target.value)}>
+                <option value="all">全部状态</option>
+                <option value="pending">待处理</option>
+                <option value="approved">已通过</option>
+                <option value="rejected">已驳回</option>
+              </select>
+              <Button onClick={loadAppeals}>刷新</Button>
+            </div>
+            {appeals.map((appeal) => (
+              <article key={appeal.id} className={cn(appeal.status === 'pending' && 'is-pending')}>
+                <header>
+                  <Badge>{appeal.status === 'pending' ? '待处理' : appeal.status === 'approved' ? '已通过' : '已驳回'}</Badge>
+                  <strong>{appeal.order_title || appeal.order_no}</strong>
+                  <small>{appeal.created_at ? new Date(appeal.created_at).toLocaleString() : ''}</small>
+                </header>
+                <p>
+                  申诉人 <strong>{appeal.appellant?.nickname || appeal.appellant?.username}</strong>
+                  {' · 订单 '}
+                  {appeal.order_no || `#${appeal.order_id}`}
+                </p>
+                <p>申诉理由：{appeal.reason}</p>
+                {appeal.review ? (
+                  <small>
+                    原投诉：{appeal.review.is_complaint ? '投诉' : '评价'} {appeal.review.rating} 星 · {appeal.review.content}
+                  </small>
+                ) : null}
+                {appeal.status === 'pending' ? (
+                  <div className="admin-row-actions">
+                    <Button size="sm" onClick={() => resolveAppeal(appeal, 'approved')}>同意申诉（恢复信任分）</Button>
+                    <Button size="sm" variant="destructive" onClick={() => resolveAppeal(appeal, 'rejected')}>驳回申诉</Button>
+                  </div>
+                ) : (
+                  <small>处理备注：{appeal.admin_note || '—'}</small>
+                )}
+              </article>
+            ))}
+            {!appeals.length ? <div className="chat-empty">暂无申诉</div> : null}
+          </div>
+        ) : null}
+
+        {!loading && tab === 'tickets' ? (
+          <div className="admin-section admin-reports">
+            <div className="admin-toolbar">
+              <select value={ticketStatus} onChange={(event) => setTicketStatus(event.target.value)}>
+                <option value="all">全部状态</option>
+                <option value="pending">待处理</option>
+                <option value="replied">已回复</option>
+                <option value="closed">已关闭</option>
+              </select>
+              <Button onClick={loadTickets}>刷新</Button>
+            </div>
+            {tickets.map((ticket) => (
+              <article key={ticket.id} className={cn(ticket.status === 'pending' && 'is-pending')}>
+                <header>
+                  <Badge>{ticket.status === 'pending' ? '待处理' : ticket.status === 'replied' ? '已回复' : '已关闭'}</Badge>
+                  <strong>{ticket.title}</strong>
+                  <small>{ticket.created_at ? new Date(ticket.created_at).toLocaleString() : ''}</small>
+                </header>
+                <p>
+                  用户 <strong>{ticket.user?.nickname || ticket.user?.username}</strong>
+                  {ticket.order_no ? ` · 订单 ${ticket.order_no}` : ''}
+                  {ticket.category ? ` · ${ticket.category}` : ''}
+                </p>
+                <p>{ticket.content}</p>
+                {ticket.admin_reply ? <small>已回复：{ticket.admin_reply}</small> : null}
+                {ticket.status !== 'closed' ? (
+                  <div className="admin-ticket-reply">
+                    <Textarea
+                      rows={2}
+                      placeholder="填写客服回复…"
+                      value={ticketReplies[ticket.id] || ''}
+                      onChange={(event) => setTicketReplies((current) => ({ ...current, [ticket.id]: event.target.value }))}
+                    />
+                    <div className="admin-row-actions">
+                      <Button size="sm" onClick={() => replyTicket(ticket)}>回复用户</Button>
+                      <Button size="sm" variant="outline" onClick={() => closeTicket(ticket)}>关闭工单</Button>
+                    </div>
+                  </div>
+                ) : null}
+              </article>
+            ))}
+            {!tickets.length ? <div className="chat-empty">暂无工单</div> : null}
           </div>
         ) : null}
 

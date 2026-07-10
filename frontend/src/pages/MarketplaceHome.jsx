@@ -96,10 +96,11 @@ const NAV_DEFS = [
   { id: 'profile', icon: UserRound },
 ]
 
+// 手机底栏：首页 / 跑腿 / 订单 / 消息 / 我的（订单入口单独露出，取消后易找回）
 const MOBILE_NAV_DEFS = [
   NAV_DEFS[0],
-  NAV_DEFS[1],
   NAV_DEFS[2],
+  NAV_DEFS[6],
   { id: 'messages', icon: MessageCircle },
   NAV_DEFS[7],
 ]

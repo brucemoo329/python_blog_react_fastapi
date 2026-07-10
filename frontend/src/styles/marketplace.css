@@ -4062,7 +4062,32 @@
 .order-badges { display: flex; flex-wrap: wrap; gap: 6px; margin-bottom: 4px; }
 .order-card.is-service { border-color: rgba(167, 139, 250, 0.35); }
 .order-cancel-reason { display: block; color: #fca5a5; font-size: 12px; margin-top: 4px; }
+.order-peer-line { display: block; margin-top: 2px; color: rgba(196, 181, 253, 0.75); }
+.order-complaint-hint { display: block; color: #fbbf24; font-size: 12px; margin-top: 4px; }
+.order-appeal-status { display: block; color: #93c5fd; font-size: 12px; margin-top: 4px; }
+.order-review-target {
+  font-weight: 600;
+  color: #fde68a !important;
+  background: rgba(251, 191, 36, 0.12);
+  border: 1px solid rgba(251, 191, 36, 0.28);
+  border-radius: 10px;
+  padding: 8px 10px;
+}
+.order-star-hint { display: block; margin: -4px 0 10px; color: rgba(196, 181, 253, 0.75); font-size: 12px; }
+.order-complaint-box {
+  margin-bottom: 10px;
+  padding: 10px;
+  border-radius: 10px;
+  background: rgba(248, 113, 113, 0.1);
+  border: 1px solid rgba(248, 113, 113, 0.28);
+}
+.order-complaint-box strong { display: block; margin-bottom: 4px; font-size: 12px; color: #fca5a5; }
+.order-complaint-box p { margin: 0; font-size: 13px; color: rgba(255,255,255,0.85); }
 .order-reviewed { font-size: 12px; color: rgba(196, 181, 253, 0.8); align-self: center; }
+.profile-support-hint { margin: 0 0 8px; font-size: 13px; color: rgba(196, 181, 253, 0.8); }
+.profile-support-history { display: grid; gap: 8px; margin-top: 8px; }
+.profile-support-reply { display: block; margin-top: 4px; color: #86efac; }
+.admin-ticket-reply { display: grid; gap: 8px; margin-top: 10px; width: 100%; }
 .order-modal-mask {
   position: fixed; inset: 0; z-index: 80;
   display: grid; place-items: center;

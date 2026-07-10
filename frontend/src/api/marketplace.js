@@ -207,6 +207,22 @@ export function skipOrderReview(orderId) {
   return request.post(`/marketplace/orders/${orderId}/skip-review`)
 }
 
+export function deleteOrderRecord(orderId) {
+  return request.post(`/marketplace/orders/${orderId}/delete-record`)
+}
+
+export function appealOrder(orderId, data) {
+  return request.post(`/marketplace/orders/${orderId}/appeal`, data)
+}
+
+export function createSupportTicket(data) {
+  return request.post('/marketplace/support/tickets', data)
+}
+
+export function getMySupportTickets() {
+  return request.get('/marketplace/support/tickets')
+}
+
 export function clearConversationMessages(conversationId) {
   return request.delete(`/marketplace/conversations/${conversationId}/messages`)
 }
@@ -261,4 +277,20 @@ export function updateAdminUserPenalties(userId, data) {
 
 export function sendOfficialNotice(data) {
   return request.post('/marketplace/admin/notices', data)
+}
+
+export function getAdminAppeals(params) {
+  return request.get('/marketplace/admin/appeals', { params })
+}
+
+export function handleAdminAppeal(appealId, data) {
+  return request.post(`/marketplace/admin/appeals/${appealId}/handle`, data)
+}
+
+export function getAdminSupportTickets(params) {
+  return request.get('/marketplace/admin/support-tickets', { params })
+}
+
+export function handleAdminSupportTicket(ticketId, data) {
+  return request.post(`/marketplace/admin/support-tickets/${ticketId}/handle`, data)
 }
