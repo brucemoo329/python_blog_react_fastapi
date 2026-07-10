@@ -167,21 +167,41 @@ docker logs -f campus_mysql
 部署完成后访问：
 
 ```text
-http://服务器公网IP
+https://服务器公网IP
 ```
+
+> **定位权限说明**：Chrome / 手机浏览器只在 **HTTPS** 或 **localhost** 下才会弹出位置权限。  
+> 使用 `http://公网IP` 时，浏览器会直接拦截定位，不会出现权限弹窗（本地 `localhost` 正常是预期行为）。
+
+### 启用 HTTPS（自签证书，适合公网 IP）
+
+```bash
+cd /opt/python_blog_react_fastapi
+bash scripts/gen-ssl-cert.sh 你的公网IP
+# 例如: bash scripts/gen-ssl-cert.sh 47.116.9.207
+podman compose up -d --build frontend
+# 或 docker compose up -d --build frontend
+```
+
+首次用手机/Chrome 打开 `https://IP` 时会出现「证书不受信任」提示：点高级 → 继续访问。  
+接受后即可弹出定位权限。若已有域名，建议用宝塔 / Let's Encrypt 换成正式证书。
 
 如果 80 端口已被宝塔或系统 Nginx 占用，将 `docker-compose.yml` 中前端端口从：
 
 ```yaml
 - "80:80"
+- "443:443"
 ```
 
 改为：
 
 ```yaml
 - "8080:80"
+- "8443:443"
 ```
 
-然后访问 `http://服务器公网IP:8080`。
+然后访问 `https://服务器公网IP:8443`。
 
-阿里云安全组至少需要按实际用途放行 `22`、`80`，启用 HTTPS 后再放行 `443`。
+阿里云安全组至少需要放行 `22`、`80`、`443`（定位功能依赖 443）。
+
+高德控制台请把服务器 **IP / 域名** 加入 Key 的安全域名白名单，否则线上地图可能加载失败。

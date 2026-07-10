@@ -14,7 +14,8 @@ import { Button } from '@/components/ui/button'
 import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card'
 import { Tabs, TabsList, TabsTrigger } from '@/components/ui/tabs'
 import { cn } from '@/lib/utils'
-import { loadAMap } from '@/lib/amap'
+import { createAMapGeolocation, describeAMapLocateResult, loadAMap } from '@/lib/amap'
+import { getGeolocationBlockReason, geolocationErrorMessage, isSecureGeolocationContext } from '@/lib/geolocation'
 
 const TASK_META = {
   express: { label: '代取快递', icon: PackageCheck },
@@ -24,17 +25,6 @@ const TASK_META = {
 }
 
 const SCHOOL_CENTER = [120.809261, 32.041042]
-
-function getLocationErrorMessage(result) {
-  const message = result?.message || result?.info || ''
-  if (message.includes('denied') || message.includes('PERMISSION_DENIED')) {
-    return '定位权限被拒绝，请在浏览器地址栏允许位置权限后重试'
-  }
-  if (message.includes('timeout') || message.includes('TIMEOUT')) {
-    return '定位超时，请检查网络或到室外后重试'
-  }
-  return message ? `定位失败：${message}` : '暂时无法获取精确位置，已显示南通理工学院'
-}
 
 export default function CampusRadar({ tasks, onAcceptTask, onOpenTask, onLocate }) {
   const [filter, setFilter] = useState('all')
@@ -62,28 +52,37 @@ export default function CampusRadar({ tasks, onAcceptTask, onOpenTask, onLocate 
     }
 
     setIsLocating(true)
-    setMapStatus('正在获取实时位置...')
+    if (!isSecureGeolocationContext()) {
+      setMapStatus('当前为 HTTP，浏览器不会弹位置权限；正在尝试粗定位（城市级）…')
+    } else {
+      setMapStatus('正在获取实时位置，请允许浏览器位置权限…')
+    }
+
     geolocation.getCurrentPosition((status, result) => {
       setIsLocating(false)
-      if (status === 'complete' && result?.position) {
-        const position = [result.position.lng, result.position.lat]
-        map.setZoomAndCenter(17, position)
+      const parsed = describeAMapLocateResult(status, result)
+      if (parsed.ok) {
+        const position = parsed.position
+        map.setZoomAndCenter(parsed.approximate ? 14 : 17, position)
         if (userMarkerRef.current) map.remove(userMarkerRef.current)
         userMarkerRef.current = new AMap.Marker({
           position,
           anchor: 'center',
-          title: '我的实时位置',
+          title: '我的位置',
           content: '<div class="amap-user-location"><span></span></div>',
           zIndex: 200,
         })
         map.add(userMarkerRef.current)
-        const address = result.formattedAddress || result.addressComponent?.district || '当前位置'
-        setMapStatus(`已定位：${address}`)
-        onLocate?.(address)
+        const note = parsed.approximate
+          ? `粗定位：${parsed.address}（精确 GPS 请用 HTTPS 打开本站）`
+          : `已定位：${parsed.address}`
+        setMapStatus(note)
+        onLocate?.(parsed.address)
         return
       }
 
-      setMapStatus(getLocationErrorMessage(result))
+      const block = getGeolocationBlockReason()
+      setMapStatus(block === 'insecure' ? geolocationErrorMessage('insecure') : parsed.message)
       map.setZoomAndCenter(16, SCHOOL_CENTER)
     })
   }, [onLocate])
@@ -113,22 +112,17 @@ export default function CampusRadar({ tasks, onAcceptTask, onOpenTask, onLocate 
           },
         }))
         mapRef.current = map
-        geolocationRef.current = new AMap.Geolocation({
-          enableHighAccuracy: true,
-          timeout: 12000,
-          convert: true,
-          showButton: false,
-          showMarker: false,
-          showCircle: true,
-          panToLocation: true,
-          zoomToAccuracy: true,
-        })
+        geolocationRef.current = createAMapGeolocation(AMap)
         map.addControl(geolocationRef.current)
-        setMapStatus('南通理工学院 · 点击“定位到我”获取实时位置')
+        if (!isSecureGeolocationContext()) {
+          setMapStatus('南通理工学院 · 当前 HTTP 无法弹权限，请改用 HTTPS 获取精确位置')
+        } else {
+          setMapStatus('南通理工学院 · 点击“定位到我”获取实时位置')
+        }
       })
       .catch((error) => {
         console.error('AMap load error:', error)
-        setMapStatus('高德地图加载失败，请检查 Key、域名白名单和网络')
+        setMapStatus('高德地图加载失败，请检查 Key、域名白名单（含服务器 IP/域名）和网络')
       })
 
     return () => {

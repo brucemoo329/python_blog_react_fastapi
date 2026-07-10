@@ -65,6 +65,10 @@ services:
         condition: service_healthy
     ports:
       - "80:80"
+      # HTTPS required for browser location permission on public hosts (not localhost)
+      - "443:443"
+    volumes:
+      - ./frontend/certs:/etc/nginx/certs:ro
 
 volumes:
   mysql_data:

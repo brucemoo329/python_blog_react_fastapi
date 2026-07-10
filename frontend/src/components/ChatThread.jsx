@@ -24,6 +24,11 @@ import {
   sendConversationMessage,
   toggleMessageReaction,
 } from '@/api/marketplace'
+import {
+  getBrowserPosition,
+  geolocationErrorMessage,
+  getGeolocationBlockReason,
+} from '@/lib/geolocation'
 
 const EMOJIS = ['👍', '❤️', '😂', '😮', '😢', '👏']
 
@@ -163,21 +168,23 @@ export default function ChatThread({
     }
   }
 
-  const sendLocation = () => {
-    if (!navigator.geolocation) {
-      onNotice?.('当前浏览器不支持定位')
-      return
-    }
-    onNotice?.('正在获取位置...')
-    navigator.geolocation.getCurrentPosition(
-      ({ coords }) => sendPayload({
+  const sendLocation = async () => {
+    try {
+      const block = getGeolocationBlockReason()
+      if (block) {
+        onNotice?.(geolocationErrorMessage(block))
+        return
+      }
+      onNotice?.('正在获取位置，请允许浏览器位置权限…')
+      const { coords } = await getBrowserPosition({ enableHighAccuracy: true, timeout: 12000 })
+      await sendPayload({
         content: '我分享了当前位置',
         message_type: 'location',
         metadata: { latitude: coords.latitude, longitude: coords.longitude, label: '当前位置' },
-      }),
-      () => onNotice?.('定位失败，请检查浏览器位置权限'),
-      { enableHighAccuracy: true, timeout: 10000 },
-    )
+      })
+    } catch (error) {
+      onNotice?.(error?.message || geolocationErrorMessage(error?.reason || 'failed'))
+    }
   }
 
   const sendTransfer = async () => {

@@ -22,6 +22,10 @@ FROM nginx:1.27-alpine
 COPY nginx.conf /etc/nginx/conf.d/default.conf
 COPY --from=builder /app/dist /usr/share/nginx/html
 
-EXPOSE 80
+# Certs are mounted at runtime from host ./frontend/certs (see docker-compose.yml).
+# Generate with: bash scripts/gen-ssl-cert.sh <public-ip>
+RUN mkdir -p /etc/nginx/certs
+
+EXPOSE 80 443
 
 CMD ["nginx", "-g", "daemon off;"]
