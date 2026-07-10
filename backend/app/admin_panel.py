@@ -140,14 +140,33 @@ def admin_overview(
     db: Session = Depends(get_db),
     admin: models.User = Depends(require_admin),
 ):
+    """统计口径与「内容管理」列表一致（不按 open/available 过滤），避免卡片数字为 0 点进去却有数据。"""
+    listing_total = db.query(models.Listing).filter(models.Listing.trade_type != "digital").count()
+    game_total = db.query(models.Listing).filter(models.Listing.trade_type == "digital").count()
+    service_total = db.query(models.ServiceTask).count()
+    service_open = db.query(models.ServiceTask).filter(models.ServiceTask.status == "open").count()
+    listing_available = db.query(models.Listing).filter(
+        models.Listing.trade_type != "digital",
+        models.Listing.status == "available",
+    ).count()
     return {
         "users": db.query(models.User).count(),
-        "active_listings": db.query(models.Listing).filter(models.Listing.status == "available").count(),
-        "open_tasks": db.query(models.ServiceTask).filter(models.ServiceTask.status == "open").count(),
+        # 卡片主数字：与内容管理点进去看到的总量一致
+        "active_listings": listing_total,
+        "listings_available": listing_available,
+        "open_tasks": service_total,
+        "tasks_open": service_open,
+        "tasks_accepted": db.query(models.ServiceTask).filter(models.ServiceTask.status == "accepted").count(),
+        "tasks_completed": db.query(models.ServiceTask).filter(models.ServiceTask.status == "completed").count(),
         "pending_reports": db.query(models.Report).filter(models.Report.status == "pending").count(),
+        "reports_total": db.query(models.Report).count(),
         "orders": db.query(models.Order).count(),
         "community_posts": db.query(models.CommunityPost).count(),
         "wanted_posts": db.query(models.WantedPost).count(),
+        "game_listings": game_total,
+        "contents_total": listing_total + game_total + service_total
+            + db.query(models.WantedPost).count()
+            + db.query(models.CommunityPost).count(),
     }
 
 

@@ -38,11 +38,13 @@ const TABS = [
 
 const OVERVIEW_CARDS = [
   { key: 'users', label: '注册用户', tab: 'users', hint: '点击查看全部用户' },
-  { key: 'active_listings', label: '在售商品', tab: 'contents', contentType: 'listing', hint: '点击查看商品内容' },
-  { key: 'pending_reports', label: '待处理举报', tab: 'reports', reportStatus: 'pending', hint: '点击处理举报' },
-  { key: 'orders', label: '订单总数', tab: 'contents', contentType: 'all', hint: '订单由买卖双方在「我的订单」处理' },
-  { key: 'open_tasks', label: '跑腿任务', tab: 'contents', contentType: 'service', hint: '点击查看跑腿内容' },
+  { key: 'active_listings', label: '二手商品', tab: 'contents', contentType: 'listing', hint: '含全部状态商品，点击查看' },
+  { key: 'open_tasks', label: '跑腿任务', tab: 'contents', contentType: 'service', hint: '含待接/配送中/已完成，点击查看' },
   { key: 'community_posts', label: '社区帖子', tab: 'contents', contentType: 'community', hint: '点击查看社区内容' },
+  { key: 'wanted_posts', label: '求购帖子', tab: 'contents', contentType: 'wanted', hint: '点击查看求购内容' },
+  { key: 'game_listings', label: '游戏交易', tab: 'contents', contentType: 'game', hint: '点击查看游戏内容' },
+  { key: 'pending_reports', label: '待处理举报', tab: 'reports', reportStatus: 'pending', hint: '点击处理举报' },
+  { key: 'orders', label: '订单总数', tab: 'contents', contentType: 'all', hint: '平台订单总量' },
 ]
 
 export default function AdminPanel({ onBack, onNotice }) {
@@ -236,13 +238,25 @@ export default function AdminPanel({ onBack, onNotice }) {
             spotlightRadius={300}
             particleCount={12}
             glowColor="132, 0, 255"
-            cards={OVERVIEW_CARDS.map((card) => ({
-              ...card,
-              color: '#120F17',
-              label: card.label,
-              title: String(overview[card.key] ?? 0),
-              description: card.hint,
-            }))}
+            cards={OVERVIEW_CARDS.map((card) => {
+              const value = overview[card.key]
+              const num = Number(value)
+              const title = Number.isFinite(num) ? String(num) : String(value ?? 0)
+              let description = card.hint
+              if (card.key === 'open_tasks' && overview.tasks_open != null) {
+                description = `待接 ${overview.tasks_open} · 配送中 ${overview.tasks_accepted ?? 0} · 完成 ${overview.tasks_completed ?? 0}`
+              }
+              if (card.key === 'active_listings' && overview.listings_available != null) {
+                description = `在售 ${overview.listings_available} · 点击查看全部商品`
+              }
+              return {
+                ...card,
+                color: '#120F17',
+                label: card.label,
+                title,
+                description,
+              }
+            })}
             onCardClick={(card) => openOverviewCard(card)}
           />
         ) : null}
