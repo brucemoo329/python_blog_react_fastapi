@@ -118,6 +118,27 @@ const SCHOOL_FALLBACKS = {
   南通理工学院海安校区: [120.4675, 32.5458],
 }
 
+/** Campus landmark offsets around 南通理工主校区 (lng, lat). */
+const CAMPUS_LANDMARKS = [
+  { keys: ['北门'], point: [120.8098, 32.0438] },
+  { keys: ['南门'], point: [120.8091, 32.0386] },
+  { keys: ['东门'], point: [120.8122, 32.0412] },
+  { keys: ['西门'], point: [120.8064, 32.0410] },
+  { keys: ['图书馆'], point: [120.8096, 32.0418] },
+  { keys: ['食堂', '一食堂'], point: [120.8084, 32.0415] },
+  { keys: ['快递', '菜鸟', '驿站'], point: [120.8078, 32.0406] },
+  { keys: ['男1', '男生1', '1栋'], point: [120.8076, 32.0398] },
+  { keys: ['男2', '男生2', '2栋'], point: [120.8079, 32.0399] },
+  { keys: ['男3', '男生3', '3栋'], point: [120.8082, 32.0400] },
+  { keys: ['男4', '男生4', '4栋', '本部男4'], point: [120.8085, 32.0401] },
+  { keys: ['男5', '男生5', '5栋'], point: [120.8088, 32.0402] },
+  { keys: ['女1', '女生1'], point: [120.8102, 32.0397] },
+  { keys: ['女2', '女生2'], point: [120.8105, 32.0398] },
+  { keys: ['教学楼', '教一'], point: [120.8099, 32.0414] },
+  { keys: ['操场', '田径场'], point: [120.8108, 32.0424] },
+  { keys: ['山姆'], point: [120.875, 32.02] },
+]
+
 export function schoolFallbackLngLat(schoolName) {
   if (!schoolName) return SCHOOL_FALLBACKS['南通理工学院']
   if (SCHOOL_FALLBACKS[schoolName]) return SCHOOL_FALLBACKS[schoolName]
@@ -125,12 +146,36 @@ export function schoolFallbackLngLat(schoolName) {
   return hit ? SCHOOL_FALLBACKS[hit] : SCHOOL_FALLBACKS['南通理工学院']
 }
 
+export function campusLandmarkLngLat(address) {
+  if (!address) return null
+  const text = String(address)
+  for (const item of CAMPUS_LANDMARKS) {
+    if (item.keys.some((k) => text.includes(k))) return item.point
+  }
+  // 南通理工 + 门牌
+  if (/南通理工|理工学院|校区/.test(text)) {
+    return schoolFallbackLngLat(text)
+  }
+  return null
+}
+
 export function geocodeAddress(address, city = '南通', timeoutMs = 6000) {
+  if (!address?.trim()) {
+    return Promise.reject(new Error('地址为空'))
+  }
+  // Prefer campus landmark map for 北门/男4 等
+  const landmark = campusLandmarkLngLat(address)
+  if (landmark && /理工|学院|校区|门|栋|食堂|快递|山姆|操场|图书馆|男|女/.test(address)) {
+    return Promise.resolve({
+      lng: landmark[0],
+      lat: landmark[1],
+      formatted: address,
+      approximate: true,
+      fallback: true,
+    })
+  }
+
   const work = loadAMap().then((AMap) => new Promise((resolve, reject) => {
-    if (!address?.trim()) {
-      reject(new Error('地址为空'))
-      return
-    }
     let settled = false
     const done = (fn, value) => {
       if (settled) return
@@ -180,8 +225,12 @@ export function geocodeAddress(address, city = '南通', timeoutMs = 6000) {
   }))
 
   return withTimeout(work, timeoutMs, '地址解析').catch((error) => {
+    const landmark = campusLandmarkLngLat(address)
+    if (landmark) {
+      return { lng: landmark[0], lat: landmark[1], formatted: address, approximate: true, fallback: true }
+    }
     const fb = schoolFallbackLngLat(address)
-    if (fb && /学院|大学|学校|校区|山姆|快递|食堂/.test(address || '')) {
+    if (fb && /学院|大学|学校|校区|山姆|快递|食堂|门|栋/.test(address || '')) {
       return { lng: fb[0], lat: fb[1], formatted: address, approximate: true, fallback: true }
     }
     throw error
@@ -211,57 +260,80 @@ export function resolveSchoolLocation(schoolName, timeoutMs = 5000) {
  * Plan route with AMap Walking / Riding / Driving.
  * @returns {{ mode, distance, duration, path, steps }}
  */
-export function planRoute(origin, destination, preferredMode = 'auto') {
+/**
+ * Plan route. Optional map draws the route via AMap planner.
+ * @param {[lng,lat]} origin
+ * @param {[lng,lat]} destination
+ * @param {'walk'|'ride'|'drive'|'auto'} preferredMode
+ * @param {{ map?: any }} options
+ */
+export function planRoute(origin, destination, preferredMode = 'auto', options = {}) {
   return loadAMap().then((AMap) => {
+    if (!origin || !destination) {
+      return Promise.reject(new Error('缺少起点或终点'))
+    }
     const meters = distanceMeters(origin, destination)
     const mode = preferredMode === 'auto' ? suggestTravelMode(meters) : preferredMode
+    const map = options.map || null
     const policyMap = {
-      walk: () => new AMap.Walking({ map: null, hideMarkers: true }),
-      ride: () => new AMap.Riding({ map: null, hideMarkers: true }),
-      drive: () => new AMap.Driving({ policy: AMap.DrivingPolicy?.LEAST_TIME, map: null, hideMarkers: true }),
+      walk: () => new AMap.Walking({ map, hideMarkers: true, autoFitView: Boolean(map) }),
+      ride: () => new AMap.Riding({ map, hideMarkers: true, autoFitView: Boolean(map) }),
+      drive: () => new AMap.Driving({
+        policy: AMap.DrivingPolicy?.LEAST_TIME,
+        map,
+        hideMarkers: true,
+        autoFitView: Boolean(map),
+      }),
     }
     const planner = (policyMap[mode] || policyMap.ride)()
 
-    return new Promise((resolve, reject) => {
-      planner.search(origin, destination, (status, result) => {
-        if (status !== 'complete' || !result) {
-          // Fallback synthetic ETA from straight-line distance
-          const dist = meters || 800
-          const speed = mode === 'walk' ? 1.3 : mode === 'drive' ? 8 : 4
-          resolve({
-            mode,
-            distance: dist,
-            duration: Math.max(60, Math.round(dist / speed)),
-            path: [origin, destination],
-            approximate: true,
-            raw: result,
-          })
-          return
-        }
-        const route = result.routes?.[0] || result.route
-        if (!route) {
-          reject(new Error('未找到可行路线'))
-          return
-        }
-        let path = []
-        if (route.steps?.length) {
-          route.steps.forEach((step) => {
-            if (step.path?.length) path = path.concat(step.path.map((p) => [p.lng, p.lat]))
-            else if (typeof step.path === 'string') {
-              // encoded sometimes
-            }
-          })
-        }
-        if (!path.length && origin && destination) path = [origin, destination]
+    return new Promise((resolve) => {
+      const fallback = () => {
+        const dist = meters || 800
+        const speed = mode === 'walk' ? 1.3 : mode === 'drive' ? 8 : 4
         resolve({
           mode,
-          distance: Number(route.distance) || meters || 0,
-          duration: Number(route.time) || Number(route.duration) || 0,
-          path,
-          approximate: false,
-          raw: result,
+          distance: dist,
+          duration: Math.max(60, Math.round(dist / speed)),
+          path: [origin, destination],
+          approximate: true,
+          planner,
         })
-      })
+      }
+      try {
+        planner.search(origin, destination, (status, result) => {
+          if (status !== 'complete' || !result) {
+            fallback()
+            return
+          }
+          const route = result.routes?.[0] || result.route
+          if (!route) {
+            fallback()
+            return
+          }
+          let path = []
+          if (route.steps?.length) {
+            route.steps.forEach((step) => {
+              if (step.path?.length) {
+                path = path.concat(step.path.map((p) => (Array.isArray(p) ? p : [p.lng, p.lat])))
+              }
+            })
+          }
+          if (!path.length) path = [origin, destination]
+          resolve({
+            mode,
+            distance: Number(route.distance) || meters || 0,
+            // AMap Walking/Riding often use `time` (seconds)
+            duration: Number(route.time) || Number(route.duration) || Math.max(60, Math.round((meters || 800) / 4)),
+            path,
+            approximate: false,
+            planner,
+            raw: result,
+          })
+        })
+      } catch {
+        fallback()
+      }
     })
   })
 }

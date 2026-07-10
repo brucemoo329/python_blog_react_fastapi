@@ -60,6 +60,7 @@ import PublishDialog from '@/components/PublishDialog'
 import QuickChat from '@/components/QuickChat'
 import LanguageSwitcher from '@/components/LanguageSwitcher'
 import ErrandTrackingMap from '@/components/ErrandTrackingMap'
+import ErrandNavPage from '@/components/ErrandNavPage'
 import SpotlightCard from '@/components/SpotlightCard'
 import StarBorder from '@/components/StarBorder'
 import {
@@ -238,6 +239,7 @@ export default function MarketplaceHome({ user, onLogout, onUserUpdate }) {
   const [quickChatRequest, setQuickChatRequest] = useState(null)
   const [initialConversationId, setInitialConversationId] = useState(null)
   const [selectedOrder, setSelectedOrder] = useState(null)
+  const [activeErrand, setActiveErrand] = useState(null)
   const [feedLightbox, setFeedLightbox] = useState({ open: false, images: [], index: 0 })
   const [feedReactBurst, setFeedReactBurst] = useState('')
 
@@ -479,23 +481,37 @@ export default function MarketplaceHome({ user, onLogout, onUserUpdate }) {
     })
   }
 
-  const handleAcceptTask = async (task) => {
+  const openErrandNav = (taskId, tracking = null) => {
+    setCheckoutItem(null)
+    setSelectedDetail(null)
+    setPublicUserId(null)
+    setSelectedOrder(null)
+    setActiveErrand({ taskId, tracking })
+  }
+
+  const handleAcceptTask = async (task, preferredMode = 'ride') => {
     try {
-      let payload = {}
+      let payload = { travel_mode: preferredMode }
       try {
-        const { getCurrentLngLat, planRoute, distanceMeters, suggestTravelMode } = await import('@/lib/amap')
+        const { getCurrentLngLat, planRoute, distanceMeters, geocodeAddress } = await import('@/lib/amap')
         const pos = await getCurrentLngLat()
         const origin = [pos.lng, pos.lat]
-        const pickup = task.pickup_longitude != null
+        let pickup = task.pickup_longitude != null
           ? [Number(task.pickup_longitude), Number(task.pickup_latitude)]
           : (task.longitude != null ? [Number(task.longitude), Number(task.latitude)] : null)
+        if (!pickup && task.pickup_location) {
+          try {
+            const geo = await geocodeAddress(task.pickup_location)
+            pickup = [geo.lng, geo.lat]
+          } catch { /* ignore */ }
+        }
         let route = null
-        if (pickup) route = await planRoute(origin, pickup, 'auto')
+        if (pickup) route = await planRoute(origin, pickup, preferredMode)
         const dist = route?.distance || distanceMeters(origin, pickup)
         payload = {
           runner_latitude: pos.lat,
           runner_longitude: pos.lng,
-          travel_mode: route?.mode || suggestTravelMode(dist),
+          travel_mode: preferredMode || route?.mode || 'ride',
           eta_seconds: route?.duration || null,
           distance_meters: dist,
         }
@@ -503,12 +519,14 @@ export default function MarketplaceHome({ user, onLogout, onUserUpdate }) {
         /* still accept without live GPS */
       }
       const response = await acceptServiceTask(task.id, payload)
-      setNotice(response.message)
+      setNotice(response.message || '接单成功，已为你打开导航')
+      // 立刻从本地列表移除，避免对方/雷达仍看到待接
+      setTasks((current) => current.filter((item) => item.id !== task.id))
+      setFeed((current) => current.filter((item) => !(item.type === 'service' && item.id === task.id)))
       loadData()
       loadNotifications()
-      setSelectedDetail({ type: 'service', id: task.id })
-      const requester = task.requester || task.author
-      if (requester?.id) setQuickChatRequest({ user: requester, context: { type: 'service', id: task.id } })
+      // 接单后进入完整导航页（先规划去取货点）
+      openErrandNav(task.id, response.tracking)
     } catch (error) {
       setNotice(error.response?.data?.detail || '接单失败')
     }
@@ -520,6 +538,7 @@ export default function MarketplaceHome({ user, onLogout, onUserUpdate }) {
     setCheckoutItem(null)
     setPublicUserId(null)
     setSelectedOrder(null)
+    setActiveErrand(null)
     setTopicFilter('')
     if (id === 'service') setView('radar')
     else setView('pulse')
@@ -642,7 +661,7 @@ export default function MarketplaceHome({ user, onLogout, onUserUpdate }) {
     }
   }
 
-  const showParticles = !selectedDetail && !checkoutItem && !publicUserId && !['messages', 'orders', 'admin'].includes(activeNav) && view === 'pulse'
+  const showParticles = !selectedDetail && !checkoutItem && !publicUserId && !activeErrand && !['messages', 'orders', 'admin'].includes(activeNav) && view === 'pulse'
 
   return (
     <main className="dark campus-shell">
@@ -724,7 +743,17 @@ export default function MarketplaceHome({ user, onLogout, onUserUpdate }) {
           </div>
         </header>
 
-        {checkoutItem ? (
+        {activeErrand ? (
+          <ErrandNavPage
+            taskId={activeErrand.taskId}
+            initialTracking={activeErrand.tracking}
+            currentUser={currentUser}
+            onBack={() => { setActiveErrand(null); loadData() }}
+            onNotice={setNotice}
+            onMessage={(source) => openChat(source)}
+            onFinished={() => { setActiveErrand(null); loadData() }}
+          />
+        ) : checkoutItem ? (
           <CheckoutPlaceholder
             language={language}
             item={checkoutItem}
@@ -749,6 +778,8 @@ export default function MarketplaceHome({ user, onLogout, onUserUpdate }) {
             onDeleted={() => { setSelectedDetail(null); loadData() }}
             onItemChange={handleDetailItemChange}
             onFeedRefresh={loadData}
+            onAcceptTask={(item) => handleAcceptTask(item, item.preferredMode || 'ride')}
+            onOpenErrandNav={(taskId, tracking) => openErrandNav(taskId, tracking)}
           />
         ) : publicUserId ? (
           <PublicProfile userId={publicUserId} onBack={() => setPublicUserId(null)} onOpenItem={handleAction} onMessage={(source) => openChat(source)} onNotice={setNotice} />
@@ -822,13 +853,16 @@ export default function MarketplaceHome({ user, onLogout, onUserUpdate }) {
                       <div className="errand-orders-list">
                         {summary.active_errands.map((errand) => (
                           <div key={errand.id} className="errand-order-block">
-                            <button type="button" className="errand-order-head" onClick={() => setSelectedDetail({ type: 'service', id: errand.id })}>
+                            <button type="button" className="errand-order-head" onClick={() => openErrandNav(errand.id, errand)}>
                               <Bike />
                               <span>
                                 <strong>{errand.title}</strong>
                                 <small>{errand.progress_text || errand.phase_label}</small>
                               </span>
                             </button>
+                            <Button size="sm" className="w-full mb-2" onClick={() => openErrandNav(errand.id, errand)}>
+                              打开配送导航
+                            </Button>
                             <ErrandTrackingMap
                               compact
                               taskId={errand.id}
@@ -836,7 +870,7 @@ export default function MarketplaceHome({ user, onLogout, onUserUpdate }) {
                               currentUserId={currentUser?.id}
                               onNotice={setNotice}
                               onMessageRequester={(track) => openChat({ user: track.requester, context: { type: 'service', id: track.id } })}
-                              onOpenTask={(item) => setSelectedDetail(item)}
+                              onOpenTask={() => openErrandNav(errand.id, errand)}
                             />
                           </div>
                         ))}

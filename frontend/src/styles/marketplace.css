@@ -3846,3 +3846,199 @@
 .errand-marker-school {
   background: linear-gradient(145deg, #60a5fa, #2563eb);
 }
+
+/* Full errand navigation page */
+.errand-nav-page {
+  display: flex;
+  flex-direction: column;
+  min-height: calc(100vh - 68px);
+  background: #0b0d16;
+  color: #f5f3ff;
+}
+.errand-nav-top {
+  display: grid;
+  grid-template-columns: 40px 1fr 40px;
+  gap: 8px;
+  align-items: center;
+  padding: 10px 12px;
+  border-bottom: 1px solid rgba(167, 139, 250, 0.2);
+  background: rgba(12, 14, 24, 0.96);
+}
+.errand-nav-top-main h1 {
+  margin: 2px 0;
+  font-size: 16px;
+}
+.errand-nav-top-main p {
+  margin: 0;
+  font-size: 12px;
+  color: rgba(216, 180, 254, 0.78);
+}
+.errand-nav-steps {
+  display: grid;
+  grid-template-columns: repeat(4, 1fr);
+  gap: 6px;
+  padding: 10px 12px 0;
+}
+.errand-nav-steps > div {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  gap: 4px;
+  padding: 8px 4px;
+  border-radius: 10px;
+  font-size: 11px;
+  color: rgba(196, 181, 253, 0.5);
+  background: rgba(255,255,255,0.03);
+}
+.errand-nav-steps > div.is-active { color: #fde68a; background: rgba(251, 191, 36, 0.12); }
+.errand-nav-steps > div.is-done { color: #86efac; background: rgba(52, 211, 153, 0.1); }
+.errand-nav-legend {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 10px;
+  padding: 8px 12px;
+  font-size: 11px;
+  color: rgba(216, 180, 254, 0.75);
+}
+.errand-nav-legend i {
+  display: inline-block;
+  width: 8px;
+  height: 8px;
+  margin-right: 4px;
+  border-radius: 999px;
+}
+.lg-pickup { background: #f59e0b; }
+.lg-delivery { background: #38bdf8; }
+.lg-runner { background: #a78bfa; }
+.lg-me { background: #34d399; }
+.errand-nav-map {
+  flex: 1;
+  min-height: 320px;
+  margin: 0 12px;
+  border-radius: 16px;
+  overflow: hidden;
+  border: 1px solid rgba(167, 139, 250, 0.25);
+}
+.errand-nav-sheet {
+  padding: 12px;
+  border-top: 1px solid rgba(167, 139, 250, 0.2);
+  background: linear-gradient(180deg, rgba(20, 18, 34, 0.98), #0b0d16);
+}
+.errand-nav-points {
+  display: grid;
+  grid-template-columns: 1fr 1fr;
+  gap: 10px;
+  margin-bottom: 10px;
+}
+.errand-nav-points > div {
+  padding: 10px;
+  border-radius: 12px;
+  background: rgba(167, 139, 250, 0.08);
+}
+.errand-nav-points strong {
+  display: flex;
+  align-items: center;
+  gap: 4px;
+  font-size: 12px;
+}
+.errand-nav-points p {
+  margin: 4px 0 0;
+  font-size: 13px;
+}
+.errand-nav-points small {
+  color: rgba(253, 230, 138, 0.9);
+  font-size: 11px;
+}
+.errand-nav-eta-card {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  gap: 10px;
+  padding: 10px 12px;
+  margin-bottom: 10px;
+  border-radius: 12px;
+  background: rgba(52, 211, 153, 0.08);
+  border: 1px solid rgba(52, 211, 153, 0.2);
+}
+.errand-nav-eta-card > div {
+  display: flex;
+  gap: 8px;
+  align-items: center;
+}
+.errand-nav-eta-card strong { display: block; font-size: 15px; }
+.errand-nav-eta-card small { color: rgba(216, 180, 254, 0.75); }
+.errand-nav-eta-card em {
+  font-style: normal;
+  font-size: 11px;
+  color: rgba(253, 230, 138, 0.9);
+}
+.errand-mode-row {
+  display: grid;
+  grid-template-columns: repeat(3, 1fr);
+  gap: 8px;
+  margin-bottom: 10px;
+}
+.errand-mode-row button {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  gap: 6px;
+  height: 40px;
+  border-radius: 999px;
+  border: 1px solid rgba(167, 139, 250, 0.28);
+  background: rgba(255,255,255,0.03);
+  color: inherit;
+  cursor: pointer;
+  font-size: 13px;
+  font-weight: 600;
+}
+.errand-mode-row button.is-active {
+  background: rgba(167, 139, 250, 0.24);
+  border-color: rgba(196, 181, 253, 0.6);
+  color: #f5f3ff;
+}
+.errand-nav-peer {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  margin-bottom: 10px;
+  padding: 8px 10px;
+  border-radius: 12px;
+  background: rgba(255,255,255,0.03);
+}
+.errand-nav-peer strong { display: block; font-size: 13px; }
+.errand-nav-peer small { color: rgba(196, 181, 253, 0.7); }
+.errand-nav-peer > div { flex: 1; }
+.errand-nav-actions {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+}
+.errand-nav-hint {
+  margin: 10px 0 0;
+  font-size: 12px;
+  line-height: 1.45;
+  color: rgba(196, 181, 253, 0.72);
+}
+.errand-desired-box { margin-top: 10px; }
+.x-service-accept-box { margin: 10px 0; }
+.x-service-accept-hint {
+  margin: 0 0 8px;
+  font-size: 12px;
+  color: rgba(216, 180, 254, 0.8);
+}
+.x-service-mode-row {
+  display: grid;
+  grid-template-columns: repeat(3, 1fr);
+  gap: 8px;
+}
+.x-service-mode-row .x-purchase-button {
+  width: 100%;
+  font-size: 13px;
+}
+.x-service-nav-entry { margin-top: 10px; }
+
+@media (max-width: 760px) {
+  .errand-nav-page { min-height: calc(100vh - 64px); }
+  .errand-nav-map { min-height: 42vh; }
+}

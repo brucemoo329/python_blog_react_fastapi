@@ -55,8 +55,8 @@ export function markTaskPickedUp(taskId, data = null) {
   return request.post(`/marketplace/tasks/${taskId}/picked-up`, data)
 }
 
-export function completeServiceTask(taskId) {
-  return request.post(`/marketplace/tasks/${taskId}/complete`)
+export function completeServiceTask(taskId, data = null) {
+  return request.post(`/marketplace/tasks/${taskId}/complete`, data)
 }
 
 export function updateTaskDesiredTime(taskId, desired_delivery_at) {
@@ -65,6 +65,10 @@ export function updateTaskDesiredTime(taskId, desired_delivery_at) {
 
 export function complainLateTask(taskId) {
   return request.post(`/marketplace/tasks/${taskId}/late-complaint`)
+}
+
+export function updateTaskTravelMode(taskId, data) {
+  return request.post(`/marketplace/tasks/${taskId}/travel-mode`, data)
 }
 
 export function getUserProfile() {

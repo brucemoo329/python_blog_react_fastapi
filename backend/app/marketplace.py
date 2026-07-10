@@ -106,6 +106,12 @@ class TaskDesiredTimeBody(BaseModel):
     desired_delivery_at: datetime
 
 
+class TaskTravelModeBody(BaseModel):
+    travel_mode: Literal["walk", "ride", "drive", "auto"] = "ride"
+    eta_seconds: Optional[int] = None
+    distance_meters: Optional[int] = None
+
+
 class CommunityPostCreate(BaseModel):
     content: str = Field(min_length=2, max_length=3000)
     title: Optional[str] = Field(default=None, max_length=120)
@@ -400,6 +406,23 @@ def suggest_travel_mode(distance_meters: Optional[float]) -> str:
     return "drive"
 
 
+def haversine_meters(lat1, lon1, lat2, lon2) -> Optional[float]:
+    try:
+        from math import asin, cos, radians, sin, sqrt
+        lat1, lon1, lat2, lon2 = map(float, (lat1, lon1, lat2, lon2))
+    except (TypeError, ValueError):
+        return None
+    r = 6371000.0
+    dlat = radians(lat2 - lat1)
+    dlon = radians(lon2 - lon1)
+    a = sin(dlat / 2) ** 2 + cos(radians(lat1)) * cos(radians(lat2)) * sin(dlon / 2) ** 2
+    return 2 * r * asin(sqrt(a))
+
+
+PICKUP_CONFIRM_RADIUS_M = 280
+DELIVERY_CONFIRM_RADIUS_M = 280
+
+
 def _as_naive_utc(value: Optional[datetime]) -> Optional[datetime]:
     if value is None:
         return None
@@ -446,6 +469,23 @@ def service_task_tracking_payload(task: models.ServiceTask, current_user_id: Opt
         else:
             progress_text = f"配送中 · 预计 {eta_minutes} 分钟送达"
 
+    runner_lat = _num(task.runner_latitude)
+    runner_lng = _num(task.runner_longitude)
+    dist_to_pickup = haversine_meters(runner_lat, runner_lng, pickup_lat, pickup_lng) if runner_lat is not None and pickup_lat is not None else None
+    dist_to_delivery = haversine_meters(runner_lat, runner_lng, delivery_lat, delivery_lng) if runner_lat is not None and delivery_lat is not None else None
+    can_confirm_pickup = (
+        role == "runner"
+        and phase == "to_pickup"
+        and dist_to_pickup is not None
+        and dist_to_pickup <= PICKUP_CONFIRM_RADIUS_M
+    )
+    can_confirm_delivery = (
+        role == "runner"
+        and phase in {"delivering", "picked_up"}
+        and dist_to_delivery is not None
+        and dist_to_delivery <= DELIVERY_CONFIRM_RADIUS_M
+    )
+
     return {
         "id": task.id,
         "type": "service",
@@ -462,8 +502,8 @@ def service_task_tracking_payload(task: models.ServiceTask, current_user_id: Opt
         "pickup": {"lat": pickup_lat, "lng": pickup_lng, "label": task.pickup_location or "取货点"},
         "delivery": {"lat": delivery_lat, "lng": delivery_lng, "label": task.delivery_location or "送达点"},
         "runner": {
-            "lat": _num(task.runner_latitude),
-            "lng": _num(task.runner_longitude),
+            "lat": runner_lat,
+            "lng": runner_lng,
             "updated_at": task.runner_location_updated_at,
             "user": user_payload(task.runner) if task.runner else None,
         },
@@ -473,6 +513,12 @@ def service_task_tracking_payload(task: models.ServiceTask, current_user_id: Opt
         "eta_seconds": task.eta_seconds,
         "eta_minutes": eta_minutes,
         "distance_meters": task.distance_meters,
+        "distance_to_pickup_m": int(dist_to_pickup) if dist_to_pickup is not None else None,
+        "distance_to_delivery_m": int(dist_to_delivery) if dist_to_delivery is not None else None,
+        "pickup_radius_m": PICKUP_CONFIRM_RADIUS_M,
+        "delivery_radius_m": DELIVERY_CONFIRM_RADIUS_M,
+        "can_confirm_pickup": can_confirm_pickup,
+        "can_confirm_delivery": can_confirm_delivery,
         "desired_delivery_at": desired,
         "accepted_at": task.accepted_at,
         "picked_up_at": task.picked_up_at,
@@ -988,12 +1034,15 @@ def get_feed(
 
     if kind in {"all", "service"}:
         query = db.query(models.ServiceTask).options(
-            joinedload(models.ServiceTask.requester).joinedload(models.User.profile)
+            joinedload(models.ServiceTask.requester).joinedload(models.User.profile),
+            joinedload(models.ServiceTask.runner).joinedload(models.User.profile),
         )
         if hidden_user_ids:
             query = query.filter(~models.ServiceTask.requester_id.in_(hidden_user_ids))
         if search:
             query = query.filter(or_(models.ServiceTask.title.contains(search), models.ServiceTask.description.contains(search)))
+        # 信息流只展示待接单；进行中的任务走导航/右侧进度，避免接单后仍像「可接」
+        query = query.filter(models.ServiceTask.status == "open")
         for task in query.order_by(models.ServiceTask.created_at.desc()).limit(20):
             items.append({
                 "id": task.id,
@@ -1012,6 +1061,10 @@ def get_feed(
                 "image_url": task.image_url,
                 "latitude": float(task.latitude) if task.latitude is not None else None,
                 "longitude": float(task.longitude) if task.longitude is not None else None,
+                "pickup_latitude": float(task.pickup_latitude) if task.pickup_latitude is not None else None,
+                "pickup_longitude": float(task.pickup_longitude) if task.pickup_longitude is not None else None,
+                "delivery_latitude": float(task.delivery_latitude) if task.delivery_latitude is not None else None,
+                "delivery_longitude": float(task.delivery_longitude) if task.delivery_longitude is not None else None,
                 "author": user_payload(task.requester),
                 "requester": user_payload(task.requester),
                 "school": task.requester.profile.school if task.requester.profile else None,
@@ -1328,6 +1381,34 @@ def update_runner_location(
     return {"message": "位置已更新", "tracking": service_task_tracking_payload(task, user.id)}
 
 
+@router.post("/tasks/{task_id}/travel-mode")
+def update_task_travel_mode(
+    task_id: int,
+    data: TaskTravelModeBody,
+    db: Session = Depends(get_db),
+    user: models.User = Depends(get_current_user),
+):
+    task = db.query(models.ServiceTask).filter_by(id=task_id).with_for_update().first()
+    if not task:
+        raise HTTPException(status_code=404, detail="任务不存在")
+    if task.runner_id != user.id:
+        raise HTTPException(status_code=403, detail="仅接单跑手可切换出行方式")
+    if task.status not in {"accepted", "in_progress"}:
+        raise HTTPException(status_code=400, detail="任务未在配送中")
+    mode = data.travel_mode if data.travel_mode != "auto" else suggest_travel_mode(data.distance_meters)
+    task.travel_mode = mode
+    if data.eta_seconds is not None:
+        task.eta_seconds = data.eta_seconds
+    if data.distance_meters is not None:
+        task.distance_meters = data.distance_meters
+    db.commit()
+    task = db.query(models.ServiceTask).options(
+        joinedload(models.ServiceTask.requester).joinedload(models.User.profile),
+        joinedload(models.ServiceTask.runner).joinedload(models.User.profile),
+    ).filter_by(id=task_id).first()
+    return {"message": f"已切换为{MODE_LABELS.get(mode, mode)}", "tracking": service_task_tracking_payload(task, user.id)}
+
+
 @router.post("/tasks/{task_id}/picked-up")
 def mark_task_picked_up(
     task_id: int,
@@ -1342,6 +1423,21 @@ def mark_task_picked_up(
         raise HTTPException(status_code=403, detail="仅接单跑手可确认取货")
     if task.delivery_phase not in {"to_pickup", "picked_up"}:
         raise HTTPException(status_code=400, detail="当前状态无法确认取货")
+
+    runner_lat = data.latitude if data and data.latitude is not None else task.runner_latitude
+    runner_lng = data.longitude if data and data.longitude is not None else task.runner_longitude
+    pickup_lat = task.pickup_latitude if task.pickup_latitude is not None else task.latitude
+    pickup_lng = task.pickup_longitude if task.pickup_longitude is not None else task.longitude
+    if runner_lat is None or runner_lng is None:
+        raise HTTPException(status_code=400, detail="请先开启定位后再确认取货")
+    if pickup_lat is not None and pickup_lng is not None:
+        dist = haversine_meters(runner_lat, runner_lng, pickup_lat, pickup_lng)
+        if dist is not None and dist > PICKUP_CONFIRM_RADIUS_M:
+            raise HTTPException(
+                status_code=400,
+                detail=f"你距离取货点约 {int(dist)} 米，需进入 {PICKUP_CONFIRM_RADIUS_M} 米内才能确认已取货",
+            )
+
     task.delivery_phase = "delivering"
     task.picked_up_at = datetime.utcnow()
     if data and data.latitude is not None:
@@ -1373,6 +1469,7 @@ def mark_task_picked_up(
 @router.post("/tasks/{task_id}/complete")
 def complete_task(
     task_id: int,
+    data: Optional[TaskLocationBody] = None,
     db: Session = Depends(get_db),
     user: models.User = Depends(get_current_user),
 ):
@@ -1383,6 +1480,17 @@ def complete_task(
         raise HTTPException(status_code=403, detail="无权完成该任务")
     if task.status not in {"accepted", "in_progress"}:
         raise HTTPException(status_code=400, detail="任务状态不可完成")
+    # Runner completing: soft check near delivery point
+    if user.id == task.runner_id and data and data.latitude is not None and task.delivery_latitude is not None:
+        dist = haversine_meters(data.latitude, data.longitude, task.delivery_latitude, task.delivery_longitude)
+        if dist is not None and dist > DELIVERY_CONFIRM_RADIUS_M:
+            raise HTTPException(
+                status_code=400,
+                detail=f"你距离送达点约 {int(dist)} 米，需进入 {DELIVERY_CONFIRM_RADIUS_M} 米内才能确认送达",
+            )
+        task.runner_latitude = data.latitude
+        task.runner_longitude = data.longitude
+        task.runner_location_updated_at = datetime.utcnow()
     task.status = "completed"
     task.delivery_phase = "delivered"
     task.completed_at = datetime.utcnow()

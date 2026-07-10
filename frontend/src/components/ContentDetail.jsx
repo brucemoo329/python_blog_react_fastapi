@@ -44,8 +44,6 @@ import {
   toggleUserModeration,
 } from '@/api/marketplace'
 import ErrandTrackingMap from '@/components/ErrandTrackingMap'
-import { acceptServiceTask } from '@/api/marketplace'
-import { planRoute, getCurrentLngLat, distanceMeters, suggestTravelMode } from '@/lib/amap'
 import { t as translate, typeLabel } from '@/lib/i18n'
 import { cn } from '@/lib/utils'
 
@@ -122,6 +120,7 @@ export default function ContentDetail({
   onItemChange,
   onFeedRefresh,
   onAcceptTask,
+  onOpenErrandNav,
 }) {
   const t = (key, fallback = '') => translate(language, key, fallback)
   const [accepting, setAccepting] = useState(false)
@@ -371,55 +370,50 @@ export default function ContentDetail({
           </div>
         ) : null}
         {item.type === 'service' && item.can_accept ? (
-          <Button
-            className="x-purchase-button"
-            disabled={accepting}
-            onClick={async () => {
-              setAccepting(true)
-              try {
-                let payload = {}
-                try {
-                  const pos = await getCurrentLngLat()
-                  const origin = [pos.lng, pos.lat]
-                  const pickup = item.tracking?.pickup?.lng != null
-                    ? [item.tracking.pickup.lng, item.tracking.pickup.lat]
-                    : (item.longitude != null ? [Number(item.longitude), Number(item.latitude)] : null)
-                  let route = null
-                  if (pickup) route = await planRoute(origin, pickup, 'auto')
-                  const dist = route?.distance || distanceMeters(origin, pickup)
-                  payload = {
-                    runner_latitude: pos.lat,
-                    runner_longitude: pos.lng,
-                    travel_mode: route?.mode || suggestTravelMode(dist),
-                    eta_seconds: route?.duration || null,
-                    distance_meters: dist,
-                  }
-                } catch {
-                  /* accept without GPS */
-                }
-                const response = await acceptServiceTask(item.id, payload)
-                onNotice?.(response.message)
-                setDetail((current) => current ? { ...current, item: { ...current.item, status: 'accepted', can_accept: false, tracking: response.tracking } } : current)
-                onFeedRefresh?.()
-                onAcceptTask?.(item)
-              } catch (error) {
-                onNotice?.(error.response?.data?.detail || '接单失败')
-              } finally {
-                setAccepting(false)
-              }
-            }}
-          >
-            <ShoppingBag />{accepting ? '接单中…' : t('detail.acceptNow')}
-          </Button>
+          <div className="x-service-accept-box">
+            <p className="x-service-accept-hint">接单后将进入导航：先去取货点，再送往对方地址。可选择步行/骑行/驾车。</p>
+            <div className="x-service-mode-row">
+              {[
+                { id: 'walk', label: '步行' },
+                { id: 'ride', label: '骑行' },
+                { id: 'drive', label: '驾车' },
+              ].map((m) => (
+                <Button
+                  key={m.id}
+                  className="x-purchase-button"
+                  disabled={accepting}
+                  onClick={async () => {
+                    setAccepting(true)
+                    try {
+                      await onAcceptTask?.({ ...item, preferredMode: m.id })
+                      // parent opens ErrandNavPage
+                    } catch (error) {
+                      onNotice?.(error.response?.data?.detail || '接单失败')
+                    } finally {
+                      setAccepting(false)
+                    }
+                  }}
+                >
+                  <ShoppingBag />{accepting ? '接单中…' : `${m.label}接单`}
+                </Button>
+              ))}
+            </div>
+          </div>
         ) : null}
         {item.type === 'service' && !item.can_accept && item.tracking && item.tracking.delivery_phase !== 'pending' ? (
-          <ErrandTrackingMap
-            taskId={item.id}
-            initialTracking={item.tracking}
-            currentUserId={currentUser?.id}
-            onNotice={onNotice}
-            onMessageRequester={() => onMessage?.(item)}
-          />
+          <div className="x-service-nav-entry">
+            <Button className="x-purchase-button" onClick={() => onOpenErrandNav?.(item.id, item.tracking)}>
+              <ShoppingBag /> 打开配送导航
+            </Button>
+            <ErrandTrackingMap
+              taskId={item.id}
+              initialTracking={item.tracking}
+              currentUserId={currentUser?.id}
+              onNotice={onNotice}
+              onMessageRequester={() => onMessage?.(item)}
+              onOpenTask={() => onOpenErrandNav?.(item.id, item.tracking)}
+            />
+          </div>
         ) : null}
         {item.type !== 'service' && isTrade && !item.can_delete ? (
           <Button className="x-purchase-button" onClick={() => onPurchase?.(item)}>
