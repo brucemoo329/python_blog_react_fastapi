@@ -47,13 +47,7 @@ import {
   updateAccountSecurity,
   updateUserProfile,
 } from '@/api/marketplace'
-
-const LANGUAGES = [
-  { value: 'zh-CN', label: '中文' },
-  { value: 'en-US', label: 'English' },
-  { value: 'ja-JP', label: '日本語' },
-  { value: 'ko-KR', label: '한국어' },
-]
+import { LANGUAGES, t as translate } from '@/lib/i18n'
 
 const SCHOOLS = ['南通理工学院', '南通理工学院南通校区', '南通理工学院海安校区']
 
@@ -63,6 +57,18 @@ const BACKGROUND_THEMES = [
   { value: 'violet', label: '霓虹社团' },
   { value: 'forest', label: '图书馆绿荫' },
 ]
+
+const SETTING_I18N = {
+  profile: 'profile.editProfile',
+  address: 'profile.address',
+  school: 'profile.school',
+  security: 'profile.security',
+  payment: 'profile.payment',
+  payout: 'profile.payout',
+  language: 'profile.language',
+  share: 'profile.share',
+  support: 'profile.support',
+}
 
 const EMPTY_PROFILE = {
   profile: {
@@ -106,17 +112,6 @@ const EMPTY_PROFILE = {
 }
 
 const SETTING_KEYS = ['profile', 'address', 'school', 'security', 'payment', 'payout', 'language', 'share', 'support']
-const SETTING_LABELS = {
-  profile: '个人资料',
-  address: '地址管理',
-  school: '学校选择',
-  security: '账号与安全',
-  payment: '支付方式',
-  payout: '收款方式',
-  language: '设置语言',
-  share: '分享给朋友',
-  support: '联系客服',
-}
 
 const SETTING_ICONS = {
   profile: UserRoundCog,
@@ -173,11 +168,13 @@ function compressImage(file, maxSize = 720, quality = 0.78) {
   })
 }
 
-export default function ProfileCenter({ user, onLogout, onNotice, onProfileChange, onOpenItem, onOpenUser }) {
+export default function ProfileCenter({ user, language = 'zh-CN', onLogout, onNotice, onProfileChange, onOpenItem, onOpenUser }) {
   const avatarInputRef = useRef(null)
   const backgroundInputRef = useRef(null)
   const [data, setData] = useState(EMPTY_PROFILE)
   const [form, setForm] = useState(EMPTY_PROFILE.profile)
+  const t = (key, fallback = '') => translate(language, key, fallback)
+  const settingLabel = (key) => t(SETTING_I18N[key] || 'profile.settings', SETTING_I18N[key] || key)
   const [activePanel, setActivePanel] = useState('profile')
   const [editOpen, setEditOpen] = useState(false)
   const [settingsOpen, setSettingsOpen] = useState(false)
@@ -438,9 +435,9 @@ export default function ProfileCenter({ user, onLogout, onNotice, onProfileChang
         <div className="profile-main-column">
           <Card className="profile-card trust-card">
             <CardHeader>
-              <CardTitle><ShieldCheck /> 交易信任等级</CardTitle>
+              <CardTitle><ShieldCheck /> {t('profile.trustCard')}</CardTitle>
               <Button variant={data.trust.checked_in_today ? 'secondary' : 'default'} onClick={handleCheckIn} disabled={data.trust.checked_in_today}>
-                {data.trust.checked_in_today ? '今日已签到' : '签到 +2'}
+                {data.trust.checked_in_today ? t('profile.checkedIn') : t('profile.checkIn')}
               </Button>
             </CardHeader>
             <CardContent>
@@ -490,19 +487,19 @@ export default function ProfileCenter({ user, onLogout, onNotice, onProfileChang
 
         <aside className="profile-side-column">
           <Card className="profile-card settings-card">
-            <CardHeader><CardTitle><UserRoundCog /> 设置</CardTitle></CardHeader>
+            <CardHeader><CardTitle><UserRoundCog /> {t('profile.settings')}</CardTitle></CardHeader>
             <CardContent>
               {SETTING_KEYS.map((key) => {
                 const Icon = SETTING_ICONS[key] || UserRoundCog
                 return (
                   <button key={key} type="button" onClick={() => chooseSetting(key)}>
                     <Icon />
-                    <span>{SETTING_LABELS[key]}</span>
+                    <span>{settingLabel(key)}</span>
                   </button>
                 )
               })}
               <button type="button" className="is-danger" onClick={onLogout}>
-                <LogOut /> 退出登录
+                <LogOut /> {t('ui.logout')}
               </button>
             </CardContent>
           </Card>
@@ -510,8 +507,8 @@ export default function ProfileCenter({ user, onLogout, onNotice, onProfileChang
           <Dialog open={settingsOpen} onOpenChange={setSettingsOpen}>
             <DialogContent className="profile-settings-dialog">
               <DialogHeader>
-                <DialogTitle>{SETTING_LABELS[activePanel] || '设置'}</DialogTitle>
-                <DialogDescription>修改后会同步到数据库，并更新首页展示。</DialogDescription>
+                <DialogTitle>{settingLabel(activePanel) || t('profile.settings')}</DialogTitle>
+                <DialogDescription>{t('profile.settingsHint', '修改后会同步到数据库，并更新首页展示。')}</DialogDescription>
               </DialogHeader>
               <div className="settings-dialog-body">
               {activePanel === 'address' && (
@@ -531,17 +528,25 @@ export default function ProfileCenter({ user, onLogout, onNotice, onProfileChang
               {activePanel === 'school' && (
                 <div className="settings-form">
                   {SCHOOLS.map((school) => (
-                    <button key={school} type="button" className="profile-choice" onClick={() => saveSettingProfile({ school }, `已切换到${school}`)}>
-                      <School /> {school} {form.school === school ? <Badge>当前</Badge> : null}
+                    <button key={school} type="button" className="profile-choice" onClick={() => saveSettingProfile({ school }, `${t('profile.switchedTo', '已切换到')}${school}`)}>
+                      <School /> {school} {form.school === school ? <Badge>{t('profile.current')}</Badge> : null}
                     </button>
                   ))}
                 </div>
               )}
               {activePanel === 'language' && (
                 <div className="settings-form">
-                  {LANGUAGES.map((language) => (
-                    <button key={language.value} type="button" className="profile-choice" onClick={() => saveSettingProfile({ language: language.value }, `语言已切换为 ${language.label}`)}>
-                      <Globe2 /> {language.label} {form.language === language.value ? <Badge>当前</Badge> : null}
+                  {LANGUAGES.map((langOption) => (
+                    <button
+                      key={langOption.value}
+                      type="button"
+                      className="profile-choice"
+                      onClick={() => saveSettingProfile(
+                        { language: langOption.value },
+                        `${t('profile.langSwitched')} ${langOption.native || langOption.label}`,
+                      )}
+                    >
+                      <Globe2 /> {langOption.native || langOption.label} {form.language === langOption.value ? <Badge>{t('profile.current')}</Badge> : null}
                     </button>
                   ))}
                 </div>

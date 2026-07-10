@@ -1,4 +1,4 @@
-import { useEffect, useState } from 'react'
+import { useEffect, useMemo, useState } from 'react'
 import { Gamepad2, ImagePlus, PackagePlus, PenLine, Search, Send, Sparkles, X } from 'lucide-react'
 import { Button } from '@/components/ui/button'
 import {
@@ -13,6 +13,7 @@ import { Field, FieldGroup, FieldLabel } from '@/components/ui/field'
 import { Input } from '@/components/ui/input'
 import { Textarea } from '@/components/ui/textarea'
 import ImageLightbox from '@/components/ImageLightbox'
+import { TOPIC_KEYS, t as translate } from '@/lib/i18n'
 import { cn } from '@/lib/utils'
 import {
   createCommunityPost,
@@ -21,12 +22,12 @@ import {
   createWantedPost,
 } from '@/api/marketplace'
 
-const TYPES = [
-  { id: 'listing', label: '发布闲置', icon: PackagePlus },
-  { id: 'service', label: '发布跑腿', icon: Send },
-  { id: 'wanted', label: '发求购', icon: Search },
-  { id: 'community', label: '发动态', icon: PenLine },
-  { id: 'game', label: '游戏交易', icon: Gamepad2 },
+const TYPE_DEFS = [
+  { id: 'listing', icon: PackagePlus },
+  { id: 'service', icon: Send },
+  { id: 'wanted', icon: Search },
+  { id: 'community', icon: PenLine },
+  { id: 'game', icon: Gamepad2 },
 ]
 
 const INITIAL_FORM = {
@@ -38,42 +39,7 @@ const INITIAL_FORM = {
   images: [],
 }
 
-const TOPICS = ['校园生活', '二手好物', '跑腿互助', '游戏交流', '学习资料', '宿舍生活', '社团活动', '失物招领', '美食分享', '求职实习', '校园吐槽', '表白墙']
-
 const MAX_CAMPUS_AMOUNT = 999999.99
-
-const COPY_BY_TYPE = {
-  listing: {
-    title: '比如：罗技鼠标 9 成新',
-    description: '写清楚成色、购买时间、配件、是否可小刀和面交地点。',
-    price: '你的出手价，例如 49',
-    location: '例如：西区宿舍 7 栋 / 图书馆门口',
-  },
-  game: {
-    title: '比如：王者荣耀皮肤号 / Steam 游戏共享',
-    description: '写清楚游戏区服、账号/道具内容、交易方式和安全说明。',
-    price: '游戏交易价格',
-    location: '线上交易或校内确认地点',
-  },
-  service: {
-    title: '比如：帮拿外卖到 4 栋',
-    description: '写清楚取件点、送达点、截止时间、是否需要排队。',
-    price: '跑腿赏金，例如 5',
-    location: '送达地点，例如：男生宿舍 4 栋',
-  },
-  wanted: {
-    title: '比如：求购计算机网络教材',
-    description: '写清楚想要的版本、预算范围、是否接受旧书。',
-    price: '最高预算，例如 30',
-    location: '希望交易地点',
-  },
-  community: {
-    title: '标题可选，比如：今天操场晚霞好美',
-    description: '分享校园见闻、避坑提醒、交易经验或同学互助信息。',
-    price: '',
-    location: '',
-  },
-}
 
 /** Keep uploads viewable: larger edge + higher quality (still base64-safe). */
 function compressImage(file, maxSize = 1600, quality = 0.86) {
@@ -97,13 +63,35 @@ function compressImage(file, maxSize = 1600, quality = 0.86) {
   })
 }
 
-export default function PublishDialog({ open, onOpenChange, initialType = 'listing', onPublished }) {
+export default function PublishDialog({ open, onOpenChange, initialType = 'listing', onPublished, language = 'zh-CN' }) {
   const [type, setType] = useState(initialType)
   const [form, setForm] = useState(INITIAL_FORM)
   const [submitting, setSubmitting] = useState(false)
   const [error, setError] = useState('')
   const [previewOpen, setPreviewOpen] = useState(false)
   const [previewIndex, setPreviewIndex] = useState(0)
+
+  const t = (key, fallback = '') => translate(language, key, fallback)
+
+  const types = useMemo(
+    () => TYPE_DEFS.map((item) => ({ ...item, label: t(`publish.type.${item.id}`) })),
+    [language],
+  )
+
+  const topics = useMemo(
+    () => TOPIC_KEYS.map((item) => ({ value: item.zh, label: t(item.key, item.zh) })),
+    [language],
+  )
+
+  const hints = useMemo(() => {
+    const kind = type === 'game' ? 'game' : type
+    return {
+      title: t(`publish.ph.${kind}.title`),
+      description: t(`publish.ph.${kind}.desc`),
+      price: t(`publish.ph.${kind}.price`),
+      location: t(`publish.ph.${kind}.location`),
+    }
+  }, [language, type])
 
   useEffect(() => {
     if (open) setType(initialType)
@@ -128,11 +116,11 @@ export default function PublishDialog({ open, onOpenChange, initialType = 'listi
   const submit = async (event) => {
     event.preventDefault()
     if (!form.description.trim() || (type !== 'community' && !form.title.trim())) {
-      setError('请把标题和内容补充完整')
+      setError(t('publish.error.incomplete', '请把标题和内容补充完整'))
       return
     }
     if (type !== 'community' && Number(form.price || 1) > MAX_CAMPUS_AMOUNT) {
-      setError('金额不能超过 999999.99 元')
+      setError(t('publish.error.amount', '金额不能超过 999999.99 元'))
       return
     }
     setSubmitting(true)
@@ -145,7 +133,7 @@ export default function PublishDialog({ open, onOpenChange, initialType = 'listi
           title: form.title,
           description: form.description,
           reward: Number(form.price || 1),
-          delivery_location: form.location || '校内',
+          delivery_location: form.location || t('publish.defaultLocation', '校内'),
           image_url: form.images[0] || null,
         })
       } else if (type === 'wanted') {
@@ -176,13 +164,19 @@ export default function PublishDialog({ open, onOpenChange, initialType = 'listi
       }
       setForm(INITIAL_FORM)
       onOpenChange(false)
-      onPublished?.(response || { message: '发布成功，已经出现在校园信息流中' })
+      onPublished?.(response || { message: t('publish.success', '发布成功，已经出现在校园信息流中') })
     } catch (publishError) {
-      setError(publishError.response?.data?.detail || '发布失败，请确认后端服务已启动')
+      setError(publishError.response?.data?.detail || t('publish.fail', '发布失败，请确认后端服务已启动'))
     } finally {
       setSubmitting(false)
     }
   }
+
+  const priceLabel = type === 'service'
+    ? t('publish.reward')
+    : type === 'wanted'
+      ? t('publish.budget')
+      : t('publish.price')
 
   return (
     <Dialog open={open} onOpenChange={onOpenChange}>
@@ -190,137 +184,129 @@ export default function PublishDialog({ open, onOpenChange, initialType = 'listi
         <DialogHeader>
           <DialogTitle className="flex items-center gap-2">
             <Sparkles />
-            发布到校园脉动
+            {t('publish.title')}
           </DialogTitle>
-          <DialogDescription>选择内容类型，同校同学会优先看到你的发布。</DialogDescription>
+          <DialogDescription>{t('publish.desc')}</DialogDescription>
         </DialogHeader>
         <form onSubmit={submit}>
           <div className="publish-dialog-body">
-            {(() => {
-              const hints = COPY_BY_TYPE[type] || COPY_BY_TYPE.listing
-              return (
-                <>
-                  <div className="publish-type-grid">
-                    {TYPES.map((item) => {
-                      const Icon = item.icon
-                      return (
+            <div className="publish-type-grid">
+              {types.map((item) => {
+                const Icon = item.icon
+                return (
+                  <button
+                    key={item.id}
+                    type="button"
+                    className={cn(type === item.id && 'is-active')}
+                    onClick={() => setType(item.id)}
+                  >
+                    <Icon />
+                    {item.label}
+                  </button>
+                )
+              })}
+            </div>
+            <FieldGroup>
+              <Field>
+                <FieldLabel htmlFor="publish-title">
+                  {type === 'community' ? t('publish.titleOptional', '标题（可选）') : t('publish.titleLabel')}
+                </FieldLabel>
+                <Input
+                  id="publish-title"
+                  value={form.title}
+                  onChange={update('title')}
+                  placeholder={hints.title}
+                />
+              </Field>
+              <Field>
+                <FieldLabel htmlFor="publish-description">{t('publish.descLabel')}</FieldLabel>
+                <Textarea
+                  id="publish-description"
+                  value={form.description}
+                  onChange={update('description')}
+                  placeholder={hints.description}
+                  rows={4}
+                />
+              </Field>
+              {type === 'community' ? (
+                <Field>
+                  <FieldLabel htmlFor="publish-topic">{t('publish.topic')}</FieldLabel>
+                  <select id="publish-topic" className="publish-topic-select" value={form.topic} onChange={update('topic')}>
+                    {topics.map((topic) => (
+                      <option key={topic.value} value={topic.value}>#{topic.label}</option>
+                    ))}
+                  </select>
+                </Field>
+              ) : null}
+              <Field>
+                <FieldLabel>{t('publish.images')}</FieldLabel>
+                <label className="publish-image-picker">
+                  <ImagePlus />
+                  <span>{t('publish.uploadHint')}</span>
+                  <input hidden type="file" accept="image/*" multiple onChange={addImages} />
+                </label>
+                {form.images.length ? (
+                  <div className="publish-image-grid">
+                    {form.images.map((image, index) => (
+                      <div key={`${image.slice(0, 24)}-${index}`}>
                         <button
-                          key={item.id}
                           type="button"
-                          className={cn(type === item.id && 'is-active')}
-                          onClick={() => setType(item.id)}
+                          className="publish-image-preview-btn"
+                          onClick={() => { setPreviewIndex(index); setPreviewOpen(true) }}
+                          aria-label={`${t('publish.preview', '预览')} ${index + 1}`}
                         >
-                          <Icon />
-                          {item.label}
+                          <img src={image} alt="" />
                         </button>
-                      )
-                    })}
-                  </div>
-                  <FieldGroup>
-                    <Field>
-                      <FieldLabel htmlFor="publish-title">
-                        {type === 'community' ? '标题（可选）' : '标题'}
-                      </FieldLabel>
-                      <Input
-                        id="publish-title"
-                        value={form.title}
-                        onChange={update('title')}
-                        placeholder={hints.title}
-                      />
-                    </Field>
-                    <Field>
-                      <FieldLabel htmlFor="publish-description">详细描述</FieldLabel>
-                      <Textarea
-                        id="publish-description"
-                        value={form.description}
-                        onChange={update('description')}
-                        placeholder={hints.description}
-                        rows={4}
-                      />
-                    </Field>
-                    {type === 'community' ? (
-                      <Field>
-                        <FieldLabel htmlFor="publish-topic">话题标签</FieldLabel>
-                        <select id="publish-topic" className="publish-topic-select" value={form.topic} onChange={update('topic')}>
-                          {TOPICS.map((topic) => <option key={topic} value={topic}>#{topic}</option>)}
-                        </select>
-                      </Field>
-                    ) : null}
-                    <Field>
-                      <FieldLabel>图片</FieldLabel>
-                      <label className="publish-image-picker">
-                        <ImagePlus />
-                        <span>上传商品或内容图片，最多 6 张</span>
-                        <input hidden type="file" accept="image/*" multiple onChange={addImages} />
-                      </label>
-                      {form.images.length ? (
-                        <div className="publish-image-grid">
-                          {form.images.map((image, index) => (
-                            <div key={`${image.slice(0, 24)}-${index}`}>
-                              <button
-                                type="button"
-                                className="publish-image-preview-btn"
-                                onClick={() => { setPreviewIndex(index); setPreviewOpen(true) }}
-                                aria-label={`预览第 ${index + 1} 张图`}
-                              >
-                                <img src={image} alt="" />
-                              </button>
-                              <button type="button" className="publish-image-remove" onClick={() => removeImage(index)} aria-label="移除图片"><X /></button>
-                            </div>
-                          ))}
-                        </div>
-                      ) : null}
-                      <ImageLightbox
-                        open={previewOpen}
-                        images={form.images}
-                        index={previewIndex}
-                        onClose={() => setPreviewOpen(false)}
-                        onIndexChange={setPreviewIndex}
-                      />
-                    </Field>
-                    {type !== 'community' ? (
-                      <div className="grid gap-4 sm:grid-cols-2">
-                        <Field>
-                          <FieldLabel htmlFor="publish-price">
-                            {type === 'service' ? '跑腿赏金' : type === 'wanted' ? '最高预算' : '价格'}
-                          </FieldLabel>
-                          <Input
-                            id="publish-price"
-                            type="number"
-                            min="1"
-                            max={MAX_CAMPUS_AMOUNT}
-                            value={form.price}
-                            onChange={update('price')}
-                            placeholder={hints.price}
-                          />
-                        </Field>
-                        <Field>
-                          <FieldLabel htmlFor="publish-location">校内地点</FieldLabel>
-                          <Input
-                            id="publish-location"
-                            value={form.location}
-                            onChange={update('location')}
-                            placeholder={hints.location}
-                          />
-                        </Field>
+                        <button type="button" className="publish-image-remove" onClick={() => removeImage(index)} aria-label={t('publish.removeImage', '移除图片')}><X /></button>
                       </div>
-                    ) : null}
-                  </FieldGroup>
-                </>
-              )
-            })()}
+                    ))}
+                  </div>
+                ) : null}
+                <ImageLightbox
+                  open={previewOpen}
+                  images={form.images}
+                  index={previewIndex}
+                  onClose={() => setPreviewOpen(false)}
+                  onIndexChange={setPreviewIndex}
+                />
+              </Field>
+              {type !== 'community' ? (
+                <div className="grid gap-4 sm:grid-cols-2">
+                  <Field>
+                    <FieldLabel htmlFor="publish-price">{priceLabel}</FieldLabel>
+                    <Input
+                      id="publish-price"
+                      type="number"
+                      min="1"
+                      max={MAX_CAMPUS_AMOUNT}
+                      value={form.price}
+                      onChange={update('price')}
+                      placeholder={hints.price}
+                    />
+                  </Field>
+                  <Field>
+                    <FieldLabel htmlFor="publish-location">{t('publish.location')}</FieldLabel>
+                    <Input
+                      id="publish-location"
+                      value={form.location}
+                      onChange={update('location')}
+                      placeholder={hints.location}
+                    />
+                  </Field>
+                </div>
+              ) : null}
+            </FieldGroup>
             {error ? <p className="publish-error" role="alert">{error}</p> : null}
           </div>
           <DialogFooter className="mt-4">
             <Button type="button" variant="outline" onClick={() => onOpenChange(false)}>
-              取消
+              {t('publish.cancel')}
             </Button>
             <Button type="submit" disabled={submitting}>
-              {submitting ? '发布中...' : '确认发布'}
+              {submitting ? t('publish.submitting', '发布中...') : t('publish.submit')}
             </Button>
           </DialogFooter>
         </form>
-
       </DialogContent>
     </Dialog>
   )

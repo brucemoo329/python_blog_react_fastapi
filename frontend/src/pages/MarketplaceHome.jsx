@@ -79,40 +79,34 @@ import {
   updateUserProfile,
 } from '@/api/marketplace'
 import { cn } from '@/lib/utils'
+import { navLabel, normalizeLang, t as translate, typeLabel } from '@/lib/i18n'
 import '@/styles/marketplace.css'
 
-const NAV_ITEMS = [
-  { id: 'home', label: '首页', labels: { en: 'Home', ja: 'ホーム', ko: '홈' }, icon: Home },
-  { id: 'listing', label: '二手市场', labels: { en: 'Market', ja: '中古市', ko: '중고장터' }, icon: ShoppingBag },
-  { id: 'service', label: '跑腿代取', labels: { en: 'Errands', ja: '代行', ko: '심부름' }, icon: Bike },
-  { id: 'game', label: '游戏交易', labels: { en: 'Games', ja: 'ゲーム', ko: '게임' }, icon: Gamepad2 },
-  { id: 'wanted', label: '求购广场', labels: { en: 'Wanted', ja: '求む', ko: '구해요' }, icon: Search },
-  { id: 'community', label: '校园社区', labels: { en: 'Community', ja: 'コミュニティ', ko: '커뮤니티' }, icon: MessageCircle },
-  { id: 'orders', label: '我的订单', labels: { en: 'Orders', ja: '注文', ko: '주문' }, icon: Package },
-  { id: 'profile', label: '我的主页', labels: { en: 'Profile', ja: 'プロフィール', ko: '프로필' }, icon: UserRound },
+const NAV_DEFS = [
+  { id: 'home', icon: Home },
+  { id: 'listing', icon: ShoppingBag },
+  { id: 'service', icon: Bike },
+  { id: 'game', icon: Gamepad2 },
+  { id: 'wanted', icon: Search },
+  { id: 'community', icon: MessageCircle },
+  { id: 'orders', icon: Package },
+  { id: 'profile', icon: UserRound },
 ]
 
-const MOBILE_NAV_ITEMS = [
-  NAV_ITEMS[0],
-  NAV_ITEMS[1],
-  NAV_ITEMS[2],
-  { id: 'messages', label: '私信', labels: { en: 'Messages', ja: 'メッセージ', ko: '메시지' }, icon: MessageCircle },
-  NAV_ITEMS[7],
+const MOBILE_NAV_DEFS = [
+  NAV_DEFS[0],
+  NAV_DEFS[1],
+  NAV_DEFS[2],
+  { id: 'messages', icon: MessageCircle },
+  NAV_DEFS[7],
 ]
-
-const UI_COPY = {
-  'zh-CN': { search: '搜索商品、服务、话题或用户', campusLabel: '选择校区', publish: '发布内容', trust: '信任等级', profile: '个人主页', logout: '退出登录' },
-  'en-US': { search: 'Search items, services, topics or users', campusLabel: 'Choose school', publish: 'Publish', trust: 'Trust level', profile: 'Profile', logout: 'Log out' },
-  'ja-JP': { search: '商品、サービス、話題、ユーザーを検索', campusLabel: '学校を選択', publish: '投稿', trust: '信頼レベル', profile: 'プロフィール', logout: 'ログアウト' },
-  'ko-KR': { search: '상품, 서비스, 주제, 사용자를 검색', campusLabel: '학교 선택', publish: '게시', trust: '신뢰 등급', profile: '프로필', logout: '로그아웃' },
-}
 
 const TYPE_META = {
-  listing: { label: '二手', icon: ShoppingBag, tone: 'violet' },
-  service: { label: '跑腿', icon: Bike, tone: 'coral' },
-  game: { label: '游戏', icon: Gamepad2, tone: 'teal' },
-  wanted: { label: '求购', icon: Search, tone: 'yellow' },
-  community: { label: '社区', icon: MessageCircle, tone: 'blue' },
+  listing: { icon: ShoppingBag, tone: 'violet' },
+  service: { icon: Bike, tone: 'coral' },
+  game: { icon: Gamepad2, tone: 'teal' },
+  wanted: { icon: Search, tone: 'yellow' },
+  community: { icon: MessageCircle, tone: 'blue' },
 }
 
 const EMPTY_SUMMARY = {
@@ -129,13 +123,6 @@ const EMPTY_SUMMARY = {
 
 const PAGE_LOADED_AT = Date.now()
 const itemKey = (item) => `${item.type || item.item_type}-${item.id || item.item_id}`
-
-function getLangGroup(language) {
-  if (language?.startsWith('en')) return 'en'
-  if (language?.startsWith('ja')) return 'ja'
-  if (language?.startsWith('ko')) return 'ko'
-  return 'zh'
-}
 
 function relativeTime(value) {
   if (!value) return '刚刚'
@@ -159,7 +146,7 @@ function likeCountOf(item) {
   return item?.like_count || 0
 }
 
-function FeedCard({ item, saved, onOpen, onOpenUser, onSave, onReact, onShare, onMessage, onPurchase, onTopic, onPreviewImage, reactBurst }) {
+function FeedCard({ item, saved, onOpen, onOpenUser, onSave, onReact, onShare, onMessage, onPurchase, onTopic, onPreviewImage, reactBurst, t }) {
   const meta = TYPE_META[item.type] || TYPE_META.listing
   const Icon = meta.icon
   const author = item.seller || item.author || item.requester || {}
@@ -182,7 +169,7 @@ function FeedCard({ item, saved, onOpen, onOpenUser, onSave, onReact, onShare, o
       <div className="x-feed-body">
         <div className="x-feed-author">
           <button type="button" onClick={stop(() => onOpenUser(author.id))}><strong>{author.nickname || author.username || '校园同学'}</strong><span>@{author.username || 'campus'} · {relativeTime(item.created_at)}</span></button>
-          <Badge variant="outline" data-tone={meta.tone}><Icon /> {meta.label}</Badge>
+          <Badge variant="outline" data-tone={meta.tone}><Icon /> {t(`type.${item.type}`, item.type)}</Badge>
         </div>
         <h3>{item.title || '校园动态'}</h3>
         <p>{item.description}</p>
@@ -213,8 +200,12 @@ function FeedCard({ item, saved, onOpen, onOpenUser, onSave, onReact, onShare, o
             <span>{likeCountOf(item)}</span>
           </button>
           <button type="button" className={cn(saved && 'is-saved')} onClick={stop(() => onSave(item))}><Bookmark className={cn(saved && 'fill-current')} /></button>
-          {item.type !== 'community' ? <Button size="sm" onClick={stop(() => onPurchase(item))}>{item.type === 'service' ? '接单' : item.type === 'wanted' ? '我有货' : '购买'}</Button> : null}
-          <Button variant="ghost" size="icon" aria-label="私信发布者" onClick={stop(() => onMessage(item))}><MessageCircle /></Button>
+          {item.type !== 'community' ? (
+            <Button size="sm" onClick={stop(() => onPurchase(item))}>
+              {item.type === 'service' ? t('action.accept') : item.type === 'wanted' ? t('action.haveIt') : t('action.buy')}
+            </Button>
+          ) : null}
+          <Button variant="ghost" size="icon" aria-label={t('action.dm')} onClick={stop(() => onMessage(item))}><MessageCircle /></Button>
         </div>
       </div>
     </article>
@@ -247,10 +238,17 @@ export default function MarketplaceHome({ user, onLogout, onUserUpdate }) {
   const [feedLightbox, setFeedLightbox] = useState({ open: false, images: [], index: 0 })
   const [feedReactBurst, setFeedReactBurst] = useState('')
 
-  const language = currentUser?.profile?.language || localStorage.getItem('campus_language') || 'zh-CN'
+  const language = normalizeLang(currentUser?.profile?.language || localStorage.getItem('campus_language') || 'zh-CN')
   const isAdmin = Boolean(currentUser?.is_admin)
-  const langGroup = getLangGroup(language)
-  const copy = UI_COPY[language] || UI_COPY['zh-CN']
+  const t = useCallback((key, fallback = '') => translate(language, key, fallback), [language])
+  const navItems = useMemo(
+    () => NAV_DEFS.map((item) => ({ ...item, label: navLabel(language, item.id) })),
+    [language],
+  )
+  const mobileNavItems = useMemo(
+    () => MOBILE_NAV_DEFS.map((item) => ({ ...item, label: navLabel(language, item.id) })),
+    [language],
+  )
   const displayProfile = currentUser?.profile || {}
   const displayName = displayProfile.nickname || currentUser?.username || '校园同学'
   const displayAvatar = displayProfile.avatar_url
@@ -510,6 +508,11 @@ export default function MarketplaceHome({ user, onLogout, onUserUpdate }) {
     setCurrentUser(merged)
     onUserUpdate?.(merged)
     if (merged.profile?.school) setCampus(merged.profile.school)
+    if (merged.profile?.language) {
+      const nextLang = normalizeLang(merged.profile.language)
+      localStorage.setItem('campus_language', nextLang)
+      document.documentElement.lang = nextLang
+    }
   }
 
   const openNotification = async (notification) => {
@@ -608,35 +611,35 @@ export default function MarketplaceHome({ user, onLogout, onUserUpdate }) {
     <main className="dark campus-shell">
       {showParticles ? <div className="campus-particles-bg" aria-hidden="true"><Particles particleColors={['#8b5cf6', '#a78bfa', '#f5d0fe']} particleCount={90} particleSpread={13} speed={0.06} particleBaseSize={72} sizeRandomness={1.2} alphaParticles disableRotation pixelRatio={1} /></div> : null}
       <aside className="campus-sidebar">
-        <button type="button" className="campus-logo" onClick={() => selectNav('home')}><span><Sparkles /></span><span>校园脉动<small>Campus Pulse</small></span></button>
-        <div className="campus-line-nav" aria-label="主导航"><LineSidebar items={NAV_ITEMS.map((item) => item.labels?.[langGroup] || item.label)} defaultActive={Math.max(0, NAV_ITEMS.findIndex((item) => item.id === activeNav))} accentColor="#a78bfa" textColor="rgba(216,180,254,.62)" showIndex={false} showMarker={false} maxShift={22} proximityRadius={138} itemGap={19} fontSize={1.02} smoothing={80} className="campus-main-line-sidebar" onItemClick={(index) => selectNav(NAV_ITEMS[index].id)} /></div>
+        <button type="button" className="campus-logo" onClick={() => selectNav('home')}><span><Sparkles /></span><span>{t('ui.pulse')}<small>Campus Pulse</small></span></button>
+        <div className="campus-line-nav" aria-label="主导航"><LineSidebar items={navItems.map((item) => item.label)} defaultActive={Math.max(0, navItems.findIndex((item) => item.id === activeNav))} accentColor="#a78bfa" textColor="rgba(216,180,254,.62)" showIndex={false} showMarker={false} maxShift={22} proximityRadius={138} itemGap={19} fontSize={1.02} smoothing={80} className="campus-main-line-sidebar" onItemClick={(index) => selectNav(navItems[index].id)} /></div>
         <SpotlightCard className="campus-sidebar-stats" spotlightColor="rgba(167, 139, 250, 0.34)">
-          <p>{copy.trust}</p>
+          <p>{t('ui.trust')}</p>
           <strong>{trustGrade}</strong>
-          <div className="campus-trust-bar" role="progressbar" aria-valuenow={trustScore} aria-valuemin={0} aria-valuemax={1000} aria-label="信任分进度">
+          <div className="campus-trust-bar" role="progressbar" aria-valuenow={trustScore} aria-valuemin={0} aria-valuemax={1000} aria-label={t('ui.trust')}>
             <span style={{ width: `${trustPercent}%` }} />
           </div>
           <small>{trustScore} / 1000</small>
         </SpotlightCard>
-        <StarBorder as="button" type="button" className="campus-publish-button" color="#c084fc" speed="4.8s" thickness={2} onClick={() => openPublish('listing')}><PenLine /> {copy.publish}</StarBorder>
+        <StarBorder as="button" type="button" className="campus-publish-button" color="#c084fc" speed="4.8s" thickness={2} onClick={() => openPublish('listing')}><PenLine /> {t('ui.publish')}</StarBorder>
       </aside>
 
       <section className="campus-workspace">
         <header className="campus-topbar">
           <DropdownMenu>
             <DropdownMenuTrigger asChild><Button variant="outline" className="campus-selector"><MapPin /> {campus} <ChevronDown /></Button></DropdownMenuTrigger>
-            <DropdownMenuContent align="start"><DropdownMenuLabel>{copy.campusLabel}</DropdownMenuLabel><DropdownMenuGroup>{['南通理工学院南通校区', '南通理工学院海安校区'].map((school) => <DropdownMenuItem key={school} onClick={async () => { try { const response = await updateUserProfile({ school }); handleProfileChange({ ...currentUser, profile: { ...(currentUser?.profile || {}), ...response.profile } }); setNotice(`已切换到${school}`) } catch (error) { setNotice(error.response?.data?.detail || '学校保存失败') } }}>{school}</DropdownMenuItem>)}</DropdownMenuGroup></DropdownMenuContent>
+            <DropdownMenuContent align="start"><DropdownMenuLabel>{t('ui.campusLabel')}</DropdownMenuLabel><DropdownMenuGroup>{['南通理工学院南通校区', '南通理工学院海安校区'].map((school) => <DropdownMenuItem key={school} onClick={async () => { try { const response = await updateUserProfile({ school }); handleProfileChange({ ...currentUser, profile: { ...(currentUser?.profile || {}), ...response.profile } }); setNotice(`${school}`) } catch (error) { setNotice(error.response?.data?.detail || '学校保存失败') } }}>{school}</DropdownMenuItem>)}</DropdownMenuGroup></DropdownMenuContent>
           </DropdownMenu>
-          <InputGroup className="campus-search"><InputGroupAddon><Search /></InputGroupAddon><InputGroupInput value={search} onChange={(event) => setSearch(event.target.value)} placeholder={copy.search} /></InputGroup>
+          <InputGroup className="campus-search"><InputGroupAddon><Search /></InputGroupAddon><InputGroupInput value={search} onChange={(event) => setSearch(event.target.value)} placeholder={t('ui.search')} /></InputGroup>
           <div className="campus-top-actions">
             <DropdownMenu>
               <DropdownMenuTrigger asChild><Button variant="ghost" size="icon" aria-label="通知" className="relative"><Bell />{summary.unread_notifications ? <span className="campus-unread">{summary.unread_notifications}</span> : null}</Button></DropdownMenuTrigger>
               <DropdownMenuContent align="end" className="notification-popover">
                 <div className="notification-header">
-                  <strong>通知</strong>
+                  <strong>{t('ui.notifications')}</strong>
                   <div className="notification-header-actions">
-                    <button type="button" onClick={markAllRead}><CheckCheck /> 全部已读</button>
-                    <button type="button" onClick={clearNotifications}><Trash2 /> 一键清除</button>
+                    <button type="button" onClick={markAllRead}><CheckCheck /> {t('ui.markAllRead')}</button>
+                    <button type="button" onClick={clearNotifications}><Trash2 /> {t('ui.clearAll')}</button>
                   </div>
                 </div>
                 <div className="notification-list">
@@ -657,12 +660,12 @@ export default function MarketplaceHome({ user, onLogout, onUserUpdate }) {
                           className={cn('notification-follow-btn', notification.is_following_actor && 'is-following')}
                           onClick={(event) => followBack(event, notification)}
                         >
-                          {notification.is_following_actor ? <><UserCheck /> 已关注</> : <><UserPlus /> 回关</>}
+                          {notification.is_following_actor ? <><UserCheck /> {t('ui.following')}</> : <><UserPlus /> {t('ui.followBack')}</>}
                         </em>
                       ) : null}
                       <button type="button" className="notification-delete" aria-label="删除通知" onClick={(event) => removeNotification(event, notification.id)}><Trash2 /></button>
                     </div>
-                  )) : <div className="notification-empty">暂时没有通知</div>}
+                  )) : <div className="notification-empty">{t('ui.noNotifications')}</div>}
                 </div>
               </DropdownMenuContent>
             </DropdownMenu>
@@ -673,10 +676,10 @@ export default function MarketplaceHome({ user, onLogout, onUserUpdate }) {
                 <DropdownMenuLabel>{user?.email}</DropdownMenuLabel>
                 <DropdownMenuSeparator />
                 <DropdownMenuGroup>
-                  <DropdownMenuItem onClick={() => selectNav('profile')}><UserRound /> {copy.profile}</DropdownMenuItem>
-                  <DropdownMenuItem onClick={() => selectNav('orders')}><Package /> 我的订单</DropdownMenuItem>
-                  {isAdmin ? <DropdownMenuItem onClick={() => selectNav('admin')}><Shield /> 管理后台</DropdownMenuItem> : null}
-                  <DropdownMenuItem onClick={onLogout}><LogOut /> {copy.logout}</DropdownMenuItem>
+                  <DropdownMenuItem onClick={() => selectNav('profile')}><UserRound /> {t('ui.profile')}</DropdownMenuItem>
+                  <DropdownMenuItem onClick={() => selectNav('orders')}><Package /> {t('nav.orders')}</DropdownMenuItem>
+                  {isAdmin ? <DropdownMenuItem onClick={() => selectNav('admin')}><Shield /> {t('ui.admin')}</DropdownMenuItem> : null}
+                  <DropdownMenuItem onClick={onLogout}><LogOut /> {t('ui.logout')}</DropdownMenuItem>
                 </DropdownMenuGroup>
               </DropdownMenuContent>
             </DropdownMenu>
@@ -685,6 +688,7 @@ export default function MarketplaceHome({ user, onLogout, onUserUpdate }) {
 
         {checkoutItem ? (
           <CheckoutPlaceholder
+            language={language}
             item={checkoutItem}
             onBack={() => { setCheckoutItem(null); handleAction(checkoutItem) }}
             onMessage={openChat}
@@ -694,6 +698,7 @@ export default function MarketplaceHome({ user, onLogout, onUserUpdate }) {
           />
         ) : selectedDetail ? (
           <ContentDetail
+            language={language}
             target={selectedDetail}
             currentUser={currentUser}
             onBack={() => setSelectedDetail(null)}
@@ -714,38 +719,39 @@ export default function MarketplaceHome({ user, onLogout, onUserUpdate }) {
         ) : activeNav === 'orders' ? (
           selectedOrder ? (
             <section className="order-detail-panel">
-              <Button variant="ghost" onClick={() => setSelectedOrder(null)}>返回订单列表</Button>
+              <Button variant="ghost" onClick={() => setSelectedOrder(null)}>{t('detail.back')} · {t('orders.title')}</Button>
               <article className="order-detail-card">
                 <header>
-                  <Badge>{selectedOrder.role === 'buyer' ? '买家视角' : '卖家视角'}</Badge>
+                  <Badge>{selectedOrder.role === 'buyer' ? t('orders.buyerRole') : t('orders.sellerRole')}</Badge>
                   <h1>{selectedOrder.title}</h1>
                   <strong>{selectedOrder.status_label}</strong>
                 </header>
-                <p>订单号 {selectedOrder.order_no}</p>
+                <p>{t('orders.orderNo', '订单号')} {selectedOrder.order_no}</p>
                 <p className="order-price">¥{Number(selectedOrder.amount || 0).toFixed(2)}</p>
-                <p>交付方式：{selectedOrder.meeting_location || '校内当面交易'}</p>
-                <p>{selectedOrder.role === 'buyer' ? `卖家：${selectedOrder.seller?.nickname || selectedOrder.seller?.username}` : `买家：${selectedOrder.buyer?.nickname || selectedOrder.buyer?.username}`}</p>
-                {selectedOrder.buyer_note ? <p>买家备注：{selectedOrder.buyer_note}</p> : null}
-                {selectedOrder.seller_note ? <p>卖家备注：{selectedOrder.seller_note}</p> : null}
+                <p>{t('orders.delivery', '交付')}：{selectedOrder.meeting_location || t('orders.campusMeet', '校内当面交易')}</p>
+                <p>{selectedOrder.role === 'buyer' ? `${t('orders.sellerRole')}: ${selectedOrder.seller?.nickname || selectedOrder.seller?.username}` : `${t('orders.buyerRole')}: ${selectedOrder.buyer?.nickname || selectedOrder.buyer?.username}`}</p>
+                {selectedOrder.buyer_note ? <p>{selectedOrder.buyer_note}</p> : null}
+                {selectedOrder.seller_note ? <p>{selectedOrder.seller_note}</p> : null}
                 <div className="order-detail-actions">
-                  <Button variant="outline" onClick={() => setSelectedOrder(null)}>返回列表操作</Button>
+                  <Button variant="outline" onClick={() => setSelectedOrder(null)}>{t('detail.back')}</Button>
                   {selectedOrder.role === 'buyer' && selectedOrder.seller ? (
-                    <Button onClick={() => openChat({ user: selectedOrder.seller, context: { type: 'listing', id: selectedOrder.listing_id, title: selectedOrder.title } })}>联系卖家</Button>
+                    <Button onClick={() => openChat({ user: selectedOrder.seller, context: { type: 'listing', id: selectedOrder.listing_id, title: selectedOrder.title } })}>{t('ui.message')}</Button>
                   ) : null}
                   {selectedOrder.role === 'seller' && selectedOrder.buyer ? (
-                    <Button onClick={() => openChat({ user: selectedOrder.buyer, context: { type: 'listing', id: selectedOrder.listing_id, title: selectedOrder.title } })}>联系买家</Button>
+                    <Button onClick={() => openChat({ user: selectedOrder.buyer, context: { type: 'listing', id: selectedOrder.listing_id, title: selectedOrder.title } })}>{t('ui.message')}</Button>
                   ) : null}
                 </div>
               </article>
             </section>
           ) : (
-            <OrdersCenter onBack={() => selectNav('home')} onNotice={setNotice} onOpenOrder={openOrderDetail} onPurchase={(item) => setCheckoutItem(item)} />
+            <OrdersCenter language={language} onBack={() => selectNav('home')} onNotice={setNotice} onOpenOrder={openOrderDetail} onPurchase={(item) => setCheckoutItem(item)} />
           )
         ) : activeNav === 'profile' ? (
-          <ProfileCenter user={currentUser} onLogout={onLogout} onNotice={setNotice} onProfileChange={handleProfileChange} onOpenItem={handleAction} onOpenUser={openUser} />
+          <ProfileCenter user={currentUser} language={language} onLogout={onLogout} onNotice={setNotice} onProfileChange={handleProfileChange} onOpenItem={handleAction} onOpenUser={openUser} />
         ) : activeNav === 'messages' ? (
           <MessagesCenter
             currentUser={currentUser}
+            language={language}
             initialConversationId={initialConversationId}
             onBack={() => selectNav('home')}
             onNotice={setNotice}
@@ -756,16 +762,16 @@ export default function MarketplaceHome({ user, onLogout, onUserUpdate }) {
         ) : (
           <div className="campus-main">
             <div className="campus-center">
-              <Card className="pulse-composer"><CardContent><Avatar className="size-10"><AvatarImage src={displayAvatar || undefined} alt={displayName} /><AvatarFallback>{displayName.slice(0, 1)}</AvatarFallback></Avatar><button type="button" onClick={() => openPublish('community')}>分享校园动态、发布商品、服务或求助...</button><Button variant="secondary" onClick={() => openPublish('community')}><PenLine /> 发布</Button></CardContent><div className="pulse-quick-actions"><button type="button" onClick={() => openPublish('listing')}><ShoppingBag /> 发布二手</button><button type="button" onClick={() => { setView('radar'); setActiveNav('service') }}><Bike /> 跑腿代取</button><button type="button" onClick={() => openPublish('wanted')}><Search /> 发求购</button><button type="button" onClick={() => openPublish('community')}><MessageCircle /> 发话题</button></div></Card>
-              <div className="pulse-view-switch"><div><button type="button" className={cn(view === 'pulse' && 'is-active')} onClick={() => setView('pulse')}><Compass /> 校园脉动</button><button type="button" className={cn(view === 'radar' && 'is-active')} onClick={() => setView('radar')}><Map /> 校园雷达</button></div><Badge variant="secondary"><span className="status-dot" /> 实时在线</Badge></div>
-              {view === 'radar' ? <CampusRadar tasks={tasks} onAcceptTask={handleAcceptTask} onOpenTask={handleAction} onLocate={(address) => setNotice(`定位成功：${address}`)} /> : <><Tabs value={filter} onValueChange={(value) => { setFilter(value); setTopicFilter('') }} className="pulse-filters"><TabsList><TabsTrigger value="all">全部</TabsTrigger><TabsTrigger value="listing">二手</TabsTrigger><TabsTrigger value="service">跑腿</TabsTrigger><TabsTrigger value="game">游戏</TabsTrigger><TabsTrigger value="wanted">求购</TabsTrigger><TabsTrigger value="community">社区</TabsTrigger></TabsList></Tabs>{topicFilter ? <div className="active-topic-filter"><span>#{topicFilter}</span><button type="button" onClick={() => setTopicFilter('')}>查看全部社区内容</button></div> : null}<div className="pulse-feed">{loading ? Array.from({ length: 3 }, (_, index) => <div key={index} className="x-feed-post"><Skeleton className="size-11 shrink-0 rounded-full" /><div className="flex flex-1 flex-col gap-3"><Skeleton className="h-5 w-2/3" /><Skeleton className="h-4 w-full" /><Skeleton className="h-28 w-full" /></div></div>) : filteredFeed.length ? filteredFeed.map((item) => <FeedCard key={itemKey(item)} item={item} saved={savedKeys.has(itemKey(item)) || item.favorited} onOpen={handleAction} onOpenUser={openUser} onSave={handleSave} onReact={handleFeedReact} reactBurst={feedReactBurst} onShare={handleFeedShare} onMessage={openChat} onPurchase={(entry) => setCheckoutItem(entry)} onTopic={openTopic} onPreviewImage={(src) => setFeedLightbox({ open: true, images: [src], index: 0 })} />) : <Card className="pulse-empty"><Search /><h3>没有找到相关内容</h3><p>换个关键词，或者成为第一个发布的人。</p><Button onClick={() => openPublish('listing')}>立即发布</Button></Card>}</div></>}
+              <Card className="pulse-composer"><CardContent><Avatar className="size-10"><AvatarImage src={displayAvatar || undefined} alt={displayName} /><AvatarFallback>{displayName.slice(0, 1)}</AvatarFallback></Avatar><button type="button" onClick={() => openPublish('community')}>{t('ui.composerPlaceholder')}</button><Button variant="secondary" onClick={() => openPublish('community')}><PenLine /> {t('ui.publish')}</Button></CardContent><div className="pulse-quick-actions"><button type="button" onClick={() => openPublish('listing')}><ShoppingBag /> {t('ui.publishListing')}</button><button type="button" onClick={() => { setView('radar'); setActiveNav('service') }}><Bike /> {t('ui.publishService')}</button><button type="button" onClick={() => openPublish('wanted')}><Search /> {t('ui.publishWanted')}</button><button type="button" onClick={() => openPublish('community')}><MessageCircle /> {t('ui.publishCommunity')}</button></div></Card>
+              <div className="pulse-view-switch"><div><button type="button" className={cn(view === 'pulse' && 'is-active')} onClick={() => setView('pulse')}><Compass /> {t('ui.pulse')}</button><button type="button" className={cn(view === 'radar' && 'is-active')} onClick={() => setView('radar')}><Map /> {t('ui.radar')}</button></div><Badge variant="secondary"><span className="status-dot" /> {t('ui.live')}</Badge></div>
+              {view === 'radar' ? <CampusRadar tasks={tasks} onAcceptTask={handleAcceptTask} onOpenTask={handleAction} onLocate={(address) => setNotice(address)} /> : <><Tabs value={filter} onValueChange={(value) => { setFilter(value); setTopicFilter('') }} className="pulse-filters"><TabsList><TabsTrigger value="all">{t('ui.filterAll')}</TabsTrigger><TabsTrigger value="listing">{t('type.listing')}</TabsTrigger><TabsTrigger value="service">{t('type.service')}</TabsTrigger><TabsTrigger value="game">{t('type.game')}</TabsTrigger><TabsTrigger value="wanted">{t('type.wanted')}</TabsTrigger><TabsTrigger value="community">{t('type.community')}</TabsTrigger></TabsList></Tabs>{topicFilter ? <div className="active-topic-filter"><span>#{topicFilter}</span><button type="button" onClick={() => setTopicFilter('')}>{t('ui.viewAllCommunity')}</button></div> : null}<div className="pulse-feed">{loading ? Array.from({ length: 3 }, (_, index) => <div key={index} className="x-feed-post"><Skeleton className="size-11 shrink-0 rounded-full" /><div className="flex flex-1 flex-col gap-3"><Skeleton className="h-5 w-2/3" /><Skeleton className="h-4 w-full" /><Skeleton className="h-28 w-full" /></div></div>) : filteredFeed.length ? filteredFeed.map((item) => <FeedCard key={itemKey(item)} item={item} t={t} saved={savedKeys.has(itemKey(item)) || item.favorited} onOpen={handleAction} onOpenUser={openUser} onSave={handleSave} onReact={handleFeedReact} reactBurst={feedReactBurst} onShare={handleFeedShare} onMessage={openChat} onPurchase={(entry) => setCheckoutItem(entry)} onTopic={openTopic} onPreviewImage={(src) => setFeedLightbox({ open: true, images: [src], index: 0 })} />) : <Card className="pulse-empty"><Search /><h3>{t('ui.noFeed')}</h3><p>{t('ui.noFeedHint')}</p><Button onClick={() => openPublish('listing')}>{t('ui.publishNow')}</Button></Card>}</div></>}
             </div>
 
             <aside className="campus-right-rail">
-              <Card className="pulse-heat-card"><CardHeader><CardTitle><TrendingUp /> 今日校园热度</CardTitle></CardHeader><CardContent><button type="button" className="heat-stat-btn" onClick={() => selectNav('listing')}><strong>{summary.active_listings.toLocaleString()}</strong><span>在售好物</span></button><button type="button" className="heat-stat-btn" onClick={() => selectNav('community')}><strong>{summary.community_posts.toLocaleString()}</strong><span>活跃发布</span></button><button type="button" className="heat-stat-btn" onClick={() => selectNav('service')}><strong>{summary.open_tasks}</strong><span>待接任务</span></button></CardContent></Card>
-              <Card><CardHeader><CardTitle>热门话题</CardTitle><Button variant="ghost" size="sm" onClick={() => selectNav('community')}>更多</Button></CardHeader><CardContent className="pulse-topic-list">{summary.topics?.length ? summary.topics.map((topic) => <button key={topic.name} type="button" onClick={() => openTopic(topic.name)}><span>#</span> {topic.name} <small>{topic.count}</small></button>) : <div className="right-rail-empty">发布第一条校园话题</div>}</CardContent></Card>
-              <Card><CardHeader><CardTitle>我的订单</CardTitle><Badge variant="secondary">{summary.my_orders} 笔</Badge></CardHeader><CardContent className="pulse-order">{summary.recent_order ? <button type="button" onClick={() => selectNav('orders')}><Package /><span><strong>{summary.recent_order.title}</strong><small>{summary.recent_order.status}</small></span></button> : <div className="right-rail-empty">暂无进行中的订单</div>}</CardContent></Card>
-              <Card><CardHeader><CardTitle>附近靠谱同学</CardTitle><CheckCircle2 /></CardHeader><CardContent className="pulse-people">{summary.nearby_users?.length ? summary.nearby_users.map((person) => <div key={person.id}><button type="button" className="nearby-person" onClick={() => openUser(person.id)}><Avatar className="size-8"><AvatarImage src={person.avatar_url || undefined} alt={person.nickname || person.username} /><AvatarFallback>{(person.nickname || person.username || '同').slice(0, 1)}</AvatarFallback></Avatar><span className={person.is_online ? 'presence-dot is-online' : 'presence-dot'} /><span><strong>{person.nickname || person.username}</strong><small><Star /> 信任 {person.trust?.score ?? 800} · {person.is_online ? '在线' : '近期活跃'}</small></span></button><Button variant="outline" size="sm" onClick={() => openChat({ user: person })}>私信</Button></div>) : <div className="right-rail-empty">暂无其他活跃发布者</div>}</CardContent></Card>
+              <Card className="pulse-heat-card"><CardHeader><CardTitle><TrendingUp /> {t('ui.heat')}</CardTitle></CardHeader><CardContent><button type="button" className="heat-stat-btn" onClick={() => selectNav('listing')}><strong>{summary.active_listings.toLocaleString()}</strong><span>{t('ui.activeListings')}</span></button><button type="button" className="heat-stat-btn" onClick={() => selectNav('community')}><strong>{summary.community_posts.toLocaleString()}</strong><span>{t('ui.activePosts')}</span></button><button type="button" className="heat-stat-btn" onClick={() => selectNav('service')}><strong>{summary.open_tasks}</strong><span>{t('ui.openTasks')}</span></button></CardContent></Card>
+              <Card><CardHeader><CardTitle>{t('ui.hotTopics')}</CardTitle><Button variant="ghost" size="sm" onClick={() => selectNav('community')}>{t('ui.more')}</Button></CardHeader><CardContent className="pulse-topic-list">{summary.topics?.length ? summary.topics.map((topic) => <button key={topic.name} type="button" onClick={() => openTopic(topic.name)}><span>#</span> {topic.name} <small>{topic.count}</small></button>) : <div className="right-rail-empty">{t('ui.publishCommunity')}</div>}</CardContent></Card>
+              <Card><CardHeader><CardTitle>{t('ui.myOrders')}</CardTitle><Badge variant="secondary">{summary.my_orders}</Badge></CardHeader><CardContent className="pulse-order">{summary.recent_order ? <button type="button" onClick={() => selectNav('orders')}><Package /><span><strong>{summary.recent_order.title}</strong><small>{summary.recent_order.status}</small></span></button> : <div className="right-rail-empty">{t('ui.noOrders')}</div>}</CardContent></Card>
+              <Card><CardHeader><CardTitle>{t('ui.nearby')}</CardTitle><CheckCircle2 /></CardHeader><CardContent className="pulse-people">{summary.nearby_users?.length ? summary.nearby_users.map((person) => <div key={person.id}><button type="button" className="nearby-person" onClick={() => openUser(person.id)}><Avatar className="size-8"><AvatarImage src={person.avatar_url || undefined} alt={person.nickname || person.username} /><AvatarFallback>{(person.nickname || person.username || '同').slice(0, 1)}</AvatarFallback></Avatar><span className={person.is_online ? 'presence-dot is-online' : 'presence-dot'} /><span><strong>{person.nickname || person.username}</strong><small><Star /> {t('ui.trustScore')} {person.trust?.score ?? 800} · {person.is_online ? t('ui.online') : t('ui.recentActive')}</small></span></button><Button variant="outline" size="sm" onClick={() => openChat({ user: person })}>{t('ui.message')}</Button></div>) : <div className="right-rail-empty">{t('ui.noNearby')}</div>}</CardContent></Card>
             </aside>
           </div>
         )}
@@ -773,7 +779,7 @@ export default function MarketplaceHome({ user, onLogout, onUserUpdate }) {
 
       <LiquidGlassBar className="campus-mobile-nav" filterId="campus-mobile-nav-glass">
         <nav className="campus-mobile-nav-inner" aria-label="移动端导航">
-          {MOBILE_NAV_ITEMS.map((item) => {
+          {mobileNavItems.map((item) => {
             const Icon = item.icon
             return (
               <button
@@ -783,7 +789,7 @@ export default function MarketplaceHome({ user, onLogout, onUserUpdate }) {
                 onClick={() => selectNav(item.id)}
               >
                 <span className="campus-mobile-nav-icon"><Icon /></span>
-                <span className="campus-mobile-nav-label">{item.labels?.[langGroup] || item.label}</span>
+                <span className="campus-mobile-nav-label">{item.label}</span>
                 {item.id === 'messages' && summary.unread_messages ? <em>{summary.unread_messages}</em> : null}
               </button>
             )
@@ -791,7 +797,7 @@ export default function MarketplaceHome({ user, onLogout, onUserUpdate }) {
         </nav>
       </LiquidGlassBar>
       {notice ? <div className="campus-notice" role="status"><CheckCircle2 /> {notice}</div> : null}
-      <PublishDialog open={publishOpen} onOpenChange={setPublishOpen} initialType={publishType} onPublished={(response) => { setNotice(response?.message || '发布成功'); if (response?.type && response?.id) setSelectedDetail({ type: response.type, id: response.id }); loadData() }} />
+      <PublishDialog language={language} open={publishOpen} onOpenChange={setPublishOpen} initialType={publishType} onPublished={(response) => { setNotice(response?.message || t('ui.publish')); if (response?.type && response?.id) setSelectedDetail({ type: response.type, id: response.id }); loadData() }} />
       <ImageLightbox open={feedLightbox.open} images={feedLightbox.images} index={feedLightbox.index} onClose={() => setFeedLightbox((current) => ({ ...current, open: false }))} onIndexChange={(index) => setFeedLightbox((current) => ({ ...current, index }))} />
       <QuickChat request={quickChatRequest} currentUser={currentUser} onClose={() => setQuickChatRequest(null)} onNotice={setNotice} onConversationUpdate={() => { loadNotifications(); getMarketplaceSummary().then((response) => setSummary((current) => ({ ...current, ...response }))).catch(() => {}) }} onOpenCenter={() => { setInitialConversationId(null); selectNav('messages'); setQuickChatRequest(null) }} />
     </main>
