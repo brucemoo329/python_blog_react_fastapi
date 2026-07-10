@@ -2282,7 +2282,7 @@
 .detail-actions button.is-like,
 .detail-comment-actions button.is-like {
   color: #ef4444;
-  background: rgba(239, 68, 68, 0.12);
+  background: transparent;
   border-color: transparent;
 }
 .detail-actions button.is-like svg,
@@ -2290,6 +2290,11 @@
   color: #ef4444;
   fill: #ef4444;
   stroke: #ef4444;
+}
+.detail-actions button.is-burst svg,
+.detail-comment-actions button.is-burst svg {
+  animation: reaction-burst 0.42s cubic-bezier(.2, .9, .2, 1.2);
+  transform-origin: center;
 }
 
 .detail-actions button.is-dislike,
@@ -2637,23 +2642,25 @@
 }
 
 .x-feed-actions > button:hover,
-.x-post-actions > button:hover { color: #b6a7ff; background: rgba(139, 92, 246, 0.08); }
-.x-feed-actions > button:active,
-.x-post-actions > button:active { transform: scale(0.9); }
+.x-post-actions > button:hover { color: #b6a7ff; background: transparent; }
+.x-feed-actions > button:not(.is-like):hover,
+.x-post-actions > button:not(.is-like):hover { color: #b6a7ff; }
+.x-feed-actions > button:active svg,
+.x-post-actions > button:active svg { transform: scale(0.9); }
 .x-feed-actions svg,
 .x-post-actions svg { width: 18px; height: 18px; }
-/* Liked state: same solid red on feed + detail + comments */
+/* Liked state: only the heart icon turns solid red (no background box) */
 .x-feed-actions > button.is-like,
 .x-post-actions > button.is-like,
 .x-comment-actions > button.is-like {
   color: #ef4444;
-  background: rgba(239, 68, 68, 0.12);
+  background: transparent;
 }
 .x-feed-actions > button.is-like:hover,
 .x-post-actions > button.is-like:hover,
 .x-comment-actions > button.is-like:hover {
   color: #f87171;
-  background: rgba(239, 68, 68, 0.18);
+  background: transparent;
 }
 .x-feed-actions > button.is-like svg,
 .x-post-actions > button.is-like svg,
@@ -2672,10 +2679,12 @@
   fill: #f87171;
   stroke: #f87171;
 }
-.x-feed-actions > button.is-burst,
-.x-post-actions > button.is-burst,
-.x-comment-actions > button.is-burst {
+/* Burst only the icon, not the whole action row button */
+.x-feed-actions > button.is-burst svg,
+.x-post-actions > button.is-burst svg,
+.x-comment-actions > button.is-burst svg {
   animation: reaction-burst 0.42s cubic-bezier(.2, .9, .2, 1.2);
+  transform-origin: center;
 }
 .x-feed-actions .is-saved,
 .x-post-actions .is-saved { color: #aa8cff; }
@@ -2818,7 +2827,8 @@
 .x-comment-body > p { margin: 5px 0 7px; color: #d4d6dd; font-size: 13px; line-height: 1.58; white-space: pre-wrap; }
 .x-comment-actions { display: flex; align-items: center; justify-content: space-between; max-width: 430px; }
 .x-comment-actions button { display: inline-flex; align-items: center; gap: 5px; border: 0; border-radius: 999px; padding: 5px 8px; color: #717787; background: transparent; font-size: 10px; cursor: pointer; }
-.x-comment-actions button:hover { color: #ad9cff; background: rgba(139, 92, 246, 0.08); }
+.x-comment-actions button:hover { color: #ad9cff; background: transparent; }
+.x-comment-actions button.is-like:hover { color: #f87171; }
 .x-comment-actions svg { width: 15px; height: 15px; }
 .x-comment-actions .is-dislike { color: #ff9e66; }
 .x-comment-reply { display: grid; gap: 8px; margin-top: 8px; }
