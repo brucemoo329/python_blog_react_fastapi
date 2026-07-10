@@ -217,6 +217,8 @@ class Conversation(Base):
     user_a_id = Column(Integer, ForeignKey("users.id", ondelete="CASCADE"), nullable=False, index=True)
     user_b_id = Column(Integer, ForeignKey("users.id", ondelete="CASCADE"), nullable=False, index=True)
     listing_id = Column(Integer, ForeignKey("marketplace_listings.id", ondelete="SET NULL"), nullable=True)
+    context_type = Column(String(30), nullable=True, index=True)
+    context_id = Column(Integer, nullable=True, index=True)
     updated_at = Column(DateTime(timezone=True), server_default=func.now(), onupdate=func.now(), index=True)
 
     messages = relationship("Message", back_populates="conversation", cascade="all, delete-orphan")
@@ -228,12 +230,16 @@ class Message(Base):
     id = Column(Integer, primary_key=True, index=True)
     conversation_id = Column(Integer, ForeignKey("marketplace_conversations.id", ondelete="CASCADE"), nullable=False, index=True)
     sender_id = Column(Integer, ForeignKey("users.id", ondelete="CASCADE"), nullable=False, index=True)
-    content = Column(Text, nullable=False)
+    content = Column(LongText, nullable=False)
+    message_type = Column(String(20), default="text", index=True)
+    metadata_json = Column(LongText, nullable=True)
+    reply_to_id = Column(Integer, ForeignKey("marketplace_messages.id", ondelete="SET NULL"), nullable=True, index=True)
     is_read = Column(Boolean, default=False, index=True)
     created_at = Column(DateTime(timezone=True), server_default=func.now(), index=True)
 
     conversation = relationship("Conversation", back_populates="messages")
     sender = relationship("User")
+    reply_to = relationship("Message", remote_side=[id])
 
 
 class Review(Base):
@@ -277,6 +283,7 @@ class UserProfile(Base):
     language = Column(String(20), default="zh-CN")
     follower_count = Column(Integer, default=0)
     following_count = Column(Integer, default=0)
+    last_active_at = Column(DateTime(timezone=True), nullable=True, index=True)
     created_at = Column(DateTime(timezone=True), server_default=func.now())
     updated_at = Column(DateTime(timezone=True), server_default=func.now(), onupdate=func.now())
 
@@ -379,5 +386,84 @@ class ContentReaction(Base):
     target_id = Column(Integer, nullable=False, index=True)
     reaction_type = Column(String(20), nullable=False)
     created_at = Column(DateTime(timezone=True), server_default=func.now(), index=True)
+
+    user = relationship("User")
+
+
+class ContentFavorite(Base):
+    __tablename__ = "content_favorites"
+    __table_args__ = (
+        UniqueConstraint("user_id", "target_type", "target_id", name="uq_content_favorite_user_target"),
+    )
+
+    id = Column(Integer, primary_key=True)
+    user_id = Column(Integer, ForeignKey("users.id", ondelete="CASCADE"), nullable=False, index=True)
+    target_type = Column(String(30), nullable=False, index=True)
+    target_id = Column(Integer, nullable=False, index=True)
+    created_at = Column(DateTime(timezone=True), server_default=func.now(), index=True)
+
+    user = relationship("User")
+
+
+class UserFollow(Base):
+    __tablename__ = "user_follows"
+    __table_args__ = (
+        UniqueConstraint("follower_id", "following_id", name="uq_user_follow_pair"),
+    )
+
+    id = Column(Integer, primary_key=True)
+    follower_id = Column(Integer, ForeignKey("users.id", ondelete="CASCADE"), nullable=False, index=True)
+    following_id = Column(Integer, ForeignKey("users.id", ondelete="CASCADE"), nullable=False, index=True)
+    created_at = Column(DateTime(timezone=True), server_default=func.now(), index=True)
+
+    follower = relationship("User", foreign_keys=[follower_id])
+    following = relationship("User", foreign_keys=[following_id])
+
+
+class UserModeration(Base):
+    __tablename__ = "user_moderations"
+    __table_args__ = (
+        UniqueConstraint("user_id", "target_user_id", "action", name="uq_user_moderation_action"),
+    )
+
+    id = Column(Integer, primary_key=True)
+    user_id = Column(Integer, ForeignKey("users.id", ondelete="CASCADE"), nullable=False, index=True)
+    target_user_id = Column(Integer, ForeignKey("users.id", ondelete="CASCADE"), nullable=False, index=True)
+    action = Column(String(20), nullable=False, index=True)
+    created_at = Column(DateTime(timezone=True), server_default=func.now(), index=True)
+
+    user = relationship("User", foreign_keys=[user_id])
+    target_user = relationship("User", foreign_keys=[target_user_id])
+
+
+class Notification(Base):
+    __tablename__ = "user_notifications"
+
+    id = Column(Integer, primary_key=True)
+    recipient_id = Column(Integer, ForeignKey("users.id", ondelete="CASCADE"), nullable=False, index=True)
+    actor_id = Column(Integer, ForeignKey("users.id", ondelete="SET NULL"), nullable=True, index=True)
+    notification_type = Column(String(40), nullable=False, index=True)
+    title = Column(String(120), nullable=False)
+    content = Column(String(500), nullable=True)
+    target_type = Column(String(30), nullable=True, index=True)
+    target_id = Column(Integer, nullable=True, index=True)
+    is_read = Column(Boolean, default=False, index=True)
+    created_at = Column(DateTime(timezone=True), server_default=func.now(), index=True)
+
+    recipient = relationship("User", foreign_keys=[recipient_id])
+    actor = relationship("User", foreign_keys=[actor_id])
+
+
+class MessageReaction(Base):
+    __tablename__ = "message_reactions"
+    __table_args__ = (
+        UniqueConstraint("message_id", "user_id", "emoji", name="uq_message_reaction_user_emoji"),
+    )
+
+    id = Column(Integer, primary_key=True)
+    message_id = Column(Integer, ForeignKey("marketplace_messages.id", ondelete="CASCADE"), nullable=False, index=True)
+    user_id = Column(Integer, ForeignKey("users.id", ondelete="CASCADE"), nullable=False, index=True)
+    emoji = Column(String(20), nullable=False)
+    created_at = Column(DateTime(timezone=True), server_default=func.now())
 
     user = relationship("User")

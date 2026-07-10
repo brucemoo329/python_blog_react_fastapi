@@ -77,6 +77,20 @@ DATABASE_URL=mysql+pymysql://用户名:URL编码后的密码@127.0.0.1:3306/blog
 - `POST /marketplace/community`
 - `POST /marketplace/favorites`
 - `POST /marketplace/orders/listing/{id}`
+- `GET /marketplace/detail/{type}/{id}`
+- `POST /marketplace/comments`
+- `DELETE /marketplace/comments/{id}`
+- `POST /marketplace/reactions`
+- `POST /marketplace/shares`
+- `POST /marketplace/relationships/follow/{user_id}`
+- `POST /marketplace/relationships/{mute|block}/{user_id}`
+- `POST /marketplace/reports`
+- `GET /marketplace/notifications`
+- `GET /marketplace/users/{user_id}`
+- `GET /marketplace/conversations`
+- `POST /marketplace/conversations/start`
+- `GET|POST /marketplace/conversations/{id}/messages`
+- `POST /marketplace/messages/{id}/reactions`
 
 Docker 部署后统一通过 `/api` 访问，例如浏览器请求 `/api/login` 会由 Nginx 转发到 FastAPI 的 `/login`。
 
@@ -87,7 +101,7 @@ cd backend
 .\venv\Scripts\python.exe seed_marketplace.py
 ```
 
-新增表覆盖商品分类、商品与图片、跑腿任务、游戏交易、求购、校园动态、订单、收藏、会话、消息、评价和举报。
+新增表覆盖商品分类、商品与图片、跑腿任务、游戏交易、求购、校园动态、订单、统一收藏、关注、屏蔽/拉黑、通知、持久化会话、消息、消息表情、评价和举报。
 
 ## 检查
 

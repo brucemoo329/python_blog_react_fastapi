@@ -38,10 +38,7 @@ export default function LineSidebar({
   const smoothingRef = useRef(smoothing)
   const [activeIndex, setActiveIndex] = useState(defaultActive)
 
-  activeRef.current = activeIndex
-  smoothingRef.current = smoothing
-
-  const runFrame = useCallback((now) => {
+  const runFrame = useCallback(function frame(now) {
     const dt = Math.min((now - lastRef.current) / 1000, 0.05)
     lastRef.current = now
     const tau = Math.max(smoothingRef.current, 1) / 1000
@@ -61,7 +58,7 @@ export default function LineSidebar({
       if (!settled) moving = true
     }
 
-    rafRef.current = moving ? requestAnimationFrame(runFrame) : null
+    rafRef.current = moving ? requestAnimationFrame(frame) : null
   }, [])
 
   const startLoop = useCallback(() => {
@@ -101,8 +98,13 @@ export default function LineSidebar({
   }, [defaultActive])
 
   useEffect(() => {
+    activeRef.current = activeIndex
     startLoop()
   }, [activeIndex, startLoop])
+
+  useEffect(() => {
+    smoothingRef.current = smoothing
+  }, [smoothing])
 
   useEffect(() => () => {
     if (rafRef.current != null) cancelAnimationFrame(rafRef.current)

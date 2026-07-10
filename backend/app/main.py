@@ -19,6 +19,7 @@ def ensure_runtime_schema():
         "ALTER TABLE user_profiles MODIFY COLUMN avatar_url LONGTEXT NULL",
         "ALTER TABLE user_profiles ADD COLUMN background_url LONGTEXT NULL",
         "ALTER TABLE user_profiles ADD COLUMN background_theme VARCHAR(40) DEFAULT 'teal'",
+        "ALTER TABLE user_profiles ADD COLUMN last_active_at DATETIME NULL",
         "ALTER TABLE marketplace_listings MODIFY COLUMN category_id INT NULL",
         "ALTER TABLE marketplace_listing_images MODIFY COLUMN image_url LONGTEXT NOT NULL",
         "ALTER TABLE marketplace_service_tasks ADD COLUMN image_url LONGTEXT NULL",
@@ -30,6 +31,12 @@ def ensure_runtime_schema():
         "ALTER TABLE marketplace_community_posts ADD COLUMN source_id INT NULL",
         "ALTER TABLE marketplace_community_posts ADD COLUMN source_title VARCHAR(160) NULL",
         "ALTER TABLE browse_history MODIFY COLUMN image_url LONGTEXT NULL",
+        "ALTER TABLE marketplace_conversations ADD COLUMN context_type VARCHAR(30) NULL",
+        "ALTER TABLE marketplace_conversations ADD COLUMN context_id INT NULL",
+        "ALTER TABLE marketplace_messages MODIFY COLUMN content LONGTEXT NOT NULL",
+        "ALTER TABLE marketplace_messages ADD COLUMN message_type VARCHAR(20) DEFAULT 'text'",
+        "ALTER TABLE marketplace_messages ADD COLUMN metadata_json LONGTEXT NULL",
+        "ALTER TABLE marketplace_messages ADD COLUMN reply_to_id INT NULL",
     ]
     with engine.begin() as conn:
         for statement in statements:

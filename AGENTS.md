@@ -158,6 +158,13 @@ VITE_AMAP_SECURITY_CODE=
 - 说明：支持楼中楼回复。
 - 是否需要 token：是
 
+### 删除自己的评论
+
+- 方法和路径：`DELETE /marketplace/comments/{comment_id}`
+- 前端代理路径：`DELETE /api/marketplace/comments/{comment_id}`
+- 说明：仅评论作者可删除；楼中楼回复和对应表态会一并清理。
+- 是否需要 token：是
+
 ### 点赞和不喜欢
 
 - 方法和路径：`POST /marketplace/reactions`
@@ -177,6 +184,28 @@ VITE_AMAP_SECURITY_CODE=
 - 请求参数：`source_type`、`source_id`、`comment`
 - 说明：生成一条 `marketplace_community_posts` 转发帖，并保存原内容类型和 ID。
 - 是否需要 token：是
+
+### 收藏、关注与用户治理
+
+- 收藏：`POST /marketplace/favorites`，支持 `listing`、`service`、`game`、`wanted`、`community`。
+- 关注：`POST /marketplace/relationships/follow/{user_id}`，再次调用取消关注。
+- 屏蔽或拉黑：`POST /marketplace/relationships/{action}/{user_id}`，`action` 为 `mute` 或 `block`。
+- 举报：`POST /marketplace/reports`。
+- 用户主页：`GET /marketplace/users/{user_id}`。
+- 以上接口均需要 token。
+
+### 通知与私信
+
+- 通知列表：`GET /marketplace/notifications`。
+- 全部已读：`POST /marketplace/notifications/read-all`。
+- 单条已读：`POST /marketplace/notifications/{notification_id}/read`。
+- 发起会话：`POST /marketplace/conversations/start`。
+- 会话列表：`GET /marketplace/conversations`。
+- 消息列表：`GET /marketplace/conversations/{conversation_id}/messages`。
+- 发送消息：`POST /marketplace/conversations/{conversation_id}/messages`。
+- 消息表情：`POST /marketplace/messages/{message_id}/reactions`。
+- 消息支持文本、图片、位置、转账卡片、引用和 emoji 表态；记录持久化到 MySQL。
+- 以上接口均需要 token。
 
 ## 数据库记录规则
 
@@ -233,6 +262,29 @@ VITE_AMAP_SECURITY_CODE=
 - 关联：`user_id -> users.id`
 - 唯一约束：`user_id + target_type + target_id`
 - 使用 API：内容详情、点赞和不喜欢。
+
+### content_favorites
+
+- 用途：统一保存商品、跑腿、游戏、求购和社区帖收藏。
+- 唯一约束：`user_id + target_type + target_id`
+- 使用 API：收藏切换、个人主页收藏列表、内容详情。
+
+### user_follows / user_moderations
+
+- 用途：分别保存关注关系，以及用户的屏蔽、拉黑关系。
+- 唯一约束：关注双方唯一；治理记录按用户、目标用户和动作唯一。
+- 使用 API：关注、回关、屏蔽、拉黑、粉丝与关注列表、信息流过滤。
+
+### user_notifications
+
+- 用途：保存关注、评论、举报、接单、私信等通知和已读状态。
+- 使用 API：顶部通知窗口、未读数量、接单双方提醒。
+
+### marketplace_conversations / marketplace_messages / message_reactions
+
+- 用途：持久化私信会话、文本或富媒体消息、引用消息和 emoji 表态。
+- 关联：会话关联双方用户；消息关联会话、发送者和可选引用消息。
+- 使用 API：帖子快捷私信、完整消息中心、消息轮询与表态。
 
 ### marketplace_listing_images / marketplace_service_tasks.image_url / marketplace_wanted_posts.image_url / marketplace_community_posts.image_url
 

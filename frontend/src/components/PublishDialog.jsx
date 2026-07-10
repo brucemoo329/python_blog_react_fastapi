@@ -33,8 +33,11 @@ const INITIAL_FORM = {
   description: '',
   price: '',
   location: '',
+  topic: '校园生活',
   images: [],
 }
+
+const TOPICS = ['校园生活', '二手好物', '跑腿互助', '游戏交流', '学习资料', '宿舍生活', '社团活动', '失物招领', '美食分享', '求职实习', '校园吐槽', '表白墙']
 
 const MAX_CAMPUS_AMOUNT = 999999.99
 
@@ -153,7 +156,7 @@ export default function PublishDialog({ open, onOpenChange, initialType = 'listi
         response = await createCommunityPost({
           title: form.title || null,
           content: form.description,
-          topic: '校园生活',
+          topic: form.topic || '校园生活',
           image_url: form.images[0] || null,
         })
       } else {
@@ -231,6 +234,14 @@ export default function PublishDialog({ open, onOpenChange, initialType = 'listi
                         rows={4}
                       />
                     </Field>
+                    {type === 'community' ? (
+                      <Field>
+                        <FieldLabel htmlFor="publish-topic">话题标签</FieldLabel>
+                        <select id="publish-topic" className="publish-topic-select" value={form.topic} onChange={update('topic')}>
+                          {TOPICS.map((topic) => <option key={topic} value={topic}>#{topic}</option>)}
+                        </select>
+                      </Field>
+                    ) : null}
                     <Field>
                       <FieldLabel>图片</FieldLabel>
                       <label className="publish-image-picker">

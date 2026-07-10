@@ -28,8 +28,11 @@ export function createWantedPost(data) {
   return request.post('/marketplace/wanted', data)
 }
 
-export function toggleFavorite(listingId) {
-  return request.post('/marketplace/favorites', { listing_id: listingId })
+export function toggleFavorite(type, id) {
+  if (id === undefined) {
+    return request.post('/marketplace/favorites', { target_type: 'listing', target_id: type })
+  }
+  return request.post('/marketplace/favorites', { target_type: type, target_id: id })
 }
 
 export function acceptServiceTask(taskId) {
@@ -72,6 +75,10 @@ export function createComment(data) {
   return request.post('/marketplace/comments', data)
 }
 
+export function deleteComment(commentId) {
+  return request.delete(`/marketplace/comments/${commentId}`)
+}
+
 export function toggleReaction(data) {
   return request.post('/marketplace/reactions', data)
 }
@@ -82,4 +89,52 @@ export function shareContent(data) {
 
 export function deleteContent(type, id) {
   return request.delete(`/marketplace/content/${type}/${id}`)
+}
+
+export function toggleFollow(userId) {
+  return request.post(`/marketplace/relationships/follow/${userId}`)
+}
+
+export function toggleUserModeration(action, userId) {
+  return request.post(`/marketplace/relationships/${action}/${userId}`)
+}
+
+export function reportTarget(data) {
+  return request.post('/marketplace/reports', data)
+}
+
+export function getNotifications() {
+  return request.get('/marketplace/notifications')
+}
+
+export function markNotificationRead(notificationId) {
+  return request.post(`/marketplace/notifications/${notificationId}/read`)
+}
+
+export function markAllNotificationsRead() {
+  return request.post('/marketplace/notifications/read-all')
+}
+
+export function getPublicUserProfile(userId) {
+  return request.get(`/marketplace/users/${userId}`)
+}
+
+export function startConversation(data) {
+  return request.post('/marketplace/conversations/start', data)
+}
+
+export function getConversations() {
+  return request.get('/marketplace/conversations')
+}
+
+export function getConversationMessages(conversationId) {
+  return request.get(`/marketplace/conversations/${conversationId}/messages`)
+}
+
+export function sendConversationMessage(conversationId, data) {
+  return request.post(`/marketplace/conversations/${conversationId}/messages`, data)
+}
+
+export function toggleMessageReaction(messageId, emoji) {
+  return request.post(`/marketplace/messages/${messageId}/reactions`, { emoji })
 }

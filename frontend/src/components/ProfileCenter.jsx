@@ -21,6 +21,7 @@ import {
   Star,
   ThumbsUp,
   UserRoundCog,
+  UsersRound,
   WalletCards,
 } from 'lucide-react'
 import { Avatar, AvatarFallback, AvatarImage } from '@/components/ui/avatar'
@@ -95,6 +96,8 @@ const EMPTY_PROFILE = {
   addresses: [],
   payment_methods: [],
   favorites: [],
+  followers_list: [],
+  following_list: [],
   history: [],
   published: { listings: [], services: [], wanted: [], posts: [] },
   sold: [],
@@ -134,17 +137,17 @@ function shortDate(value) {
   return `${date.getMonth() + 1}/${date.getDate()}`
 }
 
-function MiniItem({ item, emptyText }) {
+function MiniItem({ item, emptyText, onClick }) {
   if (!item) return <div className="profile-empty-line">{emptyText}</div>
   return (
-    <div className="profile-mini-item">
+    <button type="button" className="profile-mini-item" onClick={() => onClick?.(item)}>
       {item.image_url ? <img src={item.image_url} alt="" /> : <span>{item.title?.slice(0, 1) || '校'}</span>}
       <div>
         <strong>{item.title}</strong>
         <small>{item.price_label || item.status || shortDate(item.created_at)}</small>
       </div>
       <em>{shortDate(item.created_at || item.viewed_at)}</em>
-    </div>
+    </button>
   )
 }
 
@@ -170,7 +173,7 @@ function compressImage(file, maxSize = 720, quality = 0.78) {
   })
 }
 
-export default function ProfileCenter({ user, onLogout, onNotice, onProfileChange }) {
+export default function ProfileCenter({ user, onLogout, onNotice, onProfileChange, onOpenItem, onOpenUser }) {
   const avatarInputRef = useRef(null)
   const backgroundInputRef = useRef(null)
   const [data, setData] = useState(EMPTY_PROFILE)
@@ -178,6 +181,8 @@ export default function ProfileCenter({ user, onLogout, onNotice, onProfileChang
   const [activePanel, setActivePanel] = useState('profile')
   const [editOpen, setEditOpen] = useState(false)
   const [settingsOpen, setSettingsOpen] = useState(false)
+  const [socialOpen, setSocialOpen] = useState(false)
+  const [socialType, setSocialType] = useState('followers')
   const [saving, setSaving] = useState(false)
   const [addressForm, setAddressForm] = useState({
     label: '宿舍',
@@ -199,6 +204,7 @@ export default function ProfileCenter({ user, onLogout, onNotice, onProfileChang
     current_password: '',
     new_password: '',
   })
+  const refreshProfileRef = useRef(null)
 
   const syncProfile = (nextProfile, nextTrust) => {
     const mergedProfile = { ...form, ...nextProfile }
@@ -234,9 +240,10 @@ export default function ProfileCenter({ user, onLogout, onNotice, onProfileChang
       setData((current) => ({ ...current, profile: { ...current.profile, nickname: user?.username || current.profile.nickname } }))
     }
   }
+  refreshProfileRef.current = refreshProfile
 
   useEffect(() => {
-    refreshProfile()
+    refreshProfileRef.current?.()
   }, [])
 
   const publishedList = useMemo(() => [
@@ -245,6 +252,16 @@ export default function ProfileCenter({ user, onLogout, onNotice, onProfileChang
     ...(data.published?.wanted || []),
     ...(data.published?.posts || []),
   ], [data.published])
+
+  const openItem = (item) => onOpenItem?.({
+    type: item.type || item.item_type || 'listing',
+    id: Number(item.item_id || item.id),
+  })
+
+  const openSocial = (type) => {
+    setSocialType(type)
+    setSocialOpen(true)
+  }
 
   const trustPercent = Math.min(100, Math.max(0, Math.round((data.trust.score / 1000) * 100)))
   const updateForm = (key, value) => {
@@ -406,8 +423,8 @@ export default function ProfileCenter({ user, onLogout, onNotice, onProfileChang
           </div>
         </div>
         <div className="profile-social">
-          <div><strong>{form.followers || 0}</strong><span>粉丝</span></div>
-          <div><strong>{form.following || 0}</strong><span>关注</span></div>
+          <button type="button" onClick={() => openSocial('followers')}><strong>{form.followers || 0}</strong><span>粉丝</span></button>
+          <button type="button" onClick={() => openSocial('following')}><strong>{form.following || 0}</strong><span>关注</span></button>
           <div><strong>{data.trust.score}</strong><span>信任分</span></div>
         </div>
         <div className="profile-hero-actions">
@@ -442,10 +459,11 @@ export default function ProfileCenter({ user, onLogout, onNotice, onProfileChang
                 ))}
               </div>
               <div className="trust-facts">
-                <span><PackageCheck /> 成功交易 {data.trust.completed_orders}</span>
-                <span><ThumbsUp /> 好评 {data.trust.positive_reviews}</span>
-                <span><BellRing /> 待核实投诉 {data.trust.pending_reports}</span>
-                <span><ShieldCheck /> 已核实违规 {data.trust.verified_reports}</span>
+                {data.trust.completed_orders ? <span><PackageCheck /> 成功交易 {data.trust.completed_orders}</span> : null}
+                {data.trust.positive_reviews ? <span><ThumbsUp /> 好评 {data.trust.positive_reviews}</span> : null}
+                {data.trust.pending_reports ? <span><BellRing /> 待核实投诉 {data.trust.pending_reports}</span> : null}
+                {data.trust.verified_reports ? <span><ShieldCheck /> 已核实违规 {data.trust.verified_reports}</span> : null}
+                {!data.trust.completed_orders && !data.trust.positive_reviews && !data.trust.pending_reports && !data.trust.verified_reports ? <span><ShieldCheck /> 暂无交易评价或违规记录</span> : null}
               </div>
             </CardContent>
           </Card>
@@ -453,15 +471,15 @@ export default function ProfileCenter({ user, onLogout, onNotice, onProfileChang
           <div className="profile-list-grid">
             <Card className="profile-card">
               <CardHeader><CardTitle><Heart /> 我的收藏</CardTitle></CardHeader>
-              <CardContent>{(data.favorites || []).slice(0, 4).map((item) => <MiniItem key={item.id} item={item} />)}{!data.favorites?.length && <MiniItem emptyText="还没有收藏，遇到好物就点收藏吧。" />}</CardContent>
+              <CardContent>{(data.favorites || []).slice(0, 4).map((item) => <MiniItem key={`${item.type}-${item.id}`} item={item} onClick={openItem} />)}{!data.favorites?.length && <MiniItem emptyText="还没有收藏，遇到好物就点收藏吧。" />}</CardContent>
             </Card>
             <Card className="profile-card">
               <CardHeader><CardTitle><History /> 历史浏览</CardTitle></CardHeader>
-              <CardContent>{(data.history || []).slice(0, 4).map((item) => <MiniItem key={`${item.item_type}-${item.item_id}`} item={item} />)}{!data.history?.length && <MiniItem emptyText="浏览商品或任务后会出现在这里。" />}</CardContent>
+              <CardContent>{(data.history || []).slice(0, 4).map((item) => <MiniItem key={`${item.item_type}-${item.item_id}`} item={item} onClick={openItem} />)}{!data.history?.length && <MiniItem emptyText="浏览商品或任务后会出现在这里。" />}</CardContent>
             </Card>
             <Card className="profile-card">
               <CardHeader><CardTitle><ShoppingBag /> 我发布的</CardTitle></CardHeader>
-              <CardContent>{publishedList.slice(0, 5).map((item) => <MiniItem key={`${item.type}-${item.id}`} item={item} />)}{!publishedList.length && <MiniItem emptyText="还没有发布内容，去首页发布第一件好物。" />}</CardContent>
+              <CardContent>{publishedList.slice(0, 5).map((item) => <MiniItem key={`${item.type}-${item.id}`} item={item} onClick={openItem} />)}{!publishedList.length && <MiniItem emptyText="还没有发布内容，去首页发布第一件好物。" />}</CardContent>
             </Card>
             <Card className="profile-card">
               <CardHeader><CardTitle><Star /> 待评价</CardTitle></CardHeader>
@@ -576,6 +594,24 @@ export default function ProfileCenter({ user, onLogout, onNotice, onProfileChang
           </div>
         </aside>
       </section>
+
+      <Dialog open={socialOpen} onOpenChange={setSocialOpen}>
+        <DialogContent className="profile-social-dialog">
+          <DialogHeader>
+            <DialogTitle><UsersRound /> {socialType === 'followers' ? '我的粉丝' : '我的关注'}</DialogTitle>
+            <DialogDescription>数据来自当前账号的真实关注关系。</DialogDescription>
+          </DialogHeader>
+          <div className="profile-social-list">
+            {(socialType === 'followers' ? data.followers_list : data.following_list)?.map((person) => (
+              <button key={person.id} type="button" onClick={() => { setSocialOpen(false); onOpenUser?.(person.id) }}>
+                <Avatar className="size-10"><AvatarImage src={person.avatar_url || undefined} alt={person.nickname || person.username} /><AvatarFallback>{(person.nickname || person.username || '同').slice(0, 1)}</AvatarFallback></Avatar>
+                <span><strong>{person.nickname || person.username}</strong><small>{person.school || '校园同学'} · {person.is_online ? '在线' : '离线'}</small></span>
+              </button>
+            ))}
+            {!(socialType === 'followers' ? data.followers_list : data.following_list)?.length ? <div className="profile-empty-line">这里暂时还没有用户。</div> : null}
+          </div>
+        </DialogContent>
+      </Dialog>
 
       <Dialog open={editOpen} onOpenChange={setEditOpen}>
         <DialogContent className="profile-edit-dialog">

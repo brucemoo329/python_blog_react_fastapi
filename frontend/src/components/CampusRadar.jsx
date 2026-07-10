@@ -8,7 +8,7 @@ import {
   PackageCheck,
   ShoppingBasket,
 } from 'lucide-react'
-import { Avatar, AvatarFallback } from '@/components/ui/avatar'
+import { Avatar, AvatarFallback, AvatarImage } from '@/components/ui/avatar'
 import { Badge } from '@/components/ui/badge'
 import { Button } from '@/components/ui/button'
 import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card'
@@ -36,7 +36,7 @@ function getLocationErrorMessage(result) {
   return message ? `定位失败：${message}` : '暂时无法获取精确位置，已显示南通理工学院'
 }
 
-export default function CampusRadar({ tasks, onAcceptTask, onLocate }) {
+export default function CampusRadar({ tasks, onAcceptTask, onOpenTask, onLocate }) {
   const [filter, setFilter] = useState('all')
   const [selectedTaskId, setSelectedTaskId] = useState(tasks[0]?.id)
   const [mapStatus, setMapStatus] = useState('地图加载中...')
@@ -216,6 +216,9 @@ export default function CampusRadar({ tasks, onAcceptTask, onLocate }) {
                 key={task.id}
                 className={cn('radar-task-item', selectedTaskId === task.id && 'is-selected')}
                 onMouseEnter={() => setSelectedTaskId(task.id)}
+                onClick={() => onOpenTask?.({ ...task, type: 'service' })}
+                onKeyDown={(event) => { if (event.key === 'Enter') onOpenTask?.({ ...task, type: 'service' }) }}
+                tabIndex={0}
               >
                 <div className="radar-task-icon">
                   <Icon />
@@ -234,12 +237,13 @@ export default function CampusRadar({ tasks, onAcceptTask, onLocate }) {
                   <div className="radar-task-footer">
                     <span className="flex items-center gap-2">
                       <Avatar className="size-6">
+                        <AvatarImage src={task.requester?.avatar_url || undefined} alt={task.requester?.nickname || task.requester?.username} />
                         <AvatarFallback>{task.requester?.username?.slice(0, 1) || '同'}</AvatarFallback>
                       </Avatar>
-                      {task.requester?.username || '校园同学'}
+                      {task.requester?.nickname || task.requester?.username || '校园同学'}
                     </span>
                     <span><Clock3 /> 12 分钟内</span>
-                    <Button size="sm" onClick={() => onAcceptTask({ ...task, type: 'service' })}>接单</Button>
+                    <Button size="sm" onClick={(event) => { event.stopPropagation(); onAcceptTask({ ...task, type: 'service' }) }}>接单</Button>
                   </div>
                 </div>
               </article>

@@ -1,6 +1,7 @@
-from datetime import date, datetime
+import json
+from datetime import date, datetime, timedelta
 from decimal import Decimal
-from typing import Literal, Optional
+from typing import Any, Literal, Optional
 from uuid import uuid4
 
 from fastapi import APIRouter, Depends, Header, HTTPException, Query, Request
@@ -37,6 +38,18 @@ def get_current_user(
     user = db.get(models.User, user_id)
     if not user or not user.is_active:
         raise HTTPException(status_code=401, detail="用户不存在或已停用")
+    profile = db.query(models.UserProfile).filter_by(user_id=user.id).first()
+    if not profile:
+        profile = models.UserProfile(
+            user_id=user.id,
+            nickname=user.username,
+            school="南通理工学院",
+            signature="在校园里认真交易，也认真生活。",
+            background_theme="teal",
+        )
+        db.add(profile)
+    profile.last_active_at = datetime.utcnow()
+    db.commit()
     return user
 
 
@@ -88,7 +101,9 @@ class WantedPostCreate(BaseModel):
 
 
 class FavoriteCreate(BaseModel):
-    listing_id: int
+    target_type: Optional[str] = Field(default=None, max_length=30)
+    target_id: Optional[int] = None
+    listing_id: Optional[int] = None
 
 
 class ProfileUpdate(BaseModel):
@@ -151,6 +166,43 @@ class ShareCreate(BaseModel):
     comment: Optional[str] = Field(default=None, max_length=300)
 
 
+class ReportCreate(BaseModel):
+    target_type: str = Field(max_length=30)
+    target_id: int
+    reason: str = Field(min_length=2, max_length=80)
+    description: Optional[str] = Field(default=None, max_length=500)
+
+
+class ConversationStart(BaseModel):
+    target_user_id: int
+    context_type: Optional[str] = Field(default=None, max_length=30)
+    context_id: Optional[int] = None
+
+
+class MessageCreate(BaseModel):
+    content: str = Field(min_length=1, max_length=2000000)
+    message_type: Literal["text", "image", "location", "transfer"] = "text"
+    metadata: Optional[dict[str, Any]] = None
+    reply_to_id: Optional[int] = None
+
+
+class MessageReactionCreate(BaseModel):
+    emoji: str = Field(min_length=1, max_length=20)
+
+
+def normalize_target_type(target_type: str):
+    return "listing" if target_type == "game" else target_type
+
+
+def profile_is_online(profile):
+    if not profile or not profile.last_active_at:
+        return False
+    last_active = profile.last_active_at
+    if last_active.tzinfo:
+        last_active = last_active.replace(tzinfo=None)
+    return datetime.utcnow() - last_active <= timedelta(minutes=5)
+
+
 def user_payload(user):
     profile = getattr(user, "profile", None)
     return {
@@ -160,6 +212,185 @@ def user_payload(user):
         "avatar_url": profile.avatar_url if profile else None,
         "nickname": (profile.nickname if profile and profile.nickname else user.username),
         "school": profile.school if profile else None,
+        "is_online": profile_is_online(profile),
+        "last_active_at": profile.last_active_at if profile else None,
+    }
+
+
+def content_owner_id(db: Session, target_type: str, target_id: int):
+    normalized = normalize_target_type(target_type)
+    if normalized == "listing":
+        item = db.get(models.Listing, target_id)
+        return item.seller_id if item else None
+    if normalized == "service":
+        item = db.get(models.ServiceTask, target_id)
+        return item.requester_id if item else None
+    if normalized == "wanted":
+        item = db.get(models.WantedPost, target_id)
+        return item.user_id if item else None
+    if normalized == "community":
+        item = db.get(models.CommunityPost, target_id)
+        return item.author_id if item else None
+    if normalized == "user":
+        return target_id if db.get(models.User, target_id) else None
+    return None
+
+
+def is_following(db: Session, follower_id: int, following_id: int):
+    return db.query(models.UserFollow).filter_by(
+        follower_id=follower_id,
+        following_id=following_id,
+    ).first() is not None
+
+
+def is_favorited(db: Session, user_id: int, target_type: str, target_id: int):
+    exists = db.query(models.ContentFavorite).filter_by(
+        user_id=user_id,
+        target_type=target_type,
+        target_id=target_id,
+    ).first()
+    if exists:
+        return True
+    if normalize_target_type(target_type) == "listing":
+        return db.query(models.Favorite).filter_by(
+            user_id=user_id,
+            listing_id=target_id,
+        ).first() is not None
+    return False
+
+
+def content_metrics(db: Session, user_id: int, target_type: str, target_id: int):
+    reaction = reaction_counts(db, target_type, target_id, user_id)
+    return {
+        "reaction": reaction,
+        "like_count": reaction["likes"],
+        "dislike_count": reaction["dislikes"],
+        "comment_count": db.query(models.ContentComment).filter_by(
+            target_type=target_type,
+            target_id=target_id,
+        ).count(),
+        "repost_count": db.query(models.CommunityPost).filter_by(
+            source_type=target_type,
+            source_id=target_id,
+        ).count(),
+        "favorited": is_favorited(db, user_id, target_type, target_id),
+    }
+
+
+def create_notification(
+    db: Session,
+    recipient_id: int,
+    notification_type: str,
+    title: str,
+    content: Optional[str] = None,
+    actor_id: Optional[int] = None,
+    target_type: Optional[str] = None,
+    target_id: Optional[int] = None,
+):
+    notification = models.Notification(
+        recipient_id=recipient_id,
+        actor_id=actor_id,
+        notification_type=notification_type,
+        title=title,
+        content=content,
+        target_type=target_type,
+        target_id=target_id,
+    )
+    db.add(notification)
+    return notification
+
+
+def get_conversation_for_user(db: Session, conversation_id: int, user_id: int):
+    conversation = db.get(models.Conversation, conversation_id)
+    if not conversation:
+        raise HTTPException(status_code=404, detail="会话不存在")
+    if user_id not in {conversation.user_a_id, conversation.user_b_id}:
+        raise HTTPException(status_code=403, detail="无权访问该会话")
+    return conversation
+
+
+def find_or_create_conversation(
+    db: Session,
+    user_id: int,
+    target_user_id: int,
+    context_type: Optional[str] = None,
+    context_id: Optional[int] = None,
+):
+    if user_id == target_user_id:
+        raise HTTPException(status_code=400, detail="不能和自己创建私信")
+    target_user = db.get(models.User, target_user_id)
+    if not target_user or not target_user.is_active:
+        raise HTTPException(status_code=404, detail="对方用户不存在")
+    blocked = db.query(models.UserModeration).filter(
+        models.UserModeration.action == "block",
+        or_(
+            (models.UserModeration.user_id == user_id) & (models.UserModeration.target_user_id == target_user_id),
+            (models.UserModeration.user_id == target_user_id) & (models.UserModeration.target_user_id == user_id),
+        ),
+    ).first()
+    if blocked:
+        raise HTTPException(status_code=403, detail="当前无法与该用户发起私信")
+    user_a_id, user_b_id = sorted((user_id, target_user_id))
+    conversation = db.query(models.Conversation).filter_by(
+        user_a_id=user_a_id,
+        user_b_id=user_b_id,
+    ).first()
+    if not conversation:
+        conversation = models.Conversation(
+            user_a_id=user_a_id,
+            user_b_id=user_b_id,
+            context_type=context_type,
+            context_id=context_id,
+            listing_id=context_id if context_type in {"listing", "game"} else None,
+        )
+        db.add(conversation)
+        db.flush()
+    elif context_type and context_id:
+        conversation.context_type = context_type
+        conversation.context_id = context_id
+        if context_type in {"listing", "game"}:
+            conversation.listing_id = context_id
+    return conversation
+
+
+def message_payload(db: Session, message: models.Message, current_user_id: int):
+    metadata = None
+    if message.metadata_json:
+        try:
+            metadata = json.loads(message.metadata_json)
+        except (TypeError, ValueError):
+            metadata = None
+    reaction_rows = db.query(models.MessageReaction.emoji, func.count(models.MessageReaction.id)).filter_by(
+        message_id=message.id,
+    ).group_by(models.MessageReaction.emoji).all()
+    my_reactions = {
+        row.emoji for row in db.query(models.MessageReaction).filter_by(
+            message_id=message.id,
+            user_id=current_user_id,
+        ).all()
+    }
+    reply = None
+    if message.reply_to:
+        reply = {
+            "id": message.reply_to.id,
+            "content": message.reply_to.content[:160],
+            "sender": user_payload(message.reply_to.sender),
+        }
+    return {
+        "id": message.id,
+        "conversation_id": message.conversation_id,
+        "sender": user_payload(message.sender),
+        "content": message.content,
+        "message_type": message.message_type or "text",
+        "metadata": metadata,
+        "reply_to": reply,
+        "reactions": [
+            {"emoji": emoji, "count": int(count), "reacted": emoji in my_reactions}
+            for emoji, count in reaction_rows
+        ],
+        "is_read": message.is_read,
+        "created_at": message.created_at,
+        "is_mine": message.sender_id == current_user_id,
     }
 
 
@@ -178,6 +409,7 @@ def listing_payload(listing):
         "image_url": listing.images[0].image_url if listing.images else None,
         "seller": user_payload(listing.seller),
         "school": listing.campus,
+        "view_count": listing.view_count or 0,
         "created_at": listing.created_at,
     }
 
@@ -272,6 +504,20 @@ def compact_listing_payload(listing):
     }
 
 
+def compact_content_payload(item):
+    return {
+        "id": item["id"],
+        "type": item["type"],
+        "item_type": item["type"],
+        "item_id": item["id"],
+        "title": item["title"],
+        "status": item.get("status"),
+        "price_label": item.get("price_label"),
+        "image_url": item.get("images", [None])[0] if item.get("images") else None,
+        "created_at": item.get("created_at"),
+    }
+
+
 def compact_order_payload(order, role: str):
     title = order.listing.title if order.listing else (order.service_task.title if order.service_task else "校园交易订单")
     return {
@@ -336,6 +582,7 @@ def comment_payload(comment, child_map, db: Session, user_id: int):
         "likes": comment.like_count or 0,
         "dislikes": comment.dislike_count or 0,
         "reaction": reaction_counts(db, "comment", comment.id, user_id)["my_reaction"],
+        "can_delete": comment.user_id == user_id,
         "replies": [comment_payload(child, child_map, db, user_id) for child in child_map.get(comment.id, [])],
     }
 
@@ -423,7 +670,7 @@ def detail_payload(db: Session, item_type: str, item_id: int, user: models.User)
             "title": post.title or "校园动态",
             "description": post.content,
             "price": None,
-            "price_label": f"{post.like_count or 0} 人喜欢",
+            "price_label": None,
             "status": post.topic,
             "location": "校园社区",
             "school": post.author.profile.school if post.author.profile else None,
@@ -452,14 +699,24 @@ def get_categories(db: Session = Depends(get_db)):
 def get_feed(
     kind: str = Query(default="all"),
     search: str = Query(default="", max_length=80),
+    topic: str = Query(default="", max_length=50),
     db: Session = Depends(get_db),
-    _: models.User = Depends(get_current_user),
+    user: models.User = Depends(get_current_user),
 ):
     items = []
+    hidden_user_ids = {
+        row.target_user_id for row in db.query(models.UserModeration).filter(
+            models.UserModeration.user_id == user.id,
+            models.UserModeration.action.in_(["mute", "block"]),
+        ).all()
+    }
     if kind in {"all", "listing", "game"}:
         query = db.query(models.Listing).options(
-            joinedload(models.Listing.seller), joinedload(models.Listing.images)
+            joinedload(models.Listing.seller).joinedload(models.User.profile),
+            joinedload(models.Listing.images),
         )
+        if hidden_user_ids:
+            query = query.filter(~models.Listing.seller_id.in_(hidden_user_ids))
         if kind == "game":
             query = query.filter(models.Listing.trade_type == "digital")
         if search:
@@ -470,9 +727,14 @@ def get_feed(
         items.extend(listing_payload(row) for row in query.order_by(models.Listing.created_at.desc()).limit(30))
 
     if kind in {"all", "service"}:
-        for task in db.query(models.ServiceTask).options(joinedload(models.ServiceTask.requester)).order_by(
-            models.ServiceTask.created_at.desc()
-        ).limit(20):
+        query = db.query(models.ServiceTask).options(
+            joinedload(models.ServiceTask.requester).joinedload(models.User.profile)
+        )
+        if hidden_user_ids:
+            query = query.filter(~models.ServiceTask.requester_id.in_(hidden_user_ids))
+        if search:
+            query = query.filter(or_(models.ServiceTask.title.contains(search), models.ServiceTask.description.contains(search)))
+        for task in query.order_by(models.ServiceTask.created_at.desc()).limit(20):
             items.append({
                 "id": task.id,
                 "type": "service",
@@ -483,16 +745,23 @@ def get_feed(
                 "status": task.status,
                 "pickup_location": task.pickup_location,
                 "location": task.delivery_location,
+                "image_url": task.image_url,
                 "latitude": float(task.latitude) if task.latitude is not None else None,
                 "longitude": float(task.longitude) if task.longitude is not None else None,
                 "author": user_payload(task.requester),
+                "school": task.requester.profile.school if task.requester.profile else None,
                 "created_at": task.created_at,
             })
 
     if kind in {"all", "wanted"}:
-        for wanted in db.query(models.WantedPost).options(joinedload(models.WantedPost.user)).order_by(
-            models.WantedPost.created_at.desc()
-        ).limit(20):
+        query = db.query(models.WantedPost).options(
+            joinedload(models.WantedPost.user).joinedload(models.User.profile)
+        )
+        if hidden_user_ids:
+            query = query.filter(~models.WantedPost.user_id.in_(hidden_user_ids))
+        if search:
+            query = query.filter(or_(models.WantedPost.title.contains(search), models.WantedPost.description.contains(search)))
+        for wanted in query.order_by(models.WantedPost.created_at.desc()).limit(20):
             items.append({
                 "id": wanted.id,
                 "type": "wanted",
@@ -502,14 +771,23 @@ def get_feed(
                 "budget_max": float(wanted.budget_max) if wanted.budget_max else None,
                 "location": wanted.location_name,
                 "status": wanted.status,
+                "image_url": wanted.image_url,
                 "author": user_payload(wanted.user),
+                "school": wanted.user.profile.school if wanted.user.profile else None,
                 "created_at": wanted.created_at,
             })
 
     if kind in {"all", "community"}:
-        for post in db.query(models.CommunityPost).options(joinedload(models.CommunityPost.author)).order_by(
-            models.CommunityPost.created_at.desc()
-        ).limit(20):
+        query = db.query(models.CommunityPost).options(
+            joinedload(models.CommunityPost.author).joinedload(models.User.profile)
+        )
+        if hidden_user_ids:
+            query = query.filter(~models.CommunityPost.author_id.in_(hidden_user_ids))
+        if search:
+            query = query.filter(or_(models.CommunityPost.title.contains(search), models.CommunityPost.content.contains(search)))
+        if topic:
+            query = query.filter(models.CommunityPost.topic == topic)
+        for post in query.order_by(models.CommunityPost.created_at.desc()).limit(20):
             items.append({
                 "id": post.id,
                 "type": "community",
@@ -525,11 +803,20 @@ def get_feed(
                     "title": post.source_title,
                 } if post.source_type and post.source_id else None,
                 "author": user_payload(post.author),
+                "school": post.author.profile.school if post.author.profile else None,
                 "created_at": post.created_at,
             })
 
     items.sort(key=lambda item: item["created_at"] or datetime.min, reverse=True)
-    return {"items": items[:50], "total": len(items)}
+    result = items[:50]
+    for item in result:
+        item.update(content_metrics(db, user.id, item["type"], item["id"]))
+        item["author_is_followed"] = is_following(
+            db,
+            user.id,
+            (item.get("seller") or item.get("author") or {}).get("id", 0),
+        )
+    return {"items": result, "total": len(items)}
 
 
 @router.get("/map/tasks")
@@ -537,7 +824,9 @@ def get_map_tasks(
     db: Session = Depends(get_db),
     _: models.User = Depends(get_current_user),
 ):
-    tasks = db.query(models.ServiceTask).options(joinedload(models.ServiceTask.requester)).filter(
+    tasks = db.query(models.ServiceTask).options(
+        joinedload(models.ServiceTask.requester).joinedload(models.User.profile)
+    ).filter(
         models.ServiceTask.status == "open"
     ).order_by(models.ServiceTask.created_at.desc()).limit(30).all()
     return [{
@@ -550,6 +839,7 @@ def get_map_tasks(
         "latitude": float(task.latitude) if task.latitude is not None else None,
         "longitude": float(task.longitude) if task.longitude is not None else None,
         "requester": user_payload(task.requester),
+        "image_url": task.image_url,
         "deadline": task.deadline,
     } for task in tasks]
 
@@ -605,7 +895,7 @@ def accept_task(
     db: Session = Depends(get_db),
     user: models.User = Depends(get_current_user),
 ):
-    task = db.get(models.ServiceTask, task_id)
+    task = db.query(models.ServiceTask).filter_by(id=task_id).with_for_update().first()
     if not task:
         raise HTTPException(status_code=404, detail="任务不存在")
     if task.requester_id == user.id:
@@ -614,8 +904,34 @@ def accept_task(
         raise HTTPException(status_code=409, detail="任务已被接取")
     task.runner_id = user.id
     task.status = "accepted"
+    conversation = find_or_create_conversation(
+        db,
+        user.id,
+        task.requester_id,
+        context_type="service",
+        context_id=task.id,
+    )
+    create_notification(
+        db,
+        recipient_id=task.requester_id,
+        actor_id=user.id,
+        notification_type="task_accepted",
+        title="你的跑腿任务已被接单",
+        content=f"{user.username} 接下了“{task.title}”",
+        target_type="service",
+        target_id=task.id,
+    )
+    create_notification(
+        db,
+        recipient_id=user.id,
+        notification_type="task_accepted_self",
+        title="接单成功",
+        content=f"你已接下“{task.title}”，可私信发布者确认取送细节",
+        target_type="service",
+        target_id=task.id,
+    )
     db.commit()
-    return {"message": "接单成功"}
+    return {"message": "接单成功，双方已收到通知", "conversation_id": conversation.id}
 
 
 @router.post("/community", status_code=201)
@@ -650,19 +966,37 @@ def toggle_favorite(
     db: Session = Depends(get_db),
     user: models.User = Depends(get_current_user),
 ):
-    listing = db.get(models.Listing, data.listing_id)
-    if not listing:
-        raise HTTPException(status_code=404, detail="商品不存在")
-    favorite = db.query(models.Favorite).filter_by(
-        user_id=user.id, listing_id=data.listing_id
+    target_type = data.target_type or "listing"
+    target_id = data.target_id or data.listing_id
+    if not target_id:
+        raise HTTPException(status_code=422, detail="缺少收藏内容标识")
+    item = detail_payload(db, target_type, target_id, user)
+    target_type = item["type"]
+    favorite = db.query(models.ContentFavorite).filter_by(
+        user_id=user.id,
+        target_type=target_type,
+        target_id=target_id,
     ).first()
-    if favorite:
-        db.delete(favorite)
+    legacy = None
+    if normalize_target_type(target_type) == "listing":
+        legacy = db.query(models.Favorite).filter_by(
+            user_id=user.id,
+            listing_id=target_id,
+        ).first()
+    if favorite or legacy:
+        if favorite:
+            db.delete(favorite)
+        if legacy:
+            db.delete(legacy)
         db.commit()
-        return {"message": "已取消收藏", "favorited": False}
-    db.add(models.Favorite(user_id=user.id, listing_id=data.listing_id))
+        return {"message": "已取消收藏", "favorited": False, "target_type": target_type, "target_id": target_id}
+    db.add(models.ContentFavorite(
+        user_id=user.id,
+        target_type=target_type,
+        target_id=target_id,
+    ))
     db.commit()
-    return {"message": "收藏成功", "favorited": True}
+    return {"message": "收藏成功", "favorited": True, "target_type": target_type, "target_id": target_id}
 
 
 @router.post("/orders/listing/{listing_id}", status_code=201)
@@ -699,6 +1033,20 @@ def get_detail(
     user: models.User = Depends(get_current_user),
 ):
     item = detail_payload(db, item_type, item_id, user)
+    item.update(content_metrics(db, user.id, item["type"], item["id"]))
+    author_id = item["author"]["id"]
+    item["author"]["is_following"] = is_following(db, user.id, author_id) if author_id != user.id else False
+    item["author"]["is_muted"] = db.query(models.UserModeration).filter_by(
+        user_id=user.id,
+        target_user_id=author_id,
+        action="mute",
+    ).first() is not None
+    item["author"]["is_blocked"] = db.query(models.UserModeration).filter_by(
+        user_id=user.id,
+        target_user_id=author_id,
+        action="block",
+    ).first() is not None
+    item["can_message"] = author_id != user.id
     comments = db.query(models.ContentComment).options(
         joinedload(models.ContentComment.user).joinedload(models.User.profile)
     ).filter_by(
@@ -761,6 +1109,7 @@ def delete_content(
 
     for target_type in cleanup_target_types:
         db.query(models.ContentReaction).filter_by(target_type=target_type, target_id=item_id).delete()
+        db.query(models.ContentFavorite).filter_by(target_type=target_type, target_id=item_id).delete()
         db.query(models.ContentComment).filter_by(target_type=target_type, target_id=item_id).delete()
         db.query(models.BrowseHistory).filter_by(item_type=target_type, item_id=item_id).delete()
 
@@ -776,8 +1125,11 @@ def create_comment(
     user: models.User = Depends(get_current_user),
 ):
     detail_payload(db, data.target_type, data.target_id, user)
-    if data.parent_id and not db.get(models.ContentComment, data.parent_id):
+    parent = db.get(models.ContentComment, data.parent_id) if data.parent_id else None
+    if data.parent_id and not parent:
         raise HTTPException(status_code=404, detail="回复的评论不存在")
+    if parent and (parent.target_type != data.target_type or parent.target_id != data.target_id):
+        raise HTTPException(status_code=400, detail="不能跨内容回复评论")
     comment = models.ContentComment(
         target_type=data.target_type,
         target_id=data.target_id,
@@ -790,8 +1142,68 @@ def create_comment(
         post = db.get(models.CommunityPost, data.target_id)
         if post:
             post.comment_count = (post.comment_count or 0) + 1
+    owner_id = content_owner_id(db, data.target_type, data.target_id)
+    recipient_id = parent.user_id if parent and parent.user_id != user.id else owner_id
+    if recipient_id and recipient_id != user.id:
+        create_notification(
+            db,
+            recipient_id=recipient_id,
+            actor_id=user.id,
+            notification_type="comment_reply" if parent else "comment",
+            title="有人回复了你" if parent else "你的发布收到新评论",
+            content=data.content[:180],
+            target_type=data.target_type,
+            target_id=data.target_id,
+        )
     db.commit()
-    return {"message": "留言成功", "id": comment.id}
+    db.refresh(comment)
+    return {
+        "message": "留言成功",
+        "id": comment.id,
+        "comment": comment_payload(comment, {}, db, user.id),
+    }
+
+
+@router.delete("/comments/{comment_id}")
+def delete_comment(
+    comment_id: int,
+    db: Session = Depends(get_db),
+    user: models.User = Depends(get_current_user),
+):
+    comment = db.get(models.ContentComment, comment_id)
+    if not comment:
+        raise HTTPException(status_code=404, detail="评论不存在")
+    if comment.user_id != user.id:
+        raise HTTPException(status_code=403, detail="只能删除自己的评论")
+
+    descendant_ids = []
+    pending = [comment.id]
+    while pending:
+        children = db.query(models.ContentComment.id).filter(
+            models.ContentComment.parent_id.in_(pending)
+        ).all()
+        pending = [row.id for row in children]
+        descendant_ids.extend(pending)
+    removed_ids = [comment.id, *descendant_ids]
+    db.query(models.ContentReaction).filter(
+        models.ContentReaction.target_type == "comment",
+        models.ContentReaction.target_id.in_(removed_ids),
+    ).delete(synchronize_session=False)
+    for child_id in reversed(descendant_ids):
+        child = db.get(models.ContentComment, child_id)
+        if child:
+            db.delete(child)
+    db.delete(comment)
+    db.flush()
+    if comment.target_type == "community":
+        post = db.get(models.CommunityPost, comment.target_id)
+        if post:
+            post.comment_count = db.query(models.ContentComment).filter_by(
+                target_type="community",
+                target_id=comment.target_id,
+            ).count()
+    db.commit()
+    return {"message": "评论已删除", "id": comment_id, "removed_ids": removed_ids}
 
 
 @router.post("/reactions")
@@ -856,8 +1268,20 @@ def share_content(
         source_title=source["title"],
     )
     db.add(post)
+    owner_id = content_owner_id(db, source["type"], source["id"])
+    if owner_id and owner_id != user.id:
+        create_notification(
+            db,
+            recipient_id=owner_id,
+            actor_id=user.id,
+            notification_type="repost",
+            title="你的发布被转发了",
+            content=content[:180],
+            target_type="community",
+            target_id=None,
+        )
     db.commit()
-    return {"message": "已转发到校园社区", "id": post.id, "type": "community"}
+    return {"message": "已转发到校园社区", "id": post.id, "type": "community", "source_repost_count": source.get("repost_count", 0) + 1}
 
 
 @router.get("/summary")
@@ -867,6 +1291,76 @@ def get_summary(
 ):
     profile = ensure_user_profile(db, user)
     trust = compute_trust(db, user.id)
+    conversation_ids = [
+        row.id for row in db.query(models.Conversation.id).filter(
+            or_(models.Conversation.user_a_id == user.id, models.Conversation.user_b_id == user.id)
+        ).all()
+    ]
+    unread_messages = 0
+    if conversation_ids:
+        unread_messages = db.query(models.Message).filter(
+            models.Message.conversation_id.in_(conversation_ids),
+            models.Message.sender_id != user.id,
+            models.Message.is_read.is_(False),
+        ).count()
+
+    topics = [
+        {"name": name, "count": int(count)}
+        for name, count in db.query(
+            models.CommunityPost.topic,
+            func.count(models.CommunityPost.id),
+        ).group_by(models.CommunityPost.topic).order_by(func.count(models.CommunityPost.id).desc()).limit(8).all()
+        if name
+    ]
+
+    publisher_ids = []
+    publisher_queries = [
+        db.query(models.Listing.seller_id).order_by(models.Listing.created_at.desc()).limit(30).all(),
+        db.query(models.ServiceTask.requester_id).order_by(models.ServiceTask.created_at.desc()).limit(30).all(),
+        db.query(models.WantedPost.user_id).order_by(models.WantedPost.created_at.desc()).limit(30).all(),
+        db.query(models.CommunityPost.author_id).order_by(models.CommunityPost.created_at.desc()).limit(30).all(),
+    ]
+    for rows in publisher_queries:
+        for row in rows:
+            candidate_id = row[0]
+            if candidate_id != user.id and candidate_id not in publisher_ids:
+                publisher_ids.append(candidate_id)
+    hidden_ids = {
+        row.target_user_id for row in db.query(models.UserModeration).filter(
+            models.UserModeration.user_id == user.id,
+            models.UserModeration.action == "block",
+        ).all()
+    }
+    publisher_ids = [candidate_id for candidate_id in publisher_ids if candidate_id not in hidden_ids]
+    nearby_users = []
+    if publisher_ids:
+        users = db.query(models.User).options(joinedload(models.User.profile)).filter(
+            models.User.id.in_(publisher_ids),
+            models.User.is_active.is_(True),
+        ).all()
+        user_map = {candidate.id: candidate for candidate in users}
+        for candidate_id in publisher_ids:
+            candidate = user_map.get(candidate_id)
+            if not candidate:
+                continue
+            payload = user_payload(candidate)
+            payload["trust"] = compute_trust(db, candidate.id)
+            payload["is_following"] = is_following(db, user.id, candidate.id)
+            nearby_users.append(payload)
+        nearby_users.sort(
+            key=lambda item: (
+                item["is_online"],
+                item["last_active_at"].timestamp() if item.get("last_active_at") else 0,
+            ),
+            reverse=True,
+        )
+
+    recent_order = db.query(models.Order).options(
+        joinedload(models.Order.listing),
+        joinedload(models.Order.service_task),
+    ).filter(or_(models.Order.buyer_id == user.id, models.Order.seller_id == user.id)).order_by(
+        models.Order.created_at.desc()
+    ).first()
     return {
         "active_listings": db.query(models.Listing).filter(models.Listing.status == "available").count(),
         "open_tasks": db.query(models.ServiceTask).filter(models.ServiceTask.status == "open").count(),
@@ -874,10 +1368,17 @@ def get_summary(
         "my_orders": db.query(models.Order).filter(
             or_(models.Order.buyer_id == user.id, models.Order.seller_id == user.id)
         ).count(),
-        "unread_messages": db.query(models.Message).filter(
-            models.Message.sender_id != user.id,
-            models.Message.is_read.is_(False),
+        "unread_messages": unread_messages,
+        "unread_notifications": db.query(models.Notification).filter_by(
+            recipient_id=user.id,
+            is_read=False,
         ).count(),
+        "topics": topics,
+        "nearby_users": nearby_users[:5],
+        "recent_order": compact_order_payload(
+            recent_order,
+            "buyer" if recent_order and recent_order.buyer_id == user.id else "seller",
+        ) if recent_order else None,
         "profile": {
             "nickname": profile.nickname or user.username,
             "avatar_url": profile.avatar_url,
@@ -909,17 +1410,43 @@ def get_profile(
     db.commit()
     db.refresh(profile)
 
-    favorite_rows = db.query(models.Favorite).filter_by(user_id=user.id).order_by(
+    favorite_rows = db.query(models.ContentFavorite).filter_by(user_id=user.id).order_by(
+        models.ContentFavorite.created_at.desc()
+    ).limit(20).all()
+    favorites = []
+    favorite_keys = set()
+    for favorite in favorite_rows:
+        try:
+            item = detail_payload(db, favorite.target_type, favorite.target_id, user)
+        except HTTPException:
+            continue
+        favorites.append(compact_content_payload(item))
+        favorite_keys.add((normalize_target_type(item["type"]), item["id"]))
+
+    legacy_rows = db.query(models.Favorite).filter_by(user_id=user.id).order_by(
         models.Favorite.created_at.desc()
     ).limit(20).all()
-    favorite_ids = [row.listing_id for row in favorite_rows]
-    favorites = []
-    if favorite_ids:
+    legacy_ids = [row.listing_id for row in legacy_rows if ("listing", row.listing_id) not in favorite_keys]
+    if legacy_ids:
         listings = db.query(models.Listing).options(joinedload(models.Listing.images)).filter(
-            models.Listing.id.in_(favorite_ids)
+            models.Listing.id.in_(legacy_ids)
         ).all()
         listing_map = {listing.id: listing for listing in listings}
-        favorites = [compact_listing_payload(listing_map[item_id]) for item_id in favorite_ids if item_id in listing_map]
+        favorites.extend(
+            compact_listing_payload(listing_map[item_id])
+            for item_id in legacy_ids
+            if item_id in listing_map
+        )
+
+    follower_rows = db.query(models.UserFollow).options(
+        joinedload(models.UserFollow.follower).joinedload(models.User.profile)
+    ).filter_by(following_id=user.id).order_by(models.UserFollow.created_at.desc()).limit(50).all()
+    following_rows = db.query(models.UserFollow).options(
+        joinedload(models.UserFollow.following).joinedload(models.User.profile)
+    ).filter_by(follower_id=user.id).order_by(models.UserFollow.created_at.desc()).limit(50).all()
+    profile.follower_count = len(follower_rows)
+    profile.following_count = len(following_rows)
+    db.commit()
 
     published = {
         "listings": [
@@ -937,7 +1464,7 @@ def get_profile(
             for item in db.query(models.WantedPost).filter_by(user_id=user.id).order_by(models.WantedPost.created_at.desc()).limit(12)
         ],
         "posts": [
-            {"id": item.id, "type": "community", "title": item.title or item.content[:24], "status": item.topic, "price_label": f"{item.like_count} 赞", "created_at": item.created_at}
+            {"id": item.id, "type": "community", "title": item.title or item.content[:24], "status": item.topic, "price_label": None, "image_url": item.image_url, "created_at": item.created_at}
             for item in db.query(models.CommunityPost).filter_by(author_id=user.id).order_by(models.CommunityPost.created_at.desc()).limit(12)
         ],
     }
@@ -996,6 +1523,8 @@ def get_profile(
             models.UserPaymentMethod.is_default.desc(), models.UserPaymentMethod.created_at.desc()
         ).all(),
         "favorites": favorites,
+        "followers_list": [user_payload(row.follower) for row in follower_rows],
+        "following_list": [user_payload(row.following) for row in following_rows],
         "history": db.query(models.BrowseHistory).filter_by(user_id=user.id).order_by(
             models.BrowseHistory.viewed_at.desc()
         ).limit(20).all(),
@@ -1137,3 +1666,402 @@ def record_history(
         db.add(models.BrowseHistory(user_id=user.id, **data.model_dump()))
     db.commit()
     return {"message": "浏览历史已记录"}
+
+
+def sync_follow_counts(db: Session, *user_ids: int):
+    for user_id in set(user_ids):
+        profile = db.query(models.UserProfile).filter_by(user_id=user_id).first()
+        if not profile:
+            continue
+        profile.follower_count = db.query(models.UserFollow).filter_by(following_id=user_id).count()
+        profile.following_count = db.query(models.UserFollow).filter_by(follower_id=user_id).count()
+
+
+@router.post("/relationships/follow/{target_user_id}")
+def toggle_follow_user(
+    target_user_id: int,
+    db: Session = Depends(get_db),
+    user: models.User = Depends(get_current_user),
+):
+    if target_user_id == user.id:
+        raise HTTPException(status_code=400, detail="不能关注自己")
+    target = db.get(models.User, target_user_id)
+    if not target or not target.is_active:
+        raise HTTPException(status_code=404, detail="用户不存在")
+    existing = db.query(models.UserFollow).filter_by(
+        follower_id=user.id,
+        following_id=target_user_id,
+    ).first()
+    if existing:
+        db.delete(existing)
+        followed = False
+        message = "已取消关注"
+    else:
+        db.add(models.UserFollow(follower_id=user.id, following_id=target_user_id))
+        create_notification(
+            db,
+            recipient_id=target_user_id,
+            actor_id=user.id,
+            notification_type="follow",
+            title="你有新的关注者",
+            content=f"{user.username} 关注了你",
+            target_type="user",
+            target_id=user.id,
+        )
+        followed = True
+        message = "关注成功"
+    db.flush()
+    sync_follow_counts(db, user.id, target_user_id)
+    db.commit()
+    return {
+        "message": message,
+        "followed": followed,
+        "target_follower_count": db.query(models.UserFollow).filter_by(following_id=target_user_id).count(),
+        "my_following_count": db.query(models.UserFollow).filter_by(follower_id=user.id).count(),
+    }
+
+
+@router.post("/relationships/{action}/{target_user_id}")
+def toggle_user_moderation(
+    action: Literal["mute", "block"],
+    target_user_id: int,
+    db: Session = Depends(get_db),
+    user: models.User = Depends(get_current_user),
+):
+    if target_user_id == user.id:
+        raise HTTPException(status_code=400, detail="不能对自己执行此操作")
+    if not db.get(models.User, target_user_id):
+        raise HTTPException(status_code=404, detail="用户不存在")
+    existing = db.query(models.UserModeration).filter_by(
+        user_id=user.id,
+        target_user_id=target_user_id,
+        action=action,
+    ).first()
+    if existing:
+        db.delete(existing)
+        enabled = False
+    else:
+        db.add(models.UserModeration(
+            user_id=user.id,
+            target_user_id=target_user_id,
+            action=action,
+        ))
+        enabled = True
+        if action == "block":
+            db.query(models.UserFollow).filter(or_(
+                (models.UserFollow.follower_id == user.id) & (models.UserFollow.following_id == target_user_id),
+                (models.UserFollow.follower_id == target_user_id) & (models.UserFollow.following_id == user.id),
+            )).delete(synchronize_session=False)
+    sync_follow_counts(db, user.id, target_user_id)
+    db.commit()
+    label = "拉黑" if action == "block" else "屏蔽"
+    return {"message": f"已{label}" if enabled else f"已取消{label}", "enabled": enabled, "action": action}
+
+
+@router.post("/reports", status_code=201)
+def create_report(
+    data: ReportCreate,
+    db: Session = Depends(get_db),
+    user: models.User = Depends(get_current_user),
+):
+    if data.target_type == "comment":
+        target = db.get(models.ContentComment, data.target_id)
+        owner_id = target.user_id if target else None
+    else:
+        owner_id = content_owner_id(db, data.target_type, data.target_id)
+    if not owner_id:
+        raise HTTPException(status_code=404, detail="举报对象不存在")
+    if owner_id == user.id:
+        raise HTTPException(status_code=400, detail="不能举报自己的内容")
+    duplicate = db.query(models.Report).filter_by(
+        reporter_id=user.id,
+        target_type=data.target_type,
+        target_id=data.target_id,
+        status="pending",
+    ).first()
+    if duplicate:
+        return {"message": "该举报已提交，正在等待平台核实", "id": duplicate.id}
+    report = models.Report(reporter_id=user.id, **data.model_dump())
+    db.add(report)
+    create_notification(
+        db,
+        recipient_id=owner_id,
+        notification_type="report_received",
+        title="你的内容收到一条举报",
+        content="平台会先核实事实，待处理举报不会直接影响信任分。",
+        target_type=data.target_type,
+        target_id=data.target_id,
+    )
+    db.commit()
+    return {"message": "举报已提交，平台核实前不会直接扣除对方信任分", "id": report.id}
+
+
+@router.get("/notifications")
+def get_notifications(
+    limit: int = Query(default=30, ge=1, le=100),
+    db: Session = Depends(get_db),
+    user: models.User = Depends(get_current_user),
+):
+    rows = db.query(models.Notification).options(
+        joinedload(models.Notification.actor).joinedload(models.User.profile)
+    ).filter_by(recipient_id=user.id).order_by(models.Notification.created_at.desc()).limit(limit).all()
+    return {
+        "items": [{
+            "id": row.id,
+            "type": row.notification_type,
+            "title": row.title,
+            "content": row.content,
+            "target_type": row.target_type,
+            "target_id": row.target_id,
+            "is_read": row.is_read,
+            "actor": user_payload(row.actor) if row.actor else None,
+            "created_at": row.created_at,
+        } for row in rows],
+        "unread": sum(1 for row in rows if not row.is_read),
+    }
+
+
+@router.post("/notifications/read-all")
+def read_all_notifications(
+    db: Session = Depends(get_db),
+    user: models.User = Depends(get_current_user),
+):
+    db.query(models.Notification).filter_by(recipient_id=user.id, is_read=False).update({"is_read": True})
+    db.commit()
+    return {"message": "通知已全部标为已读"}
+
+
+@router.post("/notifications/{notification_id}/read")
+def read_notification(
+    notification_id: int,
+    db: Session = Depends(get_db),
+    user: models.User = Depends(get_current_user),
+):
+    notification = db.get(models.Notification, notification_id)
+    if not notification or notification.recipient_id != user.id:
+        raise HTTPException(status_code=404, detail="通知不存在")
+    notification.is_read = True
+    db.commit()
+    return {"message": "通知已读"}
+
+
+@router.get("/users/{target_user_id}")
+def get_public_user_profile(
+    target_user_id: int,
+    db: Session = Depends(get_db),
+    user: models.User = Depends(get_current_user),
+):
+    target = db.query(models.User).options(joinedload(models.User.profile)).filter_by(id=target_user_id).first()
+    if not target or not target.is_active:
+        raise HTTPException(status_code=404, detail="用户不存在")
+    profile = ensure_user_profile(db, target)
+    published = [
+        compact_listing_payload(item)
+        for item in db.query(models.Listing).options(joinedload(models.Listing.images)).filter_by(
+            seller_id=target.id
+        ).order_by(models.Listing.created_at.desc()).limit(12).all()
+    ]
+    published.extend({
+        "id": item.id,
+        "type": "service",
+        "title": item.title,
+        "status": item.status,
+        "price_label": f"赏金 ¥{float(item.reward):.0f}",
+        "image_url": item.image_url,
+        "created_at": item.created_at,
+    } for item in db.query(models.ServiceTask).filter_by(requester_id=target.id).order_by(models.ServiceTask.created_at.desc()).limit(8).all())
+    published.extend({
+        "id": item.id,
+        "type": "wanted",
+        "title": item.title,
+        "status": item.status,
+        "price_label": f"预算 ¥{float(item.budget_max):.0f}" if item.budget_max else "预算面议",
+        "image_url": item.image_url,
+        "created_at": item.created_at,
+    } for item in db.query(models.WantedPost).filter_by(user_id=target.id).order_by(models.WantedPost.created_at.desc()).limit(8).all())
+    published.extend({
+        "id": item.id,
+        "type": "community",
+        "title": item.title or item.content[:40],
+        "status": item.topic,
+        "price_label": None,
+        "image_url": item.image_url,
+        "created_at": item.created_at,
+    } for item in db.query(models.CommunityPost).filter_by(author_id=target.id).order_by(models.CommunityPost.created_at.desc()).limit(8).all())
+    published.sort(key=lambda item: item.get("created_at") or datetime.min, reverse=True)
+    return {
+        "user": user_payload(target),
+        "profile": {
+            "nickname": profile.nickname or target.username,
+            "avatar_url": profile.avatar_url,
+            "background_url": profile.background_url,
+            "background_theme": profile.background_theme or "teal",
+            "school": profile.school or "南通理工学院",
+            "signature": profile.signature or "",
+            "followers": db.query(models.UserFollow).filter_by(following_id=target.id).count(),
+            "following": db.query(models.UserFollow).filter_by(follower_id=target.id).count(),
+        },
+        "trust": compute_trust(db, target.id),
+        "is_following": is_following(db, user.id, target.id),
+        "is_me": user.id == target.id,
+        "published": published[:20],
+    }
+
+
+def conversation_payload(db: Session, conversation: models.Conversation, current_user_id: int):
+    other_id = conversation.user_b_id if conversation.user_a_id == current_user_id else conversation.user_a_id
+    other = db.query(models.User).options(joinedload(models.User.profile)).filter_by(id=other_id).first()
+    last_message = db.query(models.Message).options(
+        joinedload(models.Message.sender).joinedload(models.User.profile)
+    ).filter_by(conversation_id=conversation.id).order_by(models.Message.created_at.desc()).first()
+    unread = db.query(models.Message).filter(
+        models.Message.conversation_id == conversation.id,
+        models.Message.sender_id != current_user_id,
+        models.Message.is_read.is_(False),
+    ).count()
+    context = None
+    if conversation.context_type and conversation.context_id:
+        try:
+            detail = detail_payload(db, conversation.context_type, conversation.context_id, db.get(models.User, current_user_id))
+            context = compact_content_payload(detail)
+        except HTTPException:
+            context = None
+    return {
+        "id": conversation.id,
+        "user": user_payload(other),
+        "last_message": message_payload(db, last_message, current_user_id) if last_message else None,
+        "unread": unread,
+        "context": context,
+        "updated_at": conversation.updated_at,
+    }
+
+
+@router.post("/conversations/start", status_code=201)
+def start_conversation(
+    data: ConversationStart,
+    db: Session = Depends(get_db),
+    user: models.User = Depends(get_current_user),
+):
+    conversation = find_or_create_conversation(
+        db,
+        user.id,
+        data.target_user_id,
+        data.context_type,
+        data.context_id,
+    )
+    db.commit()
+    db.refresh(conversation)
+    return conversation_payload(db, conversation, user.id)
+
+
+@router.get("/conversations")
+def get_conversations(
+    db: Session = Depends(get_db),
+    user: models.User = Depends(get_current_user),
+):
+    rows = db.query(models.Conversation).filter(
+        or_(models.Conversation.user_a_id == user.id, models.Conversation.user_b_id == user.id)
+    ).order_by(models.Conversation.updated_at.desc()).all()
+    return {"items": [conversation_payload(db, row, user.id) for row in rows]}
+
+
+@router.get("/conversations/{conversation_id}/messages")
+def get_conversation_messages(
+    conversation_id: int,
+    db: Session = Depends(get_db),
+    user: models.User = Depends(get_current_user),
+):
+    conversation = get_conversation_for_user(db, conversation_id, user.id)
+    db.query(models.Message).filter(
+        models.Message.conversation_id == conversation.id,
+        models.Message.sender_id != user.id,
+        models.Message.is_read.is_(False),
+    ).update({"is_read": True}, synchronize_session=False)
+    db.commit()
+    rows = db.query(models.Message).options(
+        joinedload(models.Message.sender).joinedload(models.User.profile),
+        joinedload(models.Message.reply_to).joinedload(models.Message.sender).joinedload(models.User.profile),
+    ).filter_by(conversation_id=conversation.id).order_by(models.Message.created_at.asc()).limit(300).all()
+    return {"items": [message_payload(db, row, user.id) for row in rows]}
+
+
+@router.post("/conversations/{conversation_id}/messages", status_code=201)
+def send_conversation_message(
+    conversation_id: int,
+    data: MessageCreate,
+    db: Session = Depends(get_db),
+    user: models.User = Depends(get_current_user),
+):
+    conversation = get_conversation_for_user(db, conversation_id, user.id)
+    if data.reply_to_id:
+        reply = db.get(models.Message, data.reply_to_id)
+        if not reply or reply.conversation_id != conversation.id:
+            raise HTTPException(status_code=400, detail="引用消息不属于当前会话")
+    recipient_id = conversation.user_b_id if conversation.user_a_id == user.id else conversation.user_a_id
+    blocked = db.query(models.UserModeration).filter(
+        models.UserModeration.action == "block",
+        or_(
+            (models.UserModeration.user_id == user.id) & (models.UserModeration.target_user_id == recipient_id),
+            (models.UserModeration.user_id == recipient_id) & (models.UserModeration.target_user_id == user.id),
+        ),
+    ).first()
+    if blocked:
+        raise HTTPException(status_code=403, detail="当前无法向该用户发送私信")
+    message = models.Message(
+        conversation_id=conversation.id,
+        sender_id=user.id,
+        content=data.content,
+        message_type=data.message_type,
+        metadata_json=json.dumps(data.metadata, ensure_ascii=False) if data.metadata else None,
+        reply_to_id=data.reply_to_id,
+    )
+    conversation.updated_at = func.now()
+    db.add(message)
+    db.flush()
+    muted = db.query(models.UserModeration).filter_by(
+        user_id=recipient_id,
+        target_user_id=user.id,
+        action="mute",
+    ).first()
+    if not muted:
+        preview = "发来一张图片" if data.message_type == "image" else data.content[:120]
+        create_notification(
+            db,
+            recipient_id=recipient_id,
+            actor_id=user.id,
+            notification_type="message",
+            title="收到一条新私信",
+            content=preview,
+            target_type="conversation",
+            target_id=conversation.id,
+        )
+    db.commit()
+    db.refresh(message)
+    return {"message": "发送成功", "item": message_payload(db, message, user.id)}
+
+
+@router.post("/messages/{message_id}/reactions")
+def toggle_message_reaction(
+    message_id: int,
+    data: MessageReactionCreate,
+    db: Session = Depends(get_db),
+    user: models.User = Depends(get_current_user),
+):
+    message = db.query(models.Message).options(
+        joinedload(models.Message.sender).joinedload(models.User.profile)
+    ).filter_by(id=message_id).first()
+    if not message:
+        raise HTTPException(status_code=404, detail="消息不存在")
+    get_conversation_for_user(db, message.conversation_id, user.id)
+    existing = db.query(models.MessageReaction).filter_by(
+        message_id=message.id,
+        user_id=user.id,
+        emoji=data.emoji,
+    ).first()
+    if existing:
+        db.delete(existing)
+    else:
+        db.add(models.MessageReaction(message_id=message.id, user_id=user.id, emoji=data.emoji))
+    db.commit()
+    db.refresh(message)
+    return {"message": "消息表情已更新", "item": message_payload(db, message, user.id)}
