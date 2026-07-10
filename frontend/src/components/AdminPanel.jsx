@@ -15,6 +15,7 @@ import { Badge } from '@/components/ui/badge'
 import { Button } from '@/components/ui/button'
 import { Input } from '@/components/ui/input'
 import { Textarea } from '@/components/ui/textarea'
+import MagicBento from '@/components/MagicBento'
 import {
   deleteAdminContent,
   getAdminContents,
@@ -223,21 +224,27 @@ export default function AdminPanel({ onBack, onNotice }) {
         {loading ? <div className="chat-empty">管理数据加载中...</div> : null}
 
         {!loading && tab === 'overview' && overview ? (
-          <div className="admin-stats-grid">
-            {OVERVIEW_CARDS.map((card) => (
-              <button
-                key={card.key}
-                type="button"
-                className="admin-stat-card"
-                onClick={() => openOverviewCard(card)}
-                title={card.hint}
-              >
-                <span>{card.label}</span>
-                <strong>{overview[card.key] ?? 0}</strong>
-                <small>{card.hint}</small>
-              </button>
-            ))}
-          </div>
+          <MagicBento
+            className="admin-magic-bento"
+            textAutoHide={false}
+            enableStars
+            enableSpotlight
+            enableBorderGlow
+            enableTilt
+            enableMagnetism
+            clickEffect
+            spotlightRadius={300}
+            particleCount={12}
+            glowColor="132, 0, 255"
+            cards={OVERVIEW_CARDS.map((card) => ({
+              ...card,
+              color: '#120F17',
+              label: card.label,
+              title: String(overview[card.key] ?? 0),
+              description: card.hint,
+            }))}
+            onCardClick={(card) => openOverviewCard(card)}
+          />
         ) : null}
 
         {!loading && tab === 'contents' ? (
