@@ -196,7 +196,15 @@ export function receiveOrder(orderId) {
 }
 
 export function cancelOrder(orderId, reason = '双方协商取消') {
-  return request.post(`/marketplace/orders/${orderId}/cancel`, null, { params: { reason } })
+  return request.post(`/marketplace/orders/${orderId}/cancel`, { reason }, { params: { reason } })
+}
+
+export function reviewOrder(orderId, data) {
+  return request.post(`/marketplace/orders/${orderId}/review`, data)
+}
+
+export function skipOrderReview(orderId) {
+  return request.post(`/marketplace/orders/${orderId}/skip-review`)
 }
 
 export function clearConversationMessages(conversationId) {

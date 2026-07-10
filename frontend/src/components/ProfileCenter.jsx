@@ -446,6 +446,11 @@ export default function ProfileCenter({ user, language = 'zh-CN', onLogout, onNo
                 <span>/ 1000 · {data.trust.grade}</span>
                 <em style={{ '--trust': `${trustPercent}%` }} />
               </div>
+              <div className="trust-rate-line">
+                <span>卖家信用值 <b>{data.trust.score ?? 800}</b></span>
+                <span>好评率 <b>{data.trust.positive_rate ?? 100}%</b></span>
+                <span>好评 <b>{data.trust.positive_reviews ?? 0}</b> / {data.trust.total_reviews ?? 0}</span>
+              </div>
               <div className="trust-rules">
                 {data.trust.rules.map((rule) => (
                   <div key={rule.label} className={rule.points.startsWith('-') ? 'is-minus' : ''}>

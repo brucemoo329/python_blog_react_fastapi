@@ -217,6 +217,7 @@ class Order(Base):
     buyer_note = Column(String(240), nullable=True)
     seller_note = Column(String(240), nullable=True)
     cancel_reason = Column(String(240), nullable=True)
+    cancelled_by_id = Column(Integer, ForeignKey("users.id", ondelete="SET NULL"), nullable=True)
     paid_at = Column(DateTime(timezone=True), nullable=True)
     shipped_at = Column(DateTime(timezone=True), nullable=True)
     received_at = Column(DateTime(timezone=True), nullable=True)

@@ -48,6 +48,7 @@ def ensure_runtime_schema():
         "ALTER TABLE marketplace_orders ADD COLUMN paid_at DATETIME NULL",
         "ALTER TABLE marketplace_orders ADD COLUMN shipped_at DATETIME NULL",
         "ALTER TABLE marketplace_orders ADD COLUMN received_at DATETIME NULL",
+        "ALTER TABLE marketplace_orders ADD COLUMN cancelled_by_id INT NULL",
         "ALTER TABLE marketplace_reports ADD COLUMN admin_note VARCHAR(500) NULL",
         "ALTER TABLE marketplace_reports ADD COLUMN action_taken VARCHAR(40) NULL",
         "ALTER TABLE marketplace_reports ADD COLUMN handled_by INT NULL",

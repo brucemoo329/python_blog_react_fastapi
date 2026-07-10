@@ -80,10 +80,15 @@ export default function PublicProfile({ userId, onBack, onOpenItem, onMessage, o
       <header className="public-profile-hero" data-theme={profile.background_theme || 'teal'} style={profile.background_url ? { '--public-bg': `url("${profile.background_url}")` } : undefined}>
         <Avatar className="public-profile-avatar"><AvatarImage src={profile.avatar_url || undefined} alt={profile.nickname} /><AvatarFallback>{(profile.nickname || data.user?.username || '同').slice(0, 1)}</AvatarFallback></Avatar>
         <div className="public-profile-copy">
-          <Badge><ShieldCheck /> {data.trust?.grade} · {data.trust?.score}</Badge>
+          <Badge><ShieldCheck /> {data.trust?.grade} · 信用 {data.trust?.score ?? 800}</Badge>
           <h1>{profile.nickname || data.user?.username}</h1>
           <p>{profile.signature || '这个同学还没有填写个性签名。'}</p>
           <span><MapPin /> {profile.school || '南通理工学院'} · {data.user?.is_online ? '在线' : '离线'}</span>
+          <div className="public-credit-line">
+            <span>卖家信用值 <strong>{data.trust?.score ?? 800}</strong></span>
+            <span>好评率 <strong>{data.trust?.positive_rate ?? 100}%</strong></span>
+            <span>好评数 <strong>{data.trust?.positive_reviews ?? 0}</strong>/{data.trust?.total_reviews ?? 0}</span>
+          </div>
         </div>
         <div className="public-profile-stats">
           <div><strong>{profile.followers || 0}</strong><span>粉丝</span></div>

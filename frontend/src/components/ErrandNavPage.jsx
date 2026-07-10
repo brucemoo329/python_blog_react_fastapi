@@ -18,6 +18,7 @@ import { Avatar, AvatarFallback, AvatarImage } from '@/components/ui/avatar'
 import { Badge } from '@/components/ui/badge'
 import { Button } from '@/components/ui/button'
 import {
+  cancelOrder,
   completeServiceTask,
   complainLateTask,
   getTaskTracking,
@@ -515,6 +516,27 @@ export default function ErrandNavPage({
     }
   }
 
+  const onCancelOrder = async () => {
+    const orderId = tracking?.order_id
+    if (!orderId) {
+      onNotice?.('订单尚未生成，请稍后在「我的订单」中取消')
+      return
+    }
+    const reason = window.prompt('请填写取消原因', '临时有事，无法继续')
+    if (!reason?.trim()) return
+    if (!window.confirm('确认取消该跑腿订单？对方可选择投诉。')) return
+    setBusy(true)
+    try {
+      const response = await cancelOrder(orderId, reason.trim())
+      onNotice?.(response.message || '订单已取消')
+      onFinished?.()
+    } catch (error) {
+      onNotice?.(error.response?.data?.detail || '取消失败')
+    } finally {
+      setBusy(false)
+    }
+  }
+
   const onSaveTime = async () => {
     setBusy(true)
     try {
@@ -659,7 +681,7 @@ export default function ErrandNavPage({
               <CheckCircle2 /> 确认送达
             </Button>
           ) : null}
-          {isRequester && phase !== 'delivered' ? (
+          {isRequester && phase !== 'delivered' && phase !== 'pending' ? (
             <>
               <Button variant="outline" onClick={() => setDesiredOpen((v) => !v)}>修改期望时间</Button>
               {tracking?.can_complain_late ? (
@@ -667,8 +689,11 @@ export default function ErrandNavPage({
               ) : null}
             </>
           ) : null}
-          {isRequester && phase === 'delivered' ? (
-            <Button className="flex-1" onClick={onBack}>返回</Button>
+          {(isRunner || isRequester) && phase !== 'delivered' && phase !== 'pending' ? (
+            <Button variant="ghost" disabled={busy} onClick={onCancelOrder}>取消订单</Button>
+          ) : null}
+          {phase === 'delivered' || tracking?.status === 'cancelled' ? (
+            <Button className="flex-1" onClick={onBack}>返回（可在我的订单评价）</Button>
           ) : null}
         </div>
 

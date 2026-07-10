@@ -112,6 +112,16 @@ class TaskTravelModeBody(BaseModel):
     distance_meters: Optional[int] = None
 
 
+class OrderCancelBody(BaseModel):
+    reason: str = Field(default="双方协商取消", min_length=2, max_length=240)
+
+
+class OrderReviewBody(BaseModel):
+    rating: int = Field(ge=1, le=5)
+    content: Optional[str] = Field(default=None, max_length=500)
+    is_complaint: bool = False
+
+
 class CommunityPostCreate(BaseModel):
     content: str = Field(min_length=2, max_length=3000)
     title: Optional[str] = Field(default=None, max_length=120)
@@ -446,12 +456,21 @@ def can_late_complain(task: models.ServiceTask, current_user_id: Optional[int]) 
     return datetime.utcnow() >= desired + timedelta(minutes=20)
 
 
-def service_task_tracking_payload(task: models.ServiceTask, current_user_id: Optional[int] = None):
+def service_task_tracking_payload(
+    task: models.ServiceTask,
+    current_user_id: Optional[int] = None,
+    order_id: Optional[int] = None,
+    db: Optional[Session] = None,
+):
     desired = task.desired_delivery_at or task.deadline
     pickup_lat = _num(task.pickup_latitude) if task.pickup_latitude is not None else _num(task.latitude)
     pickup_lng = _num(task.pickup_longitude) if task.pickup_longitude is not None else _num(task.longitude)
     delivery_lat = _num(task.delivery_latitude)
     delivery_lng = _num(task.delivery_longitude)
+
+    if order_id is None and db is not None and task and task.id:
+        row = db.query(models.Order.id).filter_by(service_task_id=task.id).first()
+        order_id = row[0] if row else None
 
     role = None
     if current_user_id:
@@ -530,11 +549,12 @@ def service_task_tracking_payload(task: models.ServiceTask, current_user_id: Opt
         "created_at": task.created_at,
         "latitude": pickup_lat or delivery_lat,
         "longitude": pickup_lng or delivery_lng,
+        "order_id": order_id,
     }
 
 
 def serialize_service_detail(db: Session, task: models.ServiceTask, user: models.User):
-    tracking = service_task_tracking_payload(task, user.id)
+    tracking = service_task_tracking_payload(task, user.id, db=db)
     return {
         "id": task.id,
         "type": "service",
@@ -716,6 +736,9 @@ def compute_trust(db: Session, user_id: int):
         or_(models.Order.buyer_id == user_id, models.Order.seller_id == user_id),
         models.Order.status.in_(["completed", "success", "delivered"]),
     ).count()
+    total_reviews = db.query(models.Review).filter(
+        models.Review.reviewed_user_id == user_id,
+    ).count()
     positive_reviews = db.query(models.Review).filter(
         models.Review.reviewed_user_id == user_id,
         models.Review.rating >= 4,
@@ -737,12 +760,15 @@ def compute_trust(db: Session, user_id: int):
     ).scalar() or 0
     score = 800 + int(event_points) + completed_orders * 12 + positive_reviews * 15 - verified_reports * 35
     score = max(0, min(1000, score))
+    positive_rate = round((positive_reviews / total_reviews) * 100, 1) if total_reviews else 100.0
     return {
         "score": score,
         "grade": trust_grade(score),
         "base_score": 800,
         "completed_orders": completed_orders,
         "positive_reviews": positive_reviews,
+        "total_reviews": total_reviews,
+        "positive_rate": positive_rate,
         "verified_reports": verified_reports,
         "pending_reports": pending_reports,
         "rules": [
@@ -781,35 +807,65 @@ def compact_content_payload(item):
 
 
 def compact_order_payload(order, role: str):
+    is_service = bool(order.service_task_id)
     title = order.listing.title if order.listing else (order.service_task.title if order.service_task else "校园交易订单")
     image_url = None
     if order.listing and getattr(order.listing, "images", None):
         image_url = order.listing.images[0].image_url if order.listing.images else None
     elif order.service_task:
         image_url = order.service_task.image_url
+    status_label = order_status_label(order.status, role)
+    if is_service and order.service_task:
+        phase = order.service_task.delivery_phase or "pending"
+        if order.status == "cancelled":
+            status_label = "已取消"
+        elif order.status == "completed":
+            status_label = "已完成"
+        elif phase == "to_pickup":
+            status_label = "跑手取货中" if role == "buyer" else "前往取货"
+        elif phase in {"delivering", "picked_up"}:
+            status_label = "配送中"
+        else:
+            status_label = "进行中"
     return {
         "id": order.id,
         "order_no": order.order_no,
         "title": title,
         "role": role,
+        "kind": "service" if is_service else "listing",
         "amount": float(order.amount),
         "status": order.status,
-        "status_label": order_status_label(order.status, role),
+        "status_label": status_label,
         "image_url": image_url,
         "listing_id": order.listing_id,
+        "service_task_id": order.service_task_id,
         "delivery_method": order.delivery_method,
-        "meeting_location": order.meeting_location,
+        "meeting_location": order.meeting_location or (
+            f"{order.service_task.pickup_location or ''} → {order.service_task.delivery_location or ''}"
+            if order.service_task else None
+        ),
         "created_at": order.created_at,
         "paid_at": getattr(order, "paid_at", None),
         "shipped_at": getattr(order, "shipped_at", None),
         "received_at": getattr(order, "received_at", None),
         "completed_at": order.completed_at,
+        "cancelled_by_id": getattr(order, "cancelled_by_id", None),
     }
 
 
 def full_order_payload(db: Session, order: models.Order, user_id: int):
     role = "buyer" if order.buyer_id == user_id else "seller"
+    is_service = bool(order.service_task_id)
     payload = compact_order_payload(order, role)
+    my_review = db.query(models.Review).filter_by(order_id=order.id, reviewer_id=user_id).first()
+    can_review = order.status in {"completed", "cancelled"} and my_review is None
+    # 被对方取消后，可选择投诉（差评）或不投诉（跳过）
+    peer_cancelled = (
+        order.status == "cancelled"
+        and getattr(order, "cancelled_by_id", None)
+        and order.cancelled_by_id != user_id
+        and my_review is None
+    )
     payload.update({
         "buyer": user_payload(order.buyer) if order.buyer else None,
         "seller": user_payload(order.seller) if order.seller else None,
@@ -817,12 +873,25 @@ def full_order_payload(db: Session, order: models.Order, user_id: int):
         "seller_note": getattr(order, "seller_note", None),
         "cancel_reason": getattr(order, "cancel_reason", None),
         "description": order.listing.description if order.listing else (order.service_task.description if order.service_task else None),
-        "actions": order_actions_for_role(order.status, role),
+        "actions": order_actions_for_role(order.status, role, is_service=is_service),
+        "can_review": can_review,
+        "peer_cancelled": peer_cancelled,
+        "my_review": {
+            "rating": my_review.rating,
+            "content": my_review.content,
+        } if my_review else None,
+        "service_task": service_task_tracking_payload(order.service_task, user_id, db=db, order_id=order.id) if order.service_task else None,
     })
     return payload
 
 
-def order_actions_for_role(status: str, role: str):
+def order_actions_for_role(status: str, role: str, is_service: bool = False):
+    if status in {"completed", "cancelled"}:
+        return ["review"] if True else []
+    if is_service:
+        # 跑腿订单：双方均可取消；进行中可打开导航
+        actions = ["cancel", "navigate"]
+        return actions
     if status == "pending_payment":
         return ["pay", "cancel"] if role == "buyer" else ["cancel"]
     if status == "pending_ship":
@@ -830,6 +899,50 @@ def order_actions_for_role(status: str, role: str):
     if status == "shipped":
         return ["receive"] if role == "buyer" else ["track"]
     return []
+
+
+def make_order_no(prefix: str = "CP") -> str:
+    return f"{prefix}{datetime.utcnow().strftime('%Y%m%d%H%M%S')}{uuid4().hex[:6].upper()}"
+
+
+def get_or_create_service_order(db: Session, task: models.ServiceTask) -> models.Order:
+    """跑腿接单后生成双边可见订单：buyer=发布者，seller=跑手。"""
+    existing = db.query(models.Order).filter_by(service_task_id=task.id).first()
+    if existing:
+        return existing
+    order = models.Order(
+        order_no=make_order_no("RN"),
+        buyer_id=task.requester_id,
+        seller_id=task.runner_id,
+        service_task_id=task.id,
+        amount=task.reward,
+        status="pending_ship",
+        delivery_method="errand",
+        meeting_location=f"{task.pickup_location or '取货点'} → {task.delivery_location or '送达点'}",
+        paid_at=datetime.utcnow(),
+        buyer_note="跑腿订单（赏金）",
+    )
+    db.add(order)
+    db.flush()
+    return order
+
+
+def sync_service_order_status(db: Session, task: models.ServiceTask):
+    order = db.query(models.Order).filter_by(service_task_id=task.id).first()
+    if not order:
+        return None
+    if task.status == "cancelled":
+        order.status = "cancelled"
+    elif task.status == "completed" or task.delivery_phase == "delivered":
+        order.status = "completed"
+        order.completed_at = order.completed_at or datetime.utcnow()
+        order.received_at = order.received_at or datetime.utcnow()
+    elif task.delivery_phase in {"delivering", "picked_up"}:
+        order.status = "shipped"
+        order.shipped_at = order.shipped_at or datetime.utcnow()
+    elif task.status == "accepted":
+        order.status = "pending_ship"
+    return order
 
 
 def send_order_system_message(db: Session, order: models.Order, sender_id: int, content: str, metadata: dict):
@@ -1300,6 +1413,8 @@ def accept_task(
         target_type="service",
         target_id=task.id,
     )
+    # 生成「我的订单」双边可见的跑腿订单
+    order = get_or_create_service_order(db, task)
     db.commit()
     db.refresh(task)
     task = db.query(models.ServiceTask).options(
@@ -1307,9 +1422,10 @@ def accept_task(
         joinedload(models.ServiceTask.runner).joinedload(models.User.profile),
     ).filter_by(id=task_id).first()
     return {
-        "message": "接单成功，已进入取货导航",
+        "message": "接单成功，已进入取货导航，订单已生成",
         "conversation_id": conversation.id,
-        "tracking": service_task_tracking_payload(task, user.id),
+        "order_id": order.id,
+        "tracking": service_task_tracking_payload(task, user.id, db=db),
     }
 
 
@@ -1329,7 +1445,7 @@ def list_active_errands(
         ),
     ).order_by(models.ServiceTask.accepted_at.desc(), models.ServiceTask.created_at.desc()).limit(20).all()
     return {
-        "items": [service_task_tracking_payload(task, user.id) for task in tasks],
+        "items": [service_task_tracking_payload(task, user.id, db=db) for task in tasks],
         "total": len(tasks),
     }
 
@@ -1346,7 +1462,12 @@ def get_task_tracking(
     ).filter_by(id=task_id).first()
     if not task:
         raise HTTPException(status_code=404, detail="任务不存在")
-    return {"item": service_task_tracking_payload(task, user.id)}
+    # 兼容旧数据：已接单但未生成订单时补建
+    if task.runner_id and task.status in {"accepted", "completed", "cancelled"}:
+        get_or_create_service_order(db, task)
+        sync_service_order_status(db, task)
+        db.commit()
+    return {"item": service_task_tracking_payload(task, user.id, db=db)}
 
 
 @router.post("/tasks/{task_id}/location")
@@ -1379,7 +1500,7 @@ def update_runner_location(
         joinedload(models.ServiceTask.requester).joinedload(models.User.profile),
         joinedload(models.ServiceTask.runner).joinedload(models.User.profile),
     ).filter_by(id=task_id).first()
-    return {"message": "位置已更新", "tracking": service_task_tracking_payload(task, user.id)}
+    return {"message": "位置已更新", "tracking": service_task_tracking_payload(task, user.id, db=db)}
 
 
 @router.post("/tasks/{task_id}/travel-mode")
@@ -1407,7 +1528,7 @@ def update_task_travel_mode(
         joinedload(models.ServiceTask.requester).joinedload(models.User.profile),
         joinedload(models.ServiceTask.runner).joinedload(models.User.profile),
     ).filter_by(id=task_id).first()
-    return {"message": f"已切换为{MODE_LABELS.get(mode, mode)}", "tracking": service_task_tracking_payload(task, user.id)}
+    return {"message": f"已切换为{MODE_LABELS.get(mode, mode)}", "tracking": service_task_tracking_payload(task, user.id, db=db)}
 
 
 @router.post("/tasks/{task_id}/picked-up")
@@ -1459,12 +1580,13 @@ def mark_task_picked_up(
         target_type="service",
         target_id=task.id,
     )
+    sync_service_order_status(db, task)
     db.commit()
     task = db.query(models.ServiceTask).options(
         joinedload(models.ServiceTask.requester).joinedload(models.User.profile),
         joinedload(models.ServiceTask.runner).joinedload(models.User.profile),
     ).filter_by(id=task_id).first()
-    return {"message": "已确认取货，开始配送导航", "tracking": service_task_tracking_payload(task, user.id)}
+    return {"message": "已确认取货，开始配送导航", "tracking": service_task_tracking_payload(task, user.id, db=db)}
 
 
 @router.post("/tasks/{task_id}/complete")
@@ -1502,16 +1624,17 @@ def complete_task(
         actor_id=user.id,
         notification_type="task_completed",
         title="跑腿任务已完成",
-        content=f"“{task.title}”已送达完成",
+        content=f"“{task.title}”已送达完成，可在「我的订单」中评价",
         target_type="service",
         target_id=task.id,
     )
+    sync_service_order_status(db, task)
     db.commit()
     task = db.query(models.ServiceTask).options(
         joinedload(models.ServiceTask.requester).joinedload(models.User.profile),
         joinedload(models.ServiceTask.runner).joinedload(models.User.profile),
     ).filter_by(id=task_id).first()
-    return {"message": "任务已完成", "tracking": service_task_tracking_payload(task, user.id)}
+    return {"message": "任务已完成，可在我的订单中好评或投诉", "tracking": service_task_tracking_payload(task, user.id, db=db)}
 
 
 @router.patch("/tasks/{task_id}/desired-time")
@@ -2049,7 +2172,7 @@ def get_summary(
             models.ServiceTask.runner_id == user.id,
         ),
     ).order_by(models.ServiceTask.accepted_at.desc(), models.ServiceTask.created_at.desc()).limit(8).all()
-    active_errands = [service_task_tracking_payload(task, user.id) for task in active_errand_rows]
+    active_errands = [service_task_tracking_payload(task, user.id, db=db) for task in active_errand_rows]
     return {
         "active_listings": db.query(models.Listing).filter(models.Listing.status == "available").count(),
         "open_tasks": db.query(models.ServiceTask).filter(models.ServiceTask.status == "open").count(),
@@ -3039,22 +3162,33 @@ def receive_order(
 def cancel_order(
     order_id: int,
     reason: str = Query(default="双方协商取消"),
+    data: Optional[OrderCancelBody] = Body(default=None),
     db: Session = Depends(get_db),
     user: models.User = Depends(get_current_user),
 ):
     order = db.query(models.Order).options(
         joinedload(models.Order.listing).joinedload(models.Listing.images),
+        joinedload(models.Order.service_task),
         joinedload(models.Order.buyer).joinedload(models.User.profile),
         joinedload(models.Order.seller).joinedload(models.User.profile),
     ).filter_by(id=order_id).first()
     if not order or user.id not in {order.buyer_id, order.seller_id}:
         raise HTTPException(status_code=404, detail="订单不存在")
-    if order.status in {"completed", "cancelled", "shipped"}:
+    is_service = bool(order.service_task_id)
+    # 跑腿单进行中也可双方取消；普通商品 shipped 后不可取消
+    if order.status in {"completed", "cancelled"}:
         raise HTTPException(status_code=409, detail="当前订单状态不可取消")
+    if not is_service and order.status == "shipped":
+        raise HTTPException(status_code=409, detail="当前订单状态不可取消")
+    cancel_text = (data.reason if data and data.reason else reason)[:240]
     order.status = "cancelled"
-    order.cancel_reason = reason[:240]
+    order.cancel_reason = cancel_text
+    order.cancelled_by_id = user.id
     if order.listing and order.listing.status in {"reserved", "pending", "sold_pending"}:
         order.listing.status = "available"
+    if order.service_task:
+        order.service_task.status = "cancelled"
+        order.service_task.delivery_phase = "pending"
     peer_id = order.seller_id if user.id == order.buyer_id else order.buyer_id
     create_notification(
         db,
@@ -3062,13 +3196,139 @@ def cancel_order(
         actor_id=user.id,
         notification_type="order",
         title="订单已取消",
-        content=reason,
+        content=f"{cancel_text}。可在「我的订单」中选择投诉或不投诉。",
         target_type="order",
         target_id=order.id,
     )
     db.commit()
-    db.refresh(order)
-    return {"message": "订单已取消", "item": full_order_payload(db, order, user.id)}
+    order = db.query(models.Order).options(
+        joinedload(models.Order.listing).joinedload(models.Listing.images),
+        joinedload(models.Order.service_task),
+        joinedload(models.Order.buyer).joinedload(models.User.profile),
+        joinedload(models.Order.seller).joinedload(models.User.profile),
+    ).filter_by(id=order_id).first()
+    return {"message": "订单已取消，对方可选择投诉或跳过", "item": full_order_payload(db, order, user.id)}
+
+
+@router.post("/orders/{order_id}/review")
+def review_order(
+    order_id: int,
+    data: OrderReviewBody,
+    db: Session = Depends(get_db),
+    user: models.User = Depends(get_current_user),
+):
+    order = db.query(models.Order).options(
+        joinedload(models.Order.service_task),
+        joinedload(models.Order.listing),
+    ).filter_by(id=order_id).first()
+    if not order or user.id not in {order.buyer_id, order.seller_id}:
+        raise HTTPException(status_code=404, detail="订单不存在")
+    if order.status not in {"completed", "cancelled"}:
+        raise HTTPException(status_code=409, detail="仅已完成或已取消订单可评价")
+    exists = db.query(models.Review).filter_by(order_id=order.id, reviewer_id=user.id).first()
+    if exists:
+        raise HTTPException(status_code=409, detail="你已评价过该订单")
+    reviewed_user_id = order.seller_id if user.id == order.buyer_id else order.buyer_id
+    rating = data.rating
+    if data.is_complaint:
+        rating = min(rating, 2)
+    review = models.Review(
+        order_id=order.id,
+        reviewer_id=user.id,
+        reviewed_user_id=reviewed_user_id,
+        rating=rating,
+        content=(data.content or ("投诉本次交易" if data.is_complaint else "好评")).strip()[:500],
+    )
+    db.add(review)
+    # 信任分事件：好评 +8，投诉/差评 -20
+    if data.is_complaint or rating <= 2:
+        db.add(models.TrustScoreEvent(
+            user_id=reviewed_user_id,
+            event_type=f"order_complaint_{order.id}"[:40],
+            points_delta=-20,
+            reason=f"订单投诉：{order.order_no}"[:160],
+            related_type="order",
+            related_id=order.id,
+            occurred_on=date.today(),
+        ))
+        create_notification(
+            db,
+            recipient_id=reviewed_user_id,
+            actor_id=user.id,
+            notification_type="order_review",
+            title="你收到一则交易投诉",
+            content=review.content or "对方对本次订单提出投诉，信任分 -20",
+            target_type="order",
+            target_id=order.id,
+        )
+        message = "已提交投诉，对方信任分 -20"
+    else:
+        if rating >= 4:
+            db.add(models.TrustScoreEvent(
+                user_id=reviewed_user_id,
+                event_type=f"order_praise_{order.id}"[:40],
+                points_delta=8,
+                reason=f"订单好评：{order.order_no}"[:160],
+                related_type="order",
+                related_id=order.id,
+                occurred_on=date.today(),
+            ))
+        create_notification(
+            db,
+            recipient_id=reviewed_user_id,
+            actor_id=user.id,
+            notification_type="order_review",
+            title="你收到一则交易评价",
+            content=f"{rating} 星：{review.content or '好评'}",
+            target_type="order",
+            target_id=order.id,
+        )
+        message = "评价成功，感谢反馈"
+    db.commit()
+    order = db.query(models.Order).options(
+        joinedload(models.Order.listing).joinedload(models.Listing.images),
+        joinedload(models.Order.service_task),
+        joinedload(models.Order.buyer).joinedload(models.User.profile),
+        joinedload(models.Order.seller).joinedload(models.User.profile),
+    ).filter_by(id=order_id).first()
+    return {
+        "message": message,
+        "trust": compute_trust(db, reviewed_user_id),
+        "item": full_order_payload(db, order, user.id),
+    }
+
+
+@router.post("/orders/{order_id}/skip-review")
+def skip_order_review(
+    order_id: int,
+    db: Session = Depends(get_db),
+    user: models.User = Depends(get_current_user),
+):
+    """取消后选择不投诉：写入中性评价占位，避免反复弹窗。"""
+    order = db.get(models.Order, order_id)
+    if not order or user.id not in {order.buyer_id, order.seller_id}:
+        raise HTTPException(status_code=404, detail="订单不存在")
+    if order.status not in {"completed", "cancelled"}:
+        raise HTTPException(status_code=409, detail="当前订单无需跳过评价")
+    exists = db.query(models.Review).filter_by(order_id=order.id, reviewer_id=user.id).first()
+    if exists:
+        return {"message": "已处理过评价", "item": full_order_payload(db, order, user.id)}
+    reviewed_user_id = order.seller_id if user.id == order.buyer_id else order.buyer_id
+    db.add(models.Review(
+        order_id=order.id,
+        reviewer_id=user.id,
+        reviewed_user_id=reviewed_user_id,
+        rating=3,
+        content="不投诉/暂不评价",
+    ))
+    db.commit()
+    order = db.query(models.Order).options(
+        joinedload(models.Order.listing).joinedload(models.Listing.images),
+        joinedload(models.Order.service_task),
+        joinedload(models.Order.buyer).joinedload(models.User.profile),
+        joinedload(models.Order.seller).joinedload(models.User.profile),
+    ).filter_by(id=order_id).first()
+    return {"message": "已选择不投诉", "item": full_order_payload(db, order, user.id)}
 
 
 @router.delete("/conversations/{conversation_id}/messages")

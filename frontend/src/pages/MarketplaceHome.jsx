@@ -813,7 +813,14 @@ export default function MarketplaceHome({ user, onLogout, onUserUpdate }) {
               </article>
             </section>
           ) : (
-            <OrdersCenter language={language} onBack={() => selectNav('home')} onNotice={setNotice} onOpenOrder={openOrderDetail} onPurchase={(item) => setCheckoutItem(item)} />
+            <OrdersCenter
+              language={language}
+              onBack={() => selectNav('home')}
+              onNotice={setNotice}
+              onOpenOrder={openOrderDetail}
+              onPurchase={(item) => setCheckoutItem(item)}
+              onOpenErrandNav={(taskId, tracking) => openErrandNav(taskId, tracking)}
+            />
           )
         ) : activeNav === 'profile' ? (
           <ProfileCenter user={currentUser} language={language} onLogout={onLogout} onNotice={setNotice} onProfileChange={handleProfileChange} onOpenItem={handleAction} onOpenUser={openUser} />
