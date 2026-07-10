@@ -3,11 +3,48 @@
   --login-purple-dark: #4b31cd;
   --login-ink: #24242a;
   --login-muted: #777782;
+  position: relative;
   min-height: 100vh;
   display: grid;
   grid-template-columns: minmax(520px, 1.08fr) minmax(460px, 0.92fr);
   background: #fff;
   color: var(--login-ink);
+}
+
+.auth-lang-switcher {
+  position: fixed;
+  top: 16px;
+  right: 16px;
+  z-index: 40;
+}
+
+.auth-lang-switcher .lang-switcher--login {
+  height: 36px;
+  gap: 6px;
+  padding-inline: 12px;
+  border-radius: 999px;
+  border-color: rgba(95, 67, 233, 0.28);
+  background: rgba(255, 255, 255, 0.92);
+  color: #3f2dbd;
+  box-shadow: 0 8px 24px rgba(63, 45, 189, 0.12);
+  backdrop-filter: blur(10px);
+}
+
+.auth-lang-switcher .lang-switcher--login:hover {
+  background: #fff;
+  border-color: rgba(95, 67, 233, 0.45);
+}
+
+.auth-lang-switcher .lang-switcher-globe {
+  width: 16px;
+  height: 16px;
+}
+
+.auth-lang-switcher .lang-switcher-code {
+  min-width: 1.4em;
+  font-size: 12px;
+  font-weight: 700;
+  letter-spacing: 0.04em;
 }
 
 .character-login-showcase {

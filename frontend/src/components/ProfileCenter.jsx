@@ -403,7 +403,7 @@ export default function ProfileCenter({ user, language = 'zh-CN', onLogout, onNo
             <AvatarImage src={form.avatar_url || undefined} alt={form.nickname} />
             <AvatarFallback>{(form.nickname || user?.username || '同').slice(0, 1)}</AvatarFallback>
           </Avatar>
-          <button type="button" onClick={() => avatarInputRef.current?.click()} title="上传头像">
+          <button type="button" onClick={() => avatarInputRef.current?.click()} title={t('profile.edit')}>
             <Camera />
           </button>
           <input ref={avatarInputRef} hidden type="file" accept="image/*" onChange={handleAvatar} />
@@ -411,22 +411,22 @@ export default function ProfileCenter({ user, language = 'zh-CN', onLogout, onNo
         <div className="profile-hero-main">
           <div>
             <Badge variant="secondary"><BadgeCheck /> {data.trust.grade}</Badge>
-            <h1>{form.nickname || user?.username || '校园同学'}</h1>
-            <p>{form.signature || '添加一句个性化留言，让同学更了解你。'}</p>
+            <h1>{form.nickname || user?.username || t('ui.profile')}</h1>
+            <p>{form.signature || t('profile.signaturePh')}</p>
           </div>
           <div className="profile-identity">
-            <span><MapPin /> 当前地区：{form.current_ip || '正在获取'}</span>
-            <span><School /> 当前学校：{form.school || '南通理工学院'}</span>
+            <span><MapPin /> {t('profile.region')}：{form.current_ip || t('profile.locating')}</span>
+            <span><School /> {t('profile.schoolLabel')}：{form.school || '南通理工学院'}</span>
           </div>
         </div>
         <div className="profile-social">
-          <button type="button" onClick={() => openSocial('followers')}><strong>{form.followers || 0}</strong><span>粉丝</span></button>
-          <button type="button" onClick={() => openSocial('following')}><strong>{form.following || 0}</strong><span>关注</span></button>
-          <div><strong>{data.trust.score}</strong><span>信任分</span></div>
+          <button type="button" onClick={() => openSocial('followers')}><strong>{form.followers || 0}</strong><span>{t('profile.followers')}</span></button>
+          <button type="button" onClick={() => openSocial('following')}><strong>{form.following || 0}</strong><span>{t('profile.followingCount')}</span></button>
+          <div><strong>{data.trust.score}</strong><span>{t('profile.trustPoints')}</span></div>
         </div>
         <div className="profile-hero-actions">
-          <Button onClick={() => setEditOpen(true)}><PencilLine /> 更改资料</Button>
-          <Button variant="secondary" onClick={() => backgroundInputRef.current?.click()}><ImagePlus /> 更换背景</Button>
+          <Button onClick={() => setEditOpen(true)}><PencilLine /> {t('profile.edit')}</Button>
+          <Button variant="secondary" onClick={() => backgroundInputRef.current?.click()}><ImagePlus /> {t('profile.changeBg')}</Button>
           <input ref={backgroundInputRef} hidden type="file" accept="image/*" onChange={handleBackground} />
         </div>
       </section>
@@ -456,31 +456,31 @@ export default function ProfileCenter({ user, language = 'zh-CN', onLogout, onNo
                 ))}
               </div>
               <div className="trust-facts">
-                {data.trust.completed_orders ? <span><PackageCheck /> 成功交易 {data.trust.completed_orders}</span> : null}
-                {data.trust.positive_reviews ? <span><ThumbsUp /> 好评 {data.trust.positive_reviews}</span> : null}
-                {data.trust.pending_reports ? <span><BellRing /> 待核实投诉 {data.trust.pending_reports}</span> : null}
-                {data.trust.verified_reports ? <span><ShieldCheck /> 已核实违规 {data.trust.verified_reports}</span> : null}
-                {!data.trust.completed_orders && !data.trust.positive_reviews && !data.trust.pending_reports && !data.trust.verified_reports ? <span><ShieldCheck /> 暂无交易评价或违规记录</span> : null}
+                {data.trust.completed_orders ? <span><PackageCheck /> {t('profile.trades')} {data.trust.completed_orders}</span> : null}
+                {data.trust.positive_reviews ? <span><ThumbsUp /> {t('profile.goodReviews')} {data.trust.positive_reviews}</span> : null}
+                {data.trust.pending_reports ? <span><BellRing /> {t('profile.pendingComplaints')} {data.trust.pending_reports}</span> : null}
+                {data.trust.verified_reports ? <span><ShieldCheck /> {t('profile.verifiedViolations')} {data.trust.verified_reports}</span> : null}
+                {!data.trust.completed_orders && !data.trust.positive_reviews && !data.trust.pending_reports && !data.trust.verified_reports ? <span><ShieldCheck /> {t('profile.noTrustRecords')}</span> : null}
               </div>
             </CardContent>
           </Card>
 
           <div className="profile-list-grid">
             <Card className="profile-card">
-              <CardHeader><CardTitle><Heart /> 我的收藏</CardTitle></CardHeader>
-              <CardContent>{(data.favorites || []).slice(0, 4).map((item) => <MiniItem key={`${item.type}-${item.id}`} item={item} onClick={openItem} />)}{!data.favorites?.length && <MiniItem emptyText="还没有收藏，遇到好物就点收藏吧。" />}</CardContent>
+              <CardHeader><CardTitle><Heart /> {t('profile.favorites')}</CardTitle></CardHeader>
+              <CardContent>{(data.favorites || []).slice(0, 4).map((item) => <MiniItem key={`${item.type}-${item.id}`} item={item} onClick={openItem} />)}{!data.favorites?.length && <MiniItem emptyText={t('profile.favoritesEmpty')} />}</CardContent>
             </Card>
             <Card className="profile-card">
-              <CardHeader><CardTitle><History /> 历史浏览</CardTitle></CardHeader>
-              <CardContent>{(data.history || []).slice(0, 4).map((item) => <MiniItem key={`${item.item_type}-${item.item_id}`} item={item} onClick={openItem} />)}{!data.history?.length && <MiniItem emptyText="浏览商品或任务后会出现在这里。" />}</CardContent>
+              <CardHeader><CardTitle><History /> {t('profile.history')}</CardTitle></CardHeader>
+              <CardContent>{(data.history || []).slice(0, 4).map((item) => <MiniItem key={`${item.item_type}-${item.item_id}`} item={item} onClick={openItem} />)}{!data.history?.length && <MiniItem emptyText={t('profile.historyEmpty')} />}</CardContent>
             </Card>
             <Card className="profile-card">
-              <CardHeader><CardTitle><ShoppingBag /> 我发布的</CardTitle></CardHeader>
-              <CardContent>{publishedList.slice(0, 5).map((item) => <MiniItem key={`${item.type}-${item.id}`} item={item} onClick={openItem} />)}{!publishedList.length && <MiniItem emptyText="还没有发布内容，去首页发布第一件好物。" />}</CardContent>
+              <CardHeader><CardTitle><ShoppingBag /> {t('profile.published')}</CardTitle></CardHeader>
+              <CardContent>{publishedList.slice(0, 5).map((item) => <MiniItem key={`${item.type}-${item.id}`} item={item} onClick={openItem} />)}{!publishedList.length && <MiniItem emptyText={t('profile.publishedEmpty')} />}</CardContent>
             </Card>
             <Card className="profile-card">
-              <CardHeader><CardTitle><Star /> 待评价</CardTitle></CardHeader>
-              <CardContent>{(data.pending_reviews || []).slice(0, 4).map((item) => <MiniItem key={item.id} item={{ ...item, price_label: `¥${item.amount}` }} />)}{!data.pending_reviews?.length && <MiniItem emptyText="暂无待评价订单。" />}</CardContent>
+              <CardHeader><CardTitle><Star /> {t('profile.pendingReviews')}</CardTitle></CardHeader>
+              <CardContent>{(data.pending_reviews || []).slice(0, 4).map((item) => <MiniItem key={item.id} item={{ ...item, price_label: `¥${item.amount}` }} />)}{!data.pending_reviews?.length && <MiniItem emptyText={t('profile.reviewsEmpty')} />}</CardContent>
             </Card>
           </div>
         </div>

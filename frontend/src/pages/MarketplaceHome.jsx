@@ -58,6 +58,7 @@ import ProfileCenter from '@/components/ProfileCenter'
 import PublicProfile from '@/components/PublicProfile'
 import PublishDialog from '@/components/PublishDialog'
 import QuickChat from '@/components/QuickChat'
+import LanguageSwitcher from '@/components/LanguageSwitcher'
 import SpotlightCard from '@/components/SpotlightCard'
 import StarBorder from '@/components/StarBorder'
 import {
@@ -79,7 +80,7 @@ import {
   updateUserProfile,
 } from '@/api/marketplace'
 import { cn } from '@/lib/utils'
-import { navLabel, normalizeLang, t as translate, typeLabel } from '@/lib/i18n'
+import { navLabel, normalizeLang, t as translate, typeLabel, writeStoredLanguage } from '@/lib/i18n'
 import '@/styles/marketplace.css'
 
 const NAV_DEFS = [
@@ -508,10 +509,22 @@ export default function MarketplaceHome({ user, onLogout, onUserUpdate }) {
     setCurrentUser(merged)
     onUserUpdate?.(merged)
     if (merged.profile?.school) setCampus(merged.profile.school)
-    if (merged.profile?.language) {
-      const nextLang = normalizeLang(merged.profile.language)
-      localStorage.setItem('campus_language', nextLang)
-      document.documentElement.lang = nextLang
+    if (merged.profile?.language) writeStoredLanguage(merged.profile.language)
+  }
+
+  const handleLanguageChange = async (nextLang) => {
+    const lang = writeStoredLanguage(nextLang)
+    const meta = { ...(currentUser?.profile || {}), language: lang }
+    handleProfileChange({ ...currentUser, profile: meta })
+    try {
+      const response = await updateUserProfile({ language: lang })
+      handleProfileChange({
+        ...currentUser,
+        profile: { ...meta, ...(response.profile || {}), language: lang },
+      })
+      setNotice(`${translate(lang, 'profile.langSwitched')} ${lang}`)
+    } catch (error) {
+      setNotice(error.response?.data?.detail || translate(lang, 'profile.langSwitched'))
     }
   }
 
@@ -632,6 +645,7 @@ export default function MarketplaceHome({ user, onLogout, onUserUpdate }) {
           </DropdownMenu>
           <InputGroup className="campus-search"><InputGroupAddon><Search /></InputGroupAddon><InputGroupInput value={search} onChange={(event) => setSearch(event.target.value)} placeholder={t('ui.search')} /></InputGroup>
           <div className="campus-top-actions">
+            <LanguageSwitcher language={language} onChange={handleLanguageChange} appearance="topbar" />
             <DropdownMenu>
               <DropdownMenuTrigger asChild><Button variant="ghost" size="icon" aria-label="通知" className="relative"><Bell />{summary.unread_notifications ? <span className="campus-unread">{summary.unread_notifications}</span> : null}</Button></DropdownMenuTrigger>
               <DropdownMenuContent align="end" className="notification-popover">

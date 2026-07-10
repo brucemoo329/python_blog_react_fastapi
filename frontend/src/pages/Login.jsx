@@ -1,7 +1,9 @@
 import { useRef, useState } from 'react';
 import { Eye, EyeOff, Mail } from 'lucide-react';
 import AnimatedAuthShowcase, { CharacterAuthBrand } from '../components/AnimatedAuthShowcase.jsx';
+import LanguageSwitcher from '@/components/LanguageSwitcher';
 import { login } from '../api/auth.js';
+import { updateUserProfile } from '@/api/marketplace';
 import { Button } from '@/components/ui/button';
 import {
   Card,
@@ -31,21 +33,24 @@ import {
 } from '@/components/ui/input-group';
 import { Input } from '@/components/ui/input';
 import { Spinner } from '@/components/ui/spinner';
+import { readStoredLanguage, t as translate } from '@/lib/i18n';
 import { cn } from '@/lib/utils';
 import '../styles/animated-login.css';
 
-function getErrorMessage(error) {
-  if (error.code === 'ECONNABORTED') return '服务器连接超时，请检查后端是否启动';
-  if (!error.response) return '服务器连接失败，请确认 FastAPI 后端正在运行';
+function getErrorMessage(error, language) {
+  const t = (key, fallback = '') => translate(language, key, fallback);
+  if (error.code === 'ECONNABORTED') return t('login.timeout', '服务器连接超时，请检查后端是否启动');
+  if (!error.response) return t('login.connFail', '服务器连接失败，请确认 FastAPI 后端正在运行');
   const serverMessage = error.response.data?.detail || error.response.data?.message;
   if (serverMessage) return serverMessage;
-  if (error.response.status === 404) return '登录接口不存在，请检查后端路由 /login';
-  if (error.response.status === 422) return '请求格式错误，请检查账号和密码字段';
-  if (error.response.status >= 500) return '服务器或数据库校验失败，请查看后端控制台';
-  return '登录失败，请稍后再试';
+  if (error.response.status === 404) return t('login.notFound', '登录接口不存在，请检查后端路由 /login');
+  if (error.response.status === 422) return t('login.badRequest', '请求格式错误，请检查账号和密码字段');
+  if (error.response.status >= 500) return t('login.serverError', '服务器或数据库校验失败，请查看后端控制台');
+  return t('login.fail', '登录失败，请稍后再试');
 }
 
 export default function Login({ onLogin, onNavigateRegister }) {
+  const [language, setLanguage] = useState(() => readStoredLanguage());
   const [form, setForm] = useState(() => ({
     account: localStorage.getItem('remembered_account') || '',
     password: '',
@@ -56,23 +61,28 @@ export default function Login({ onLogin, onNavigateRegister }) {
   const [focusedField, setFocusedField] = useState(null);
   const [loading, setLoading] = useState(false);
   const [message, setMessage] = useState({ type: '', text: '' });
+  const t = (key, fallback = '') => translate(language, key, fallback);
+
+  const handleLanguageChange = (next) => {
+    setLanguage(next);
+  };
 
   const handleSubmit = async (event) => {
     event.preventDefault();
     const account = form.account.trim();
 
     if (!account) {
-      setMessage({ type: 'error', text: '账号不能为空' });
+      setMessage({ type: 'error', text: t('login.accountRequired') });
       return;
     }
 
     if (!form.password) {
-      setMessage({ type: 'error', text: '密码不能为空' });
+      setMessage({ type: 'error', text: t('login.passwordRequired') });
       return;
     }
 
     if (form.password.length < 3) {
-      setMessage({ type: 'error', text: '密码长度不能太短' });
+      setMessage({ type: 'error', text: t('login.passwordShort') });
       return;
     }
 
@@ -101,11 +111,22 @@ export default function Login({ onLogin, onNavigateRegister }) {
         localStorage.removeItem('remembered_account');
       }
 
-      setMessage({ type: 'success', text: '登录成功，正在进入校园集市' });
-      window.setTimeout(() => onLogin(response.user || { username: account, email: account }), 350);
+      const nextUser = response.user || { username: account, email: account };
+      nextUser.profile = { ...(nextUser.profile || {}), language };
+      try {
+        if (token) {
+          const profileResponse = await updateUserProfile({ language });
+          nextUser.profile = { ...(nextUser.profile || {}), ...(profileResponse.profile || {}), language };
+        }
+      } catch {
+        // Keep local language even if profile sync fails.
+      }
+
+      setMessage({ type: 'success', text: t('login.success') });
+      window.setTimeout(() => onLogin(nextUser), 350);
     } catch (error) {
       console.error('login error:', error);
-      setMessage({ type: 'error', text: getErrorMessage(error) });
+      setMessage({ type: 'error', text: getErrorMessage(error, language) });
     } finally {
       setLoading(false);
     }
@@ -113,6 +134,15 @@ export default function Login({ onLogin, onNavigateRegister }) {
 
   return (
     <main className="character-login-page">
+      <div className="auth-lang-switcher">
+        <LanguageSwitcher
+          language={language}
+          onChange={handleLanguageChange}
+          appearance="login"
+          align="end"
+        />
+      </div>
+
       <AnimatedAuthShowcase
         accountFocused={focusedField === 'account'}
         passwordFocused={focusedField === 'password'}
@@ -123,15 +153,15 @@ export default function Login({ onLogin, onNavigateRegister }) {
         <Card className="w-full max-w-[420px] gap-0 overflow-visible border-0 bg-transparent py-0 ring-0 shadow-none">
           <CardHeader className="px-0 pb-8 text-center">
             <CharacterAuthBrand mobile />
-            <CardTitle className="text-4xl font-bold tracking-normal">欢迎回来</CardTitle>
-            <CardDescription className="mt-2">请输入你的账号信息</CardDescription>
+            <CardTitle className="text-4xl font-bold tracking-normal">{t('login.welcome')}</CardTitle>
+            <CardDescription className="mt-2">{t('login.subtitle')}</CardDescription>
           </CardHeader>
 
           <CardContent className="px-0">
             <form className="flex flex-col gap-5" onSubmit={handleSubmit}>
               <FieldGroup>
                 <Field>
-                  <FieldLabel htmlFor="login-account">邮箱或用户名</FieldLabel>
+                  <FieldLabel htmlFor="login-account">{t('login.account')}</FieldLabel>
                   <Input
                     id="login-account"
                     ref={accountInputRef}
@@ -146,7 +176,7 @@ export default function Login({ onLogin, onNavigateRegister }) {
                 </Field>
 
                 <Field>
-                  <FieldLabel htmlFor="login-password">密码</FieldLabel>
+                  <FieldLabel htmlFor="login-password">{t('login.password')}</FieldLabel>
                   <InputGroup className="h-12 bg-background">
                     <InputGroupInput
                       id="login-password"
@@ -156,13 +186,13 @@ export default function Login({ onLogin, onNavigateRegister }) {
                       onChange={(event) => setForm({ ...form, password: event.target.value })}
                       onFocus={() => setFocusedField('password')}
                       onBlur={() => setFocusedField(null)}
-                      placeholder="请输入密码"
+                      placeholder={t('login.passwordPh')}
                       autoComplete="current-password"
                     />
                     <InputGroupAddon align="inline-end">
                       <InputGroupButton
                         size="icon-xs"
-                        aria-label={showPassword ? '隐藏密码' : '显示密码'}
+                        aria-label={showPassword ? 'hide' : 'show'}
                         onMouseDown={(event) => event.preventDefault()}
                         onClick={() => setShowPassword((value) => !value)}
                       >
@@ -181,26 +211,26 @@ export default function Login({ onLogin, onNavigateRegister }) {
                     onCheckedChange={(checked) => setForm({ ...form, remember: Boolean(checked) })}
                   />
                   <FieldLabel htmlFor="remember-account" className="font-normal text-muted-foreground">
-                    记住我
+                    {t('login.remember')}
                   </FieldLabel>
                 </Field>
 
                 <Dialog>
                   <DialogTrigger asChild>
                     <Button type="button" variant="link" size="sm" className="px-0">
-                      忘记密码？
+                      {t('login.forgot')}
                     </Button>
                   </DialogTrigger>
                   <DialogContent>
                     <DialogHeader>
-                      <DialogTitle>重置密码</DialogTitle>
+                      <DialogTitle>{t('login.resetTitle')}</DialogTitle>
                       <DialogDescription>
-                        当前版本暂未开放自助重置，请联系校园集市管理员处理。
+                        {t('login.resetDesc')}
                       </DialogDescription>
                     </DialogHeader>
                     <DialogFooter>
                       <DialogClose asChild>
-                        <Button type="button">我知道了</Button>
+                        <Button type="button">{t('login.gotIt')}</Button>
                       </DialogClose>
                     </DialogFooter>
                   </DialogContent>
@@ -224,7 +254,7 @@ export default function Login({ onLogin, onNavigateRegister }) {
 
               <Button className="h-12 w-full text-base" type="submit" size="lg" disabled={loading}>
                 {loading && <Spinner data-icon="inline-start" />}
-                {loading ? '正在登录...' : '登录'}
+                {loading ? t('login.submitting') : t('login.submit')}
               </Button>
             </form>
 
@@ -236,14 +266,14 @@ export default function Login({ onLogin, onNavigateRegister }) {
               onClick={() => accountInputRef.current?.focus()}
             >
               <Mail data-icon="inline-start" />
-              使用校园邮箱登录
+              {t('login.campusMail')}
             </Button>
           </CardContent>
 
           <CardFooter className="justify-center border-0 bg-transparent px-0 pt-7 pb-0 text-sm text-muted-foreground">
-            <span>还没有账号？</span>
+            <span>{t('login.noAccount')}</span>
             <Button type="button" variant="link" className="h-auto px-1" onClick={onNavigateRegister}>
-              立即注册
+              {t('login.register')}
             </Button>
           </CardFooter>
         </Card>
