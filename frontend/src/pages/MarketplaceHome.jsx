@@ -221,6 +221,7 @@ export default function MarketplaceHome({ user, onLogout, onUserUpdate }) {
   const displayAvatar = displayProfile.avatar_url
   const trustScore = currentUser?.trust?.score ?? summary.trust?.score ?? 800
   const trustGrade = currentUser?.trust?.grade ?? summary.trust?.grade ?? '优秀'
+  const trustPercent = Math.min(100, Math.max(0, Math.round((Number(trustScore) / 1000) * 100)))
 
   useEffect(() => {
     setCurrentUser(user)
@@ -499,7 +500,14 @@ export default function MarketplaceHome({ user, onLogout, onUserUpdate }) {
       <aside className="campus-sidebar">
         <button type="button" className="campus-logo" onClick={() => selectNav('home')}><span><Sparkles /></span><span>校园脉动<small>Campus Pulse</small></span></button>
         <div className="campus-line-nav" aria-label="主导航"><LineSidebar items={NAV_ITEMS.map((item) => item.labels?.[langGroup] || item.label)} defaultActive={Math.max(0, NAV_ITEMS.findIndex((item) => item.id === activeNav))} accentColor="#a78bfa" textColor="rgba(216,180,254,.62)" showIndex={false} showMarker={false} maxShift={22} proximityRadius={138} itemGap={19} fontSize={1.02} smoothing={80} className="campus-main-line-sidebar" onItemClick={(index) => selectNav(NAV_ITEMS[index].id)} /></div>
-        <SpotlightCard className="campus-sidebar-stats" spotlightColor="rgba(167, 139, 250, 0.34)"><p>{copy.trust}</p><strong>{trustGrade}</strong><div><span /></div><small>{trustScore} / 1000</small></SpotlightCard>
+        <SpotlightCard className="campus-sidebar-stats" spotlightColor="rgba(167, 139, 250, 0.34)">
+          <p>{copy.trust}</p>
+          <strong>{trustGrade}</strong>
+          <div className="campus-trust-bar" role="progressbar" aria-valuenow={trustScore} aria-valuemin={0} aria-valuemax={1000} aria-label="信任分进度">
+            <span style={{ width: `${trustPercent}%` }} />
+          </div>
+          <small>{trustScore} / 1000</small>
+        </SpotlightCard>
         <StarBorder as="button" type="button" className="campus-publish-button" color="#c084fc" speed="4.8s" thickness={2} onClick={() => openPublish('listing')}><PenLine /> {copy.publish}</StarBorder>
       </aside>
 

@@ -167,7 +167,8 @@
   margin: 4px 0 10px;
 }
 
-.campus-sidebar-stats > div {
+.campus-sidebar-stats > div,
+.campus-trust-bar {
   height: 4px;
   margin-bottom: 7px;
   overflow: hidden;
@@ -175,12 +176,14 @@
   background: #252836;
 }
 
-.campus-sidebar-stats > div span {
+.campus-sidebar-stats > div span,
+.campus-trust-bar span {
   display: block;
-  width: 84%;
+  width: 0;
   height: 100%;
   border-radius: inherit;
   background: linear-gradient(90deg, #8b5cf6, #d946ef);
+  transition: width 0.45s cubic-bezier(0.22, 1, 0.36, 1);
 }
 
 .campus-publish-button {
