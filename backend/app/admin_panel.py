@@ -438,12 +438,13 @@ def admin_list_users(
     db: Session = Depends(get_db),
     admin: models.User = Depends(require_admin),
 ):
-    query = db.query(models.User).options(joinedload(models.User.profile))
+    query = db.query(models.User).outerjoin(models.UserProfile).options(joinedload(models.User.profile))
     if keyword.strip():
         key = keyword.strip()
         query = query.filter(or_(
             models.User.username.contains(key),
             models.User.email.contains(key),
+            models.UserProfile.nickname.contains(key),
         ))
     rows = query.order_by(models.User.id.desc()).limit(limit).all()
     return {

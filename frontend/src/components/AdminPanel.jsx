@@ -5,9 +5,11 @@ import {
   Flag,
   Megaphone,
   Package,
+  Search,
   Shield,
   Trash2,
   Users,
+  X,
 } from 'lucide-react'
 import { Badge } from '@/components/ui/badge'
 import { Button } from '@/components/ui/button'
@@ -33,6 +35,15 @@ const TABS = [
   { id: 'notices', label: '官方通知', icon: Megaphone },
 ]
 
+const OVERVIEW_CARDS = [
+  { key: 'users', label: '注册用户', tab: 'users', hint: '点击查看全部用户' },
+  { key: 'active_listings', label: '在售商品', tab: 'contents', contentType: 'listing', hint: '点击查看商品内容' },
+  { key: 'pending_reports', label: '待处理举报', tab: 'reports', reportStatus: 'pending', hint: '点击处理举报' },
+  { key: 'orders', label: '订单总数', tab: 'contents', contentType: 'all', hint: '订单由买卖双方在「我的订单」处理' },
+  { key: 'open_tasks', label: '跑腿任务', tab: 'contents', contentType: 'service', hint: '点击查看跑腿内容' },
+  { key: 'community_posts', label: '社区帖子', tab: 'contents', contentType: 'community', hint: '点击查看社区内容' },
+]
+
 export default function AdminPanel({ onBack, onNotice }) {
   const [tab, setTab] = useState('overview')
   const [overview, setOverview] = useState(null)
@@ -40,9 +51,14 @@ export default function AdminPanel({ onBack, onNotice }) {
   const [contentType, setContentType] = useState('all')
   const [keyword, setKeyword] = useState('')
   const [reports, setReports] = useState([])
+  const [reportStatus, setReportStatus] = useState('all')
   const [users, setUsers] = useState([])
   const [userKeyword, setUserKeyword] = useState('')
-  const [noticeForm, setNoticeForm] = useState({ title: '', content: '', recipient_user_id: '', broadcast: true })
+  const [noticeForm, setNoticeForm] = useState({ title: '', content: '', broadcast: false })
+  const [selectedRecipient, setSelectedRecipient] = useState(null)
+  const [noticeUserKeyword, setNoticeUserKeyword] = useState('')
+  const [noticeUserResults, setNoticeUserResults] = useState([])
+  const [noticeUserSearching, setNoticeUserSearching] = useState(false)
   const [loading, setLoading] = useState(false)
 
   const loadOverview = useCallback(async () => {
@@ -56,9 +72,9 @@ export default function AdminPanel({ onBack, onNotice }) {
   }, [contentType, keyword])
 
   const loadReports = useCallback(async () => {
-    const data = await getAdminReports({ status: 'all' })
+    const data = await getAdminReports({ status: reportStatus })
     setReports(data.items || [])
-  }, [])
+  }, [reportStatus])
 
   const loadUsers = useCallback(async () => {
     const data = await getAdminUsers({ keyword: userKeyword })
@@ -82,6 +98,13 @@ export default function AdminPanel({ onBack, onNotice }) {
     })()
     return () => { cancelled = true }
   }, [tab, loadOverview, loadContents, loadReports, loadUsers, onNotice])
+
+  const openOverviewCard = (card) => {
+    if (card.contentType) setContentType(card.contentType)
+    if (card.reportStatus) setReportStatus(card.reportStatus)
+    if (card.tab === 'users') setUserKeyword('')
+    setTab(card.tab)
+  }
 
   const removeContent = async (item) => {
     if (!window.confirm(`确认删除「${item.title}」？`)) return
@@ -120,17 +143,46 @@ export default function AdminPanel({ onBack, onNotice }) {
     }
   }
 
+  const searchNoticeUsers = async () => {
+    const key = noticeUserKeyword.trim()
+    if (!key) {
+      onNotice?.('请输入用户名、昵称或邮箱进行检索')
+      return
+    }
+    setNoticeUserSearching(true)
+    try {
+      const data = await getAdminUsers({ keyword: key, limit: 20 })
+      setNoticeUserResults(data.items || [])
+      if (!(data.items || []).length) onNotice?.('没有找到匹配用户')
+    } catch (error) {
+      onNotice?.(error.response?.data?.detail || '用户检索失败')
+    } finally {
+      setNoticeUserSearching(false)
+    }
+  }
+
   const sendNotice = async () => {
+    if (!noticeForm.title.trim() || !noticeForm.content.trim()) {
+      onNotice?.('请填写通知标题和正文')
+      return
+    }
+    if (!noticeForm.broadcast && !selectedRecipient?.id) {
+      onNotice?.('请先检索并选择接收用户，或勾选全站广播')
+      return
+    }
     try {
       const payload = {
         title: noticeForm.title.trim(),
         content: noticeForm.content.trim(),
         broadcast: noticeForm.broadcast,
-        recipient_user_id: noticeForm.broadcast ? undefined : Number(noticeForm.recipient_user_id || 0) || undefined,
+        recipient_user_id: noticeForm.broadcast ? undefined : selectedRecipient?.id,
       }
       const response = await sendOfficialNotice(payload)
       onNotice?.(response.message)
-      setNoticeForm({ title: '', content: '', recipient_user_id: '', broadcast: true })
+      setNoticeForm({ title: '', content: '', broadcast: false })
+      setSelectedRecipient(null)
+      setNoticeUserKeyword('')
+      setNoticeUserResults([])
     } catch (error) {
       onNotice?.(error.response?.data?.detail || '发送失败')
     }
@@ -172,15 +224,18 @@ export default function AdminPanel({ onBack, onNotice }) {
 
         {!loading && tab === 'overview' && overview ? (
           <div className="admin-stats-grid">
-            {[
-              ['注册用户', overview.users],
-              ['在售商品', overview.active_listings],
-              ['待处理举报', overview.pending_reports],
-              ['订单总数', overview.orders],
-              ['跑腿任务', overview.open_tasks],
-              ['社区帖子', overview.community_posts],
-            ].map(([label, value]) => (
-              <article key={label}><span>{label}</span><strong>{value}</strong></article>
+            {OVERVIEW_CARDS.map((card) => (
+              <button
+                key={card.key}
+                type="button"
+                className="admin-stat-card"
+                onClick={() => openOverviewCard(card)}
+                title={card.hint}
+              >
+                <span>{card.label}</span>
+                <strong>{overview[card.key] ?? 0}</strong>
+                <small>{card.hint}</small>
+              </button>
             ))}
           </div>
         ) : null}
@@ -221,6 +276,15 @@ export default function AdminPanel({ onBack, onNotice }) {
 
         {!loading && tab === 'reports' ? (
           <div className="admin-section admin-reports">
+            <div className="admin-toolbar">
+              <select value={reportStatus} onChange={(event) => setReportStatus(event.target.value)}>
+                <option value="all">全部状态</option>
+                <option value="pending">待处理</option>
+                <option value="resolved">已处理</option>
+                <option value="dismissed">已驳回</option>
+              </select>
+              <Button onClick={loadReports}>刷新</Button>
+            </div>
             {reports.map((report) => (
               <article key={report.id} className={cn(report.status === 'pending' && 'is-pending')}>
                 <header>
@@ -256,15 +320,15 @@ export default function AdminPanel({ onBack, onNotice }) {
         {!loading && tab === 'users' ? (
           <div className="admin-section">
             <div className="admin-toolbar">
-              <Input value={userKeyword} onChange={(event) => setUserKeyword(event.target.value)} placeholder="搜索用户名/邮箱" />
-              <Button onClick={loadUsers}>搜索</Button>
+              <Input value={userKeyword} onChange={(event) => setUserKeyword(event.target.value)} placeholder="搜索用户名 / 昵称 / 邮箱" />
+              <Button onClick={loadUsers}><Search /> 搜索</Button>
             </div>
             <div className="admin-table">
               {users.map((user) => (
                 <article key={user.id}>
                   <div>
                     <strong>{user.nickname || user.username}</strong>
-                    <small>@{user.username} · 信任 {user.trust?.score ?? 800}</small>
+                    <small>ID {user.id} · @{user.username} · {user.email} · 信任 {user.trust?.score ?? 800}</small>
                     <p>
                       {user.can_comment ? '可评论' : '禁评'} · {user.can_post ? '可发帖' : '禁发'} · {user.is_active ? '正常' : '停用'}
                       {user.ban_reason ? ` · ${user.ban_reason}` : ''}
@@ -282,9 +346,21 @@ export default function AdminPanel({ onBack, onNotice }) {
                     <Button size="sm" variant="destructive" onClick={() => updateUser(user, { is_active: !user.is_active, ban_reason: user.is_active ? '账号被管理员停用' : null })}>
                       {user.is_active ? '停用' : '启用'}
                     </Button>
+                    <Button
+                      size="sm"
+                      variant="secondary"
+                      onClick={() => {
+                        setSelectedRecipient(user)
+                        setNoticeForm((current) => ({ ...current, broadcast: false }))
+                        setTab('notices')
+                      }}
+                    >
+                      <Megaphone /> 发通知
+                    </Button>
                   </div>
                 </article>
               ))}
+              {!users.length ? <div className="chat-empty">未找到用户</div> : null}
             </div>
           </div>
         ) : null}
@@ -293,11 +369,73 @@ export default function AdminPanel({ onBack, onNotice }) {
           <div className="admin-section admin-notice-form">
             <label><span>通知标题</span><Input value={noticeForm.title} onChange={(event) => setNoticeForm({ ...noticeForm, title: event.target.value })} placeholder="例如：校园交易安全提醒" /></label>
             <label><span>通知正文</span><Textarea value={noticeForm.content} onChange={(event) => setNoticeForm({ ...noticeForm, content: event.target.value })} placeholder="官方通知内容" rows={5} /></label>
-            <label className="admin-check"><input type="checkbox" checked={noticeForm.broadcast} onChange={(event) => setNoticeForm({ ...noticeForm, broadcast: event.target.checked })} /> 全站广播</label>
+
+            <label className="admin-check">
+              <input
+                type="checkbox"
+                checked={noticeForm.broadcast}
+                onChange={(event) => {
+                  const broadcast = event.target.checked
+                  setNoticeForm({ ...noticeForm, broadcast })
+                  if (broadcast) setSelectedRecipient(null)
+                }}
+              />
+              全站广播（发给所有活跃用户）
+            </label>
+
             {!noticeForm.broadcast ? (
-              <label><span>接收用户 ID</span><Input value={noticeForm.recipient_user_id} onChange={(event) => setNoticeForm({ ...noticeForm, recipient_user_id: event.target.value })} placeholder="用户数字 ID" /></label>
+              <div className="admin-notice-user-picker">
+                <span className="admin-notice-label">指定接收用户</span>
+                {selectedRecipient ? (
+                  <div className="admin-selected-user">
+                    <div>
+                      <strong>{selectedRecipient.nickname || selectedRecipient.username}</strong>
+                      <small>ID {selectedRecipient.id} · @{selectedRecipient.username} · {selectedRecipient.email}</small>
+                    </div>
+                    <Button size="sm" variant="ghost" onClick={() => setSelectedRecipient(null)}><X /> 更换</Button>
+                  </div>
+                ) : (
+                  <>
+                    <div className="admin-toolbar">
+                      <Input
+                        value={noticeUserKeyword}
+                        onChange={(event) => setNoticeUserKeyword(event.target.value)}
+                        onKeyDown={(event) => {
+                          if (event.key === 'Enter') {
+                            event.preventDefault()
+                            searchNoticeUsers()
+                          }
+                        }}
+                        placeholder="输入用户名、昵称或邮箱检索"
+                      />
+                      <Button onClick={searchNoticeUsers} disabled={noticeUserSearching}>
+                        <Search /> {noticeUserSearching ? '检索中...' : '检索用户'}
+                      </Button>
+                    </div>
+                    <div className="admin-notice-user-results">
+                      {noticeUserResults.map((user) => (
+                        <button
+                          key={user.id}
+                          type="button"
+                          className="admin-notice-user-item"
+                          onClick={() => {
+                            setSelectedRecipient(user)
+                            setNoticeUserResults([])
+                          }}
+                        >
+                          <strong>{user.nickname || user.username}</strong>
+                          <small>ID {user.id} · @{user.username} · {user.email}</small>
+                        </button>
+                      ))}
+                    </div>
+                  </>
+                )}
+              </div>
             ) : null}
-            <Button onClick={sendNotice}><Megaphone /> 发送官方通知</Button>
+
+            <Button onClick={sendNotice}>
+              <Megaphone /> {noticeForm.broadcast ? '发送全站官方通知' : selectedRecipient ? `发送给 ${selectedRecipient.nickname || selectedRecipient.username}` : '发送官方通知'}
+            </Button>
           </div>
         ) : null}
       </div>
