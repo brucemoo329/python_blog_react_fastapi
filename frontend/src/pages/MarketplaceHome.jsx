@@ -336,10 +336,62 @@ export default function MarketplaceHome({ user, onLogout, onUserUpdate }) {
       const response = await shareContent({ source_type: item.type, source_id: item.id, comment: '' })
       setFeed((current) => current.map((entry) => itemKey(entry) === itemKey(item) ? { ...entry, repost_count: (entry.repost_count || 0) + 1 } : entry))
       setNotice(response.message || '已转发到校园社区')
+      // New community repost should appear in feed without manual refresh.
+      loadData()
     } catch (error) {
       setNotice(error.response?.data?.detail || '转发失败')
     }
   }
+
+  /** Keep homepage feed in sync when user interacts inside detail page. */
+  const handleDetailItemChange = useCallback((patch) => {
+    if (!patch?.id || !patch?.type) return
+    const key = itemKey(patch)
+    setFeed((current) => current.map((entry) => {
+      if (itemKey(entry) !== key) {
+        // Follow state may apply to author across multiple feed cards.
+        if (patch._authorFollow && (entry.author?.id === patch._authorFollow.userId || entry.seller?.id === patch._authorFollow.userId || entry.requester?.id === patch._authorFollow.userId)) {
+          const nextAuthor = {
+            ...(entry.author || entry.seller || entry.requester || {}),
+            is_following: patch._authorFollow.followed,
+          }
+          return {
+            ...entry,
+            author: entry.author ? nextAuthor : entry.author,
+            seller: entry.seller ? nextAuthor : entry.seller,
+            requester: entry.requester ? nextAuthor : entry.requester,
+          }
+        }
+        return entry
+      }
+      const next = { ...entry, ...patch }
+      // Keep nested author fields when only partial author patch is provided.
+      if (patch.author) {
+        next.author = { ...(entry.author || entry.seller || entry.requester || {}), ...patch.author }
+        if (entry.seller) next.seller = { ...entry.seller, ...patch.author }
+        if (entry.requester) next.requester = { ...entry.requester, ...patch.author }
+      }
+      delete next._authorFollow
+      delete next._hideAuthorId
+      return next
+    }))
+
+    if (typeof patch.favorited === 'boolean') {
+      setSavedKeys((current) => {
+        const next = new Set(current)
+        if (patch.favorited) next.add(key)
+        else next.delete(key)
+        return next
+      })
+    }
+
+    if (patch._hideAuthorId) {
+      setFeed((current) => current.filter((entry) => {
+        const ownerId = entry.author?.id || entry.seller?.id || entry.requester?.id
+        return ownerId !== patch._hideAuthorId
+      }))
+    }
+  }, [])
 
   const handleAction = async (item) => {
     const type = item.type || item.item_type || 'listing'
@@ -590,7 +642,20 @@ export default function MarketplaceHome({ user, onLogout, onUserUpdate }) {
             onOrderCreated={(order) => { setCheckoutItem(null); setSelectedOrder(order); setActiveNav('orders') }}
           />
         ) : selectedDetail ? (
-          <ContentDetail target={selectedDetail} currentUser={currentUser} onBack={() => setSelectedDetail(null)} onNotice={setNotice} onOpenTarget={setSelectedDetail} onOpenUser={openUser} onTopic={openTopic} onMessage={openChat} onPurchase={(item) => { setSelectedDetail(null); setCheckoutItem(item) }} onDeleted={() => { setSelectedDetail(null); loadData() }} />
+          <ContentDetail
+            target={selectedDetail}
+            currentUser={currentUser}
+            onBack={() => setSelectedDetail(null)}
+            onNotice={setNotice}
+            onOpenTarget={setSelectedDetail}
+            onOpenUser={openUser}
+            onTopic={openTopic}
+            onMessage={openChat}
+            onPurchase={(item) => { setSelectedDetail(null); setCheckoutItem(item) }}
+            onDeleted={() => { setSelectedDetail(null); loadData() }}
+            onItemChange={handleDetailItemChange}
+            onFeedRefresh={loadData}
+          />
         ) : publicUserId ? (
           <PublicProfile userId={publicUserId} onBack={() => setPublicUserId(null)} onOpenItem={handleAction} onMessage={(source) => openChat(source)} onNotice={setNotice} />
         ) : activeNav === 'admin' && isAdmin ? (

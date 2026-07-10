@@ -105,7 +105,20 @@ function CommentNode({ comment, onReply, onReact, onDelete, onOpenUser, depth = 
   )
 }
 
-export default function ContentDetail({ target, currentUser, onBack, onNotice, onOpenTarget, onOpenUser, onTopic, onMessage, onPurchase, onDeleted }) {
+export default function ContentDetail({
+  target,
+  currentUser,
+  onBack,
+  onNotice,
+  onOpenTarget,
+  onOpenUser,
+  onTopic,
+  onMessage,
+  onPurchase,
+  onDeleted,
+  onItemChange,
+  onFeedRefresh,
+}) {
   const [detail, setDetail] = useState(null)
   const [comment, setComment] = useState('')
   const [shareText, setShareText] = useState('')
@@ -134,6 +147,15 @@ export default function ContentDetail({ target, currentUser, onBack, onNotice, o
   const item = detail?.item
   const author = item?.author || {}
 
+  const pushItemChange = (patch) => {
+    if (!item?.id || !item?.type) return
+    onItemChange?.({
+      type: item.type,
+      id: item.id,
+      ...patch,
+    })
+  }
+
   const react = async (targetType, targetId, reactionType) => {
     try {
       const response = await toggleReaction({ target_type: targetType, target_id: targetId, reaction_type: reactionType })
@@ -142,8 +164,12 @@ export default function ContentDetail({ target, currentUser, onBack, onNotice, o
         if (targetType === 'comment') {
           return { ...current, comments: mapCommentTree(current.comments || [], targetId, (node) => ({ ...node, likes: response.likes, dislikes: response.dislikes, reaction: response.my_reaction })) }
         }
-        return { ...current, item: { ...current.item, reaction: response, like_count: response.likes, dislike_count: response.dislikes } }
+        const nextItem = { ...current.item, reaction: response, like_count: response.likes, dislike_count: response.dislikes }
+        return { ...current, item: nextItem }
       })
+      if (targetType !== 'comment') {
+        pushItemChange({ reaction: response, like_count: response.likes, dislike_count: response.dislikes })
+      }
     } catch (error) {
       onNotice?.(error.response?.data?.detail || '操作失败')
     }
@@ -153,11 +179,13 @@ export default function ContentDetail({ target, currentUser, onBack, onNotice, o
     try {
       const response = await createComment({ target_type: item.type, target_id: item.id, content, parent_id: parentId })
       setComment('')
+      const nextCount = (item.comment_count || 0) + 1
       setDetail((current) => ({
         ...current,
-        item: { ...current.item, comment_count: (current.item.comment_count || 0) + 1 },
+        item: { ...current.item, comment_count: nextCount },
         comments: parentId ? appendCommentReply(current.comments || [], parentId, response.comment) : [...(current.comments || []), response.comment],
       }))
+      pushItemChange({ comment_count: nextCount })
       onNotice?.('留言成功')
     } catch (error) {
       onNotice?.(error.response?.data?.detail || '留言失败')
@@ -169,11 +197,13 @@ export default function ContentDetail({ target, currentUser, onBack, onNotice, o
     try {
       const response = await deleteComment(node.id)
       const removed = response.removed_ids || [node.id]
+      const nextCount = Math.max(0, (item.comment_count || 0) - removed.length)
       setDetail((current) => ({
         ...current,
-        item: { ...current.item, comment_count: Math.max(0, (current.item.comment_count || 0) - removed.length) },
+        item: { ...current.item, comment_count: nextCount },
         comments: removeComments(current.comments || [], removed),
       }))
+      pushItemChange({ comment_count: nextCount })
       onNotice?.(response.message)
     } catch (error) {
       onNotice?.(error.response?.data?.detail || '评论删除失败')
@@ -185,7 +215,10 @@ export default function ContentDetail({ target, currentUser, onBack, onNotice, o
       const response = await shareContent({ source_type: item.type, source_id: item.id, comment: shareText })
       setShareText('')
       setShareOpen(false)
-      setDetail((current) => ({ ...current, item: { ...current.item, repost_count: (current.item.repost_count || 0) + 1 } }))
+      const nextRepost = (item.repost_count || 0) + 1
+      setDetail((current) => ({ ...current, item: { ...current.item, repost_count: nextRepost } }))
+      pushItemChange({ repost_count: nextRepost })
+      onFeedRefresh?.()
       onNotice?.(response.message || '已转发到校园社区')
     } catch (error) {
       onNotice?.(error.response?.data?.detail || '转发失败')
@@ -196,6 +229,7 @@ export default function ContentDetail({ target, currentUser, onBack, onNotice, o
     try {
       const response = await toggleFavorite(item.type, item.id)
       setDetail((current) => ({ ...current, item: { ...current.item, favorited: response.favorited } }))
+      pushItemChange({ favorited: response.favorited })
       onNotice?.(response.message)
     } catch (error) {
       onNotice?.(error.response?.data?.detail || '收藏失败')
@@ -206,6 +240,12 @@ export default function ContentDetail({ target, currentUser, onBack, onNotice, o
     try {
       const response = await toggleFollow(author.id)
       setDetail((current) => ({ ...current, item: { ...current.item, author: { ...current.item.author, is_following: response.followed } } }))
+      onItemChange?.({
+        type: item.type,
+        id: item.id,
+        author: { ...(item.author || {}), is_following: response.followed },
+        _authorFollow: { userId: author.id, followed: response.followed },
+      })
       onNotice?.(response.message)
     } catch (error) {
       onNotice?.(error.response?.data?.detail || '关注失败')
@@ -215,8 +255,16 @@ export default function ContentDetail({ target, currentUser, onBack, onNotice, o
   const moderate = async (action) => {
     try {
       const response = await toggleUserModeration(action, author.id)
-      setDetail((current) => ({ ...current, item: { ...current.item, author: { ...current.item.author, [action === 'mute' ? 'is_muted' : 'is_blocked']: response.enabled } } }))
+      const flag = action === 'mute' ? 'is_muted' : 'is_blocked'
+      setDetail((current) => ({ ...current, item: { ...current.item, author: { ...current.item.author, [flag]: response.enabled } } }))
+      onItemChange?.({
+        type: item.type,
+        id: item.id,
+        author: { ...(item.author || {}), [flag]: response.enabled },
+        _hideAuthorId: response.enabled ? author.id : null,
+      })
       onNotice?.(response.message)
+      if (response.enabled) onFeedRefresh?.()
     } catch (error) {
       onNotice?.(error.response?.data?.detail || '操作失败')
     }
