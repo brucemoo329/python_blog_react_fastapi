@@ -35,8 +35,36 @@ export function toggleFavorite(type, id) {
   return request.post('/marketplace/favorites', { target_type: type, target_id: id })
 }
 
-export function acceptServiceTask(taskId) {
-  return request.post(`/marketplace/tasks/${taskId}/accept`)
+export function acceptServiceTask(taskId, data = {}) {
+  return request.post(`/marketplace/tasks/${taskId}/accept`, data)
+}
+
+export function getActiveErrands() {
+  return request.get('/marketplace/tasks/active')
+}
+
+export function getTaskTracking(taskId) {
+  return request.get(`/marketplace/tasks/${taskId}/tracking`)
+}
+
+export function updateTaskRunnerLocation(taskId, data) {
+  return request.post(`/marketplace/tasks/${taskId}/location`, data)
+}
+
+export function markTaskPickedUp(taskId, data = null) {
+  return request.post(`/marketplace/tasks/${taskId}/picked-up`, data)
+}
+
+export function completeServiceTask(taskId) {
+  return request.post(`/marketplace/tasks/${taskId}/complete`)
+}
+
+export function updateTaskDesiredTime(taskId, desired_delivery_at) {
+  return request.patch(`/marketplace/tasks/${taskId}/desired-time`, { desired_delivery_at })
+}
+
+export function complainLateTask(taskId) {
+  return request.post(`/marketplace/tasks/${taskId}/late-complaint`)
 }
 
 export function getUserProfile() {

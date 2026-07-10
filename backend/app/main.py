@@ -52,6 +52,23 @@ def ensure_runtime_schema():
         "ALTER TABLE marketplace_reports ADD COLUMN action_taken VARCHAR(40) NULL",
         "ALTER TABLE marketplace_reports ADD COLUMN handled_by INT NULL",
         "ALTER TABLE marketplace_reports ADD COLUMN handled_at DATETIME NULL",
+        # Errand navigation / tracking
+        "ALTER TABLE marketplace_service_tasks ADD COLUMN pickup_latitude DECIMAL(10,7) NULL",
+        "ALTER TABLE marketplace_service_tasks ADD COLUMN pickup_longitude DECIMAL(10,7) NULL",
+        "ALTER TABLE marketplace_service_tasks ADD COLUMN delivery_latitude DECIMAL(10,7) NULL",
+        "ALTER TABLE marketplace_service_tasks ADD COLUMN delivery_longitude DECIMAL(10,7) NULL",
+        "ALTER TABLE marketplace_service_tasks ADD COLUMN desired_delivery_at DATETIME NULL",
+        "ALTER TABLE marketplace_service_tasks ADD COLUMN travel_mode VARCHAR(20) DEFAULT 'auto'",
+        "ALTER TABLE marketplace_service_tasks ADD COLUMN delivery_phase VARCHAR(20) DEFAULT 'pending'",
+        "ALTER TABLE marketplace_service_tasks ADD COLUMN runner_latitude DECIMAL(10,7) NULL",
+        "ALTER TABLE marketplace_service_tasks ADD COLUMN runner_longitude DECIMAL(10,7) NULL",
+        "ALTER TABLE marketplace_service_tasks ADD COLUMN runner_location_updated_at DATETIME NULL",
+        "ALTER TABLE marketplace_service_tasks ADD COLUMN eta_seconds INT NULL",
+        "ALTER TABLE marketplace_service_tasks ADD COLUMN distance_meters INT NULL",
+        "ALTER TABLE marketplace_service_tasks ADD COLUMN accepted_at DATETIME NULL",
+        "ALTER TABLE marketplace_service_tasks ADD COLUMN picked_up_at DATETIME NULL",
+        "ALTER TABLE marketplace_service_tasks ADD COLUMN completed_at DATETIME NULL",
+        "ALTER TABLE marketplace_service_tasks ADD COLUMN late_complaint_at DATETIME NULL",
     ]
     with engine.begin() as conn:
         for statement in statements:

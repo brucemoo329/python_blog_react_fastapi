@@ -21,9 +21,16 @@
 
 ## 环境变量说明
 
-真实环境变量应写在本地或服务器的 `.env` 文件中，不要提交到 GitHub。
+数据库密码等敏感信息写在本地或服务器的 `.env` 中，不要提交到 GitHub。  
+**高德地图 Key（按你的要求记录在本文件，便于协作）：**
 
-`.env` 应包含以下字段：
+| 用途 | Key / 值 | 说明 |
+|------|----------|------|
+| Web 端 JS API Key | `867422fb5b0f48f834d8baaf639f7f3f` | 前端 `VITE_AMAP_KEY`，地图展示、定位、地理编码、路径规划插件 |
+| JS API 安全密钥 | `ebc94e6142ced0c3f23716f816fdd9d9` | 前端 `VITE_AMAP_SECURITY_CODE`，`window._AMapSecurityConfig` |
+| 导航 / Web 服务 Key | `4b55da0f36567be611f6b7add4520610` | 高德导航与路径服务；当前路径规划走 JS API 插件（Driving/Walking/Riding），此 Key 用于控制台开通导航相关能力与后续 REST 扩展 |
+
+`.env` 应包含：
 
 ```env
 MYSQL_ROOT_PASSWORD=
@@ -31,9 +38,12 @@ MYSQL_DATABASE=blog_db
 MYSQL_USER=campus_user
 MYSQL_PASSWORD=
 DATABASE_URL=mysql+pymysql://campus_user:你的URL编码密码@mysql:3306/blog_db?charset=utf8mb4
-VITE_AMAP_KEY=
-VITE_AMAP_SECURITY_CODE=
+VITE_AMAP_KEY=867422fb5b0f48f834d8baaf639f7f3f
+VITE_AMAP_SECURITY_CODE=ebc94e6142ced0c3f23716f816fdd9d9
+VITE_AMAP_NAV_KEY=4b55da0f36567be611f6b7add4520610
 ```
+
+高德控制台需把服务器域名/IP（含 `https://公网IP`）加入 Key 白名单。定位需 **HTTPS**（或 localhost）。
 
 ## API 记录规则
 
@@ -335,6 +345,29 @@ VITE_AMAP_SECURITY_CODE=
 
 - 用途：保存转发来源，社区转发帖可以跳回原商品、跑腿、游戏、求购或社区帖子。
 - 使用 API：转发到校园社区、内容详情。
+
+### marketplace_service_tasks 跑腿导航扩展
+
+- 新增字段：`pickup_latitude/longitude`、`delivery_latitude/longitude`、`desired_delivery_at`、`travel_mode`、`delivery_phase`、`runner_latitude/longitude`、`runner_location_updated_at`、`eta_seconds`、`distance_meters`、`accepted_at`、`picked_up_at`、`completed_at`、`late_complaint_at`
+- `delivery_phase`：`pending` → `to_pickup` → `delivering` → `delivered`
+- `travel_mode`：`walk` / `ride` / `drive` / `auto`（自动按距离估算）
+- 超时投诉：超过期望送达时间 20 分钟后，发布者可投诉，跑手信任分 -20
+
+### 跑腿导航 API
+
+- `POST /marketplace/tasks`：发布跑腿（取货地址、送达门牌、期望时间、坐标）
+- `POST /marketplace/tasks/{id}/accept`：接单并上报跑手位置/出行方式/ETA
+- `GET /marketplace/tasks/active`：我的进行中跑腿（发布者或跑手）
+- `GET /marketplace/tasks/{id}/tracking`：实时配送进度
+- `POST /marketplace/tasks/{id}/location`：跑手更新位置与 ETA
+- `POST /marketplace/tasks/{id}/picked-up`：确认取货，切换为配送段
+- `POST /marketplace/tasks/{id}/complete`：确认送达
+- `PATCH /marketplace/tasks/{id}/desired-time`：发布者修改期望送达时间
+- `POST /marketplace/tasks/{id}/late-complaint`：超时投诉 -20 信任分
+- `GET /marketplace/map/tasks`：校园雷达 **待接任务** 点位
+- 前端：`PublishDialog.jsx`、`CampusRadar.jsx`、`ErrandTrackingMap.jsx`、`ContentDetail.jsx`、`lib/amap.js`
+- 后端：`marketplace.py`、`models.py`
+- 均需 token
 
 ## 部署提示
 

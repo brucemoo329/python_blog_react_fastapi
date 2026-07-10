@@ -14,14 +14,14 @@ import { Button } from '@/components/ui/button'
 import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card'
 import { Tabs, TabsList, TabsTrigger } from '@/components/ui/tabs'
 import { cn } from '@/lib/utils'
-import { createAMapGeolocation, describeAMapLocateResult, loadAMap } from '@/lib/amap'
+import { createAMapGeolocation, describeAMapLocateResult, loadAMap, MARKER_HTML } from '@/lib/amap'
 import { getGeolocationBlockReason, geolocationErrorMessage, isSecureGeolocationContext } from '@/lib/geolocation'
 
 const TASK_META = {
-  express: { label: '代取快递', icon: PackageCheck },
-  takeout: { label: '拿外卖', icon: ShoppingBasket },
+  express: { label: '帮拿快递', icon: PackageCheck },
+  takeout: { label: '帮拿外卖', icon: ShoppingBasket },
   errand: { label: '跑腿代办', icon: Bike },
-  purchase: { label: '帮买', icon: Box },
+  purchase: { label: '代购', icon: Box },
 }
 
 const SCHOOL_CENTER = [120.809261, 32.041042]
@@ -53,7 +53,7 @@ export default function CampusRadar({ tasks, onAcceptTask, onOpenTask, onLocate 
 
     setIsLocating(true)
     if (!isSecureGeolocationContext()) {
-      setMapStatus('当前为 HTTP，浏览器不会弹位置权限；正在尝试粗定位（城市级）…')
+      setMapStatus('当前为 HTTP，浏览器不会弹位置权限；正在尝试粗定位…')
     } else {
       setMapStatus('正在获取实时位置，请允许浏览器位置权限…')
     }
@@ -69,12 +69,12 @@ export default function CampusRadar({ tasks, onAcceptTask, onOpenTask, onLocate 
           position,
           anchor: 'center',
           title: '我的位置',
-          content: '<div class="amap-user-location"><span></span></div>',
+          content: MARKER_HTML.me,
           zIndex: 200,
         })
         map.add(userMarkerRef.current)
         const note = parsed.approximate
-          ? `粗定位：${parsed.address}（精确 GPS 请用 HTTPS 打开本站）`
+          ? `粗定位：${parsed.address}`
           : `已定位：${parsed.address}`
         setMapStatus(note)
         onLocate?.(parsed.address)
@@ -106,23 +106,16 @@ export default function CampusRadar({ tasks, onAcceptTask, onOpenTask, onLocate 
         map.add(new AMap.Marker({
           position: SCHOOL_CENTER,
           title: '南通理工学院',
-          label: {
-            content: '南通理工学院',
-            direction: 'top',
-          },
+          label: { content: '南通理工学院', direction: 'top' },
         }))
         mapRef.current = map
         geolocationRef.current = createAMapGeolocation(AMap)
         map.addControl(geolocationRef.current)
-        if (!isSecureGeolocationContext()) {
-          setMapStatus('南通理工学院 · 当前 HTTP 无法弹权限，请改用 HTTPS 获取精确位置')
-        } else {
-          setMapStatus('南通理工学院 · 点击“定位到我”获取实时位置')
-        }
+        setMapStatus('待接跑腿任务 · 点击地图标记或列表查看详情')
       })
       .catch((error) => {
         console.error('AMap load error:', error)
-        setMapStatus('高德地图加载失败，请检查 Key、域名白名单（含服务器 IP/域名）和网络')
+        setMapStatus('高德地图加载失败，请检查 Key、域名白名单和网络')
       })
 
     return () => {
@@ -147,30 +140,38 @@ export default function CampusRadar({ tasks, onAcceptTask, onOpenTask, onLocate 
     }
 
     taskMarkersRef.current = visibleTasks
-      .filter((task) => Number.isFinite(Number(task.longitude)) && Number.isFinite(Number(task.latitude)))
+      .filter((task) => Number.isFinite(Number(task.longitude ?? task.pickup_longitude)) && Number.isFinite(Number(task.latitude ?? task.pickup_latitude)))
       .map((task) => {
+        const position = [
+          Number(task.longitude ?? task.pickup_longitude),
+          Number(task.latitude ?? task.pickup_latitude),
+        ]
         const marker = new AMap.Marker({
-          position: [Number(task.longitude), Number(task.latitude)],
+          position,
           anchor: 'bottom-center',
           title: task.title,
-          content: `<button class="amap-task-marker">¥${Number(task.reward)}</button>`,
+          content: MARKER_HTML.openTask(task.reward),
+          zIndex: selectedTaskId === task.id ? 160 : 100,
         })
-        marker.on('click', () => setSelectedTaskId(task.id))
+        marker.on('click', () => {
+          setSelectedTaskId(task.id)
+          onOpenTask?.({ ...task, type: 'service', id: task.id })
+        })
         return marker
       })
 
     if (taskMarkersRef.current.length) {
       map.add(taskMarkersRef.current)
     }
-  }, [visibleTasks, mapStatus])
+  }, [visibleTasks, selectedTaskId, mapStatus, onOpenTask])
 
   return (
     <section className="campus-radar-grid">
       <Card className="campus-map-card overflow-hidden py-0">
         <div className="campus-map-toolbar">
           <div>
-            <p className="text-sm font-semibold">校园雷达</p>
-            <p className="text-xs text-muted-foreground">发现附近正在发生的任务</p>
+            <p className="text-sm font-semibold">校园雷达 · 待接任务</p>
+            <p className="text-xs text-muted-foreground">显示可接单的跑腿任务，点击标记进入详情</p>
           </div>
           <Button variant="secondary" size="sm" onClick={locateUser} disabled={isLocating}>
             <LocateFixed data-icon="inline-start" />
@@ -178,7 +179,7 @@ export default function CampusRadar({ tasks, onAcceptTask, onOpenTask, onLocate 
           </Button>
         </div>
         <div className="campus-map-stage">
-          <div ref={mapContainerRef} className="campus-amap" aria-label="南通理工学院校园任务地图" />
+          <div ref={mapContainerRef} className="campus-amap" aria-label="待接跑腿任务地图" />
           <div className="campus-map-status">
             <span className="status-dot" />
             {mapStatus}
@@ -189,8 +190,8 @@ export default function CampusRadar({ tasks, onAcceptTask, onOpenTask, onLocate 
       <Card className="campus-task-panel">
         <CardHeader className="gap-3">
           <div className="flex items-center justify-between gap-3">
-            <CardTitle>附近任务</CardTitle>
-            <Badge variant="secondary">实时更新</Badge>
+            <CardTitle>待接任务</CardTitle>
+            <Badge variant="secondary">{visibleTasks.length} 单</Badge>
           </div>
           <Tabs value={filter} onValueChange={setFilter}>
             <TabsList className="w-full">
@@ -198,10 +199,14 @@ export default function CampusRadar({ tasks, onAcceptTask, onOpenTask, onLocate 
               <TabsTrigger value="express">快递</TabsTrigger>
               <TabsTrigger value="takeout">外卖</TabsTrigger>
               <TabsTrigger value="errand">跑腿</TabsTrigger>
+              <TabsTrigger value="purchase">代购</TabsTrigger>
             </TabsList>
           </Tabs>
         </CardHeader>
         <CardContent className="campus-task-list">
+          {!visibleTasks.length ? (
+            <div className="radar-empty">暂时没有待接任务，去发布一个跑腿吧。</div>
+          ) : null}
           {visibleTasks.map((task) => {
             const meta = TASK_META[task.task_type] || TASK_META.errand
             const Icon = meta.icon
@@ -210,8 +215,8 @@ export default function CampusRadar({ tasks, onAcceptTask, onOpenTask, onLocate 
                 key={task.id}
                 className={cn('radar-task-item', selectedTaskId === task.id && 'is-selected')}
                 onMouseEnter={() => setSelectedTaskId(task.id)}
-                onClick={() => onOpenTask?.({ ...task, type: 'service' })}
-                onKeyDown={(event) => { if (event.key === 'Enter') onOpenTask?.({ ...task, type: 'service' }) }}
+                onClick={() => onOpenTask?.({ ...task, type: 'service', id: task.id })}
+                onKeyDown={(event) => { if (event.key === 'Enter') onOpenTask?.({ ...task, type: 'service', id: task.id }) }}
                 tabIndex={0}
               >
                 <div className="radar-task-icon">
@@ -226,7 +231,7 @@ export default function CampusRadar({ tasks, onAcceptTask, onOpenTask, onLocate 
                     <strong>¥{task.reward}</strong>
                   </div>
                   <p>
-                    <Navigation /> {task.pickup_location || '校内'} → {task.delivery_location}
+                    <Navigation /> {task.pickup_location || '取货点'} → {task.delivery_location || task.location}
                   </p>
                   <div className="radar-task-footer">
                     <span className="flex items-center gap-2">
@@ -236,8 +241,16 @@ export default function CampusRadar({ tasks, onAcceptTask, onOpenTask, onLocate 
                       </Avatar>
                       {task.requester?.nickname || task.requester?.username || '校园同学'}
                     </span>
-                    <span><Clock3 /> 12 分钟内</span>
-                    <Button size="sm" onClick={(event) => { event.stopPropagation(); onAcceptTask({ ...task, type: 'service' }) }}>接单</Button>
+                    <span><Clock3 /> 待接单</span>
+                    <Button
+                      size="sm"
+                      onClick={(event) => {
+                        event.stopPropagation()
+                        onAcceptTask({ ...task, type: 'service' })
+                      }}
+                    >
+                      接单
+                    </Button>
                   </div>
                 </div>
               </article>

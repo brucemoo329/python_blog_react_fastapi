@@ -3681,3 +3681,100 @@
     border-bottom: 1px solid rgba(148, 163, 184, 0.2);
   }
 }
+
+/* ===== Errand navigation / tracking ===== */
+.errand-marker {
+  width: 36px;
+  height: 36px;
+  border-radius: 50% 50% 50% 4px;
+  display: grid;
+  place-items: center;
+  color: #fff;
+  font-size: 12px;
+  font-weight: 800;
+  box-shadow: 0 8px 18px rgba(0, 0, 0, 0.35);
+  transform: rotate(-45deg);
+  border: 2px solid rgba(255, 255, 255, 0.85);
+}
+.errand-marker span { transform: rotate(45deg); line-height: 1; }
+.errand-marker-pickup { background: linear-gradient(145deg, #f59e0b, #ea580c); }
+.errand-marker-delivery { background: linear-gradient(145deg, #22d3ee, #2563eb); }
+.errand-marker-runner { background: linear-gradient(145deg, #a78bfa, #7c3aed); animation: errand-pulse 1.6s ease-in-out infinite; }
+.errand-marker-me { background: linear-gradient(145deg, #34d399, #059669); }
+@keyframes errand-pulse {
+  0%, 100% { box-shadow: 0 0 0 0 rgba(167, 139, 250, 0.55); }
+  50% { box-shadow: 0 0 0 10px rgba(167, 139, 250, 0); }
+}
+.amap-task-marker.errand-open-marker {
+  display: grid;
+  gap: 1px;
+  min-width: 52px;
+  padding: 6px 8px;
+  border: 0;
+  border-radius: 12px;
+  background: linear-gradient(145deg, #fbbf24, #f97316);
+  color: #1c1917;
+  font-weight: 800;
+  box-shadow: 0 10px 22px rgba(249, 115, 22, 0.4);
+  cursor: pointer;
+}
+.amap-task-marker.errand-open-marker small { font-size: 10px; font-weight: 700; opacity: 0.85; }
+.errand-track-panel {
+  margin-top: 12px;
+  padding: 12px;
+  border: 1px solid rgba(167, 139, 250, 0.28);
+  border-radius: 16px;
+  background: linear-gradient(180deg, rgba(30, 27, 46, 0.92), rgba(17, 20, 31, 0.96));
+}
+.errand-track-panel.is-compact { margin-top: 8px; padding: 8px; }
+.errand-track-header { display: flex; justify-content: space-between; gap: 10px; margin-bottom: 10px; }
+.errand-track-header h3 { margin: 4px 0 2px; font-size: 15px; }
+.errand-track-header p { margin: 0; color: rgba(216, 180, 254, 0.78); font-size: 12px; }
+.errand-track-eta { display: grid; justify-items: end; gap: 2px; min-width: 88px; color: #c4b5fd; }
+.errand-track-eta strong { font-size: 14px; color: #f5f3ff; }
+.errand-track-eta small { font-size: 11px; opacity: 0.8; }
+.errand-track-steps { display: grid; grid-template-columns: repeat(4, 1fr); gap: 6px; margin-bottom: 10px; }
+.errand-track-steps > div {
+  display: flex; align-items: center; gap: 4px; padding: 6px; border-radius: 10px;
+  font-size: 11px; color: rgba(196, 181, 253, 0.55); background: rgba(255, 255, 255, 0.03);
+}
+.errand-track-steps > div.is-active { color: #fde68a; background: rgba(251, 191, 36, 0.12); }
+.errand-track-steps > div.is-done { color: #86efac; background: rgba(52, 211, 153, 0.1); }
+.errand-track-map {
+  width: 100%; height: 240px; border-radius: 14px; overflow: hidden;
+  border: 1px solid rgba(255, 255, 255, 0.08);
+}
+.errand-track-panel.is-compact .errand-track-map { height: 160px; }
+.errand-track-points { display: grid; gap: 4px; margin-bottom: 8px; font-size: 12px; color: rgba(237, 233, 254, 0.86); }
+.errand-track-points .dot { display: inline-block; width: 8px; height: 8px; margin-right: 6px; border-radius: 999px; }
+.errand-track-points .dot.pickup { background: #f59e0b; }
+.errand-track-points .dot.delivery { background: #38bdf8; }
+.errand-track-meta { display: flex; flex-wrap: wrap; gap: 10px; margin: 8px 0; font-size: 12px; color: rgba(216, 180, 254, 0.8); }
+.errand-track-actions { display: flex; flex-wrap: wrap; gap: 8px; align-items: center; }
+.errand-time-input {
+  height: 32px; border-radius: 8px; border: 1px solid rgba(167, 139, 250, 0.3);
+  background: #11141f; color: #ede9fe; padding: 0 8px; font-size: 12px;
+}
+.errand-orders-expand summary {
+  cursor: pointer; list-style: none; margin-bottom: 8px; color: #e9d5ff; font-weight: 600; font-size: 13px;
+}
+.errand-order-head {
+  display: flex; gap: 8px; width: 100%; text-align: left; margin-bottom: 6px;
+  background: transparent; border: 0; color: inherit; cursor: pointer;
+}
+.errand-order-head small { display: block; color: rgba(216, 180, 254, 0.7); }
+.x-service-meta {
+  margin: 8px 0 12px; padding: 10px 12px; border-radius: 12px;
+  background: rgba(167, 139, 250, 0.08); font-size: 13px; color: rgba(237, 233, 254, 0.88);
+}
+.x-service-meta p { margin: 2px 0; }
+.x-service-owner-hint { margin-top: 8px; font-size: 12px; color: rgba(196, 181, 253, 0.75); }
+.publish-service-type-row { display: flex; flex-wrap: wrap; gap: 8px; }
+.publish-service-type-row button {
+  border: 1px solid rgba(167, 139, 250, 0.28); background: rgba(255, 255, 255, 0.03);
+  color: inherit; border-radius: 999px; padding: 6px 12px; font-size: 12px; cursor: pointer;
+}
+.publish-service-type-row button.is-active {
+  background: rgba(167, 139, 250, 0.22); border-color: rgba(196, 181, 253, 0.55);
+}
+.radar-empty { padding: 24px 12px; text-align: center; color: rgba(196, 181, 253, 0.7); font-size: 13px; }

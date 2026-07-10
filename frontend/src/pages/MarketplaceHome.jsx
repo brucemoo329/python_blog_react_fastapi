@@ -59,6 +59,7 @@ import PublicProfile from '@/components/PublicProfile'
 import PublishDialog from '@/components/PublishDialog'
 import QuickChat from '@/components/QuickChat'
 import LanguageSwitcher from '@/components/LanguageSwitcher'
+import ErrandTrackingMap from '@/components/ErrandTrackingMap'
 import SpotlightCard from '@/components/SpotlightCard'
 import StarBorder from '@/components/StarBorder'
 import {
@@ -111,6 +112,7 @@ const TYPE_META = {
 }
 
 const EMPTY_SUMMARY = {
+  active_errands: [],
   active_listings: 0,
   open_tasks: 0,
   community_posts: 0,
@@ -479,10 +481,32 @@ export default function MarketplaceHome({ user, onLogout, onUserUpdate }) {
 
   const handleAcceptTask = async (task) => {
     try {
-      const response = await acceptServiceTask(task.id)
+      let payload = {}
+      try {
+        const { getCurrentLngLat, planRoute, distanceMeters, suggestTravelMode } = await import('@/lib/amap')
+        const pos = await getCurrentLngLat()
+        const origin = [pos.lng, pos.lat]
+        const pickup = task.pickup_longitude != null
+          ? [Number(task.pickup_longitude), Number(task.pickup_latitude)]
+          : (task.longitude != null ? [Number(task.longitude), Number(task.latitude)] : null)
+        let route = null
+        if (pickup) route = await planRoute(origin, pickup, 'auto')
+        const dist = route?.distance || distanceMeters(origin, pickup)
+        payload = {
+          runner_latitude: pos.lat,
+          runner_longitude: pos.lng,
+          travel_mode: route?.mode || suggestTravelMode(dist),
+          eta_seconds: route?.duration || null,
+          distance_meters: dist,
+        }
+      } catch {
+        /* still accept without live GPS */
+      }
+      const response = await acceptServiceTask(task.id, payload)
       setNotice(response.message)
       loadData()
       loadNotifications()
+      setSelectedDetail({ type: 'service', id: task.id })
       const requester = task.requester || task.author
       if (requester?.id) setQuickChatRequest({ user: requester, context: { type: 'service', id: task.id } })
     } catch (error) {
@@ -784,7 +808,55 @@ export default function MarketplaceHome({ user, onLogout, onUserUpdate }) {
             <aside className="campus-right-rail">
               <Card className="pulse-heat-card"><CardHeader><CardTitle><TrendingUp /> {t('ui.heat')}</CardTitle></CardHeader><CardContent><button type="button" className="heat-stat-btn" onClick={() => selectNav('listing')}><strong>{summary.active_listings.toLocaleString()}</strong><span>{t('ui.activeListings')}</span></button><button type="button" className="heat-stat-btn" onClick={() => selectNav('community')}><strong>{summary.community_posts.toLocaleString()}</strong><span>{t('ui.activePosts')}</span></button><button type="button" className="heat-stat-btn" onClick={() => selectNav('service')}><strong>{summary.open_tasks}</strong><span>{t('ui.openTasks')}</span></button></CardContent></Card>
               <Card><CardHeader><CardTitle>{t('ui.hotTopics')}</CardTitle><Button variant="ghost" size="sm" onClick={() => selectNav('community')}>{t('ui.more')}</Button></CardHeader><CardContent className="pulse-topic-list">{summary.topics?.length ? summary.topics.map((topic) => <button key={topic.name} type="button" onClick={() => openTopic(topic.name)}><span>#</span> {topic.name} <small>{topic.count}</small></button>) : <div className="right-rail-empty">{t('ui.publishCommunity')}</div>}</CardContent></Card>
-              <Card><CardHeader><CardTitle>{t('ui.myOrders')}</CardTitle><Badge variant="secondary">{summary.my_orders}</Badge></CardHeader><CardContent className="pulse-order">{summary.recent_order ? <button type="button" onClick={() => selectNav('orders')}><Package /><span><strong>{summary.recent_order.title}</strong><small>{summary.recent_order.status}</small></span></button> : <div className="right-rail-empty">{t('ui.noOrders')}</div>}</CardContent></Card>
+              <Card className="pulse-errand-orders">
+                <CardHeader>
+                  <CardTitle>{t('ui.myOrders')}</CardTitle>
+                  <Badge variant="secondary">{(summary.active_errands?.length || 0) + (summary.recent_order ? 1 : 0)}</Badge>
+                </CardHeader>
+                <CardContent className="pulse-order">
+                  {summary.active_errands?.length ? (
+                    <details className="errand-orders-expand" open={summary.active_errands.length === 1}>
+                      <summary>
+                        配送进度 · {summary.active_errands.length} 单
+                      </summary>
+                      <div className="errand-orders-list">
+                        {summary.active_errands.map((errand) => (
+                          <div key={errand.id} className="errand-order-block">
+                            <button type="button" className="errand-order-head" onClick={() => setSelectedDetail({ type: 'service', id: errand.id })}>
+                              <Bike />
+                              <span>
+                                <strong>{errand.title}</strong>
+                                <small>{errand.progress_text || errand.phase_label}</small>
+                              </span>
+                            </button>
+                            <ErrandTrackingMap
+                              compact
+                              taskId={errand.id}
+                              initialTracking={errand}
+                              currentUserId={currentUser?.id}
+                              onNotice={setNotice}
+                              onMessageRequester={(track) => openChat({ user: track.requester, context: { type: 'service', id: track.id } })}
+                              onOpenTask={(item) => setSelectedDetail(item)}
+                            />
+                          </div>
+                        ))}
+                      </div>
+                    </details>
+                  ) : null}
+                  {summary.recent_order ? (
+                    <button type="button" onClick={() => selectNav('orders')}>
+                      <Package />
+                      <span>
+                        <strong>{summary.recent_order.title}</strong>
+                        <small>{summary.recent_order.status}</small>
+                      </span>
+                    </button>
+                  ) : null}
+                  {!summary.active_errands?.length && !summary.recent_order ? (
+                    <div className="right-rail-empty">{t('ui.noOrders')}</div>
+                  ) : null}
+                </CardContent>
+              </Card>
               <Card><CardHeader><CardTitle>{t('ui.nearby')}</CardTitle><CheckCircle2 /></CardHeader><CardContent className="pulse-people">{summary.nearby_users?.length ? summary.nearby_users.map((person) => <div key={person.id}><button type="button" className="nearby-person" onClick={() => openUser(person.id)}><Avatar className="size-8"><AvatarImage src={person.avatar_url || undefined} alt={person.nickname || person.username} /><AvatarFallback>{(person.nickname || person.username || '同').slice(0, 1)}</AvatarFallback></Avatar><span className={person.is_online ? 'presence-dot is-online' : 'presence-dot'} /><span><strong>{person.nickname || person.username}</strong><small><Star /> {t('ui.trustScore')} {person.trust?.score ?? 800} · {person.is_online ? t('ui.online') : t('ui.recentActive')}</small></span></button><Button variant="outline" size="sm" onClick={() => openChat({ user: person })}>{t('ui.message')}</Button></div>) : <div className="right-rail-empty">{t('ui.noNearby')}</div>}</CardContent></Card>
             </aside>
           </div>

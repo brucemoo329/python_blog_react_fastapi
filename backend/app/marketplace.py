@@ -73,12 +73,37 @@ class ServiceTaskCreate(BaseModel):
     title: str = Field(min_length=2, max_length=120)
     description: Optional[str] = Field(default=None, max_length=2000)
     reward: Decimal = Field(gt=0)
-    pickup_location: Optional[str] = None
-    delivery_location: str = Field(min_length=2, max_length=120)
+    pickup_location: Optional[str] = Field(default=None, max_length=200)
+    delivery_location: str = Field(min_length=2, max_length=200)
     latitude: Optional[Decimal] = None
     longitude: Optional[Decimal] = None
+    pickup_latitude: Optional[Decimal] = None
+    pickup_longitude: Optional[Decimal] = None
+    delivery_latitude: Optional[Decimal] = None
+    delivery_longitude: Optional[Decimal] = None
+    desired_delivery_at: Optional[datetime] = None
     deadline: Optional[datetime] = None
     image_url: Optional[str] = None
+
+
+class TaskAcceptBody(BaseModel):
+    runner_latitude: Optional[Decimal] = None
+    runner_longitude: Optional[Decimal] = None
+    travel_mode: Optional[Literal["walk", "ride", "drive", "auto"]] = "auto"
+    eta_seconds: Optional[int] = None
+    distance_meters: Optional[int] = None
+
+
+class TaskLocationBody(BaseModel):
+    latitude: Decimal
+    longitude: Decimal
+    eta_seconds: Optional[int] = None
+    distance_meters: Optional[int] = None
+    travel_mode: Optional[Literal["walk", "ride", "drive", "auto"]] = None
+
+
+class TaskDesiredTimeBody(BaseModel):
+    desired_delivery_at: datetime
 
 
 class CommunityPostCreate(BaseModel):
@@ -338,6 +363,157 @@ def create_notification(
     )
     db.add(notification)
     return notification
+
+
+PHASE_LABELS = {
+    "pending": "待接单",
+    "to_pickup": "跑手前往取货",
+    "picked_up": "已取货",
+    "delivering": "配送中",
+    "delivered": "已送达",
+}
+
+MODE_LABELS = {
+    "walk": "步行",
+    "ride": "骑行",
+    "drive": "驾车",
+    "auto": "智能",
+}
+
+
+def _num(value):
+    if value is None:
+        return None
+    try:
+        return float(value)
+    except (TypeError, ValueError):
+        return None
+
+
+def suggest_travel_mode(distance_meters: Optional[float]) -> str:
+    if distance_meters is None:
+        return "ride"
+    if distance_meters < 1200:
+        return "walk"
+    if distance_meters < 6000:
+        return "ride"
+    return "drive"
+
+
+def _as_naive_utc(value: Optional[datetime]) -> Optional[datetime]:
+    if value is None:
+        return None
+    if getattr(value, "tzinfo", None):
+        return value.replace(tzinfo=None)
+    return value
+
+
+def can_late_complain(task: models.ServiceTask, current_user_id: Optional[int]) -> bool:
+    if not current_user_id or current_user_id != task.requester_id:
+        return False
+    if task.late_complaint_at or not task.runner_id:
+        return False
+    if task.status not in {"accepted"} and (task.delivery_phase or "") in {"pending", "delivered"}:
+        return False
+    if task.status == "open" or task.status == "completed" or task.status == "cancelled":
+        return False
+    desired = _as_naive_utc(task.desired_delivery_at or task.deadline)
+    if not desired:
+        return False
+    return datetime.utcnow() >= desired + timedelta(minutes=20)
+
+
+def service_task_tracking_payload(task: models.ServiceTask, current_user_id: Optional[int] = None):
+    desired = task.desired_delivery_at or task.deadline
+    pickup_lat = _num(task.pickup_latitude) if task.pickup_latitude is not None else _num(task.latitude)
+    pickup_lng = _num(task.pickup_longitude) if task.pickup_longitude is not None else _num(task.longitude)
+    delivery_lat = _num(task.delivery_latitude)
+    delivery_lng = _num(task.delivery_longitude)
+
+    role = None
+    if current_user_id:
+        if current_user_id == task.requester_id:
+            role = "requester"
+        elif current_user_id == task.runner_id:
+            role = "runner"
+
+    eta_minutes = int(round(task.eta_seconds / 60)) if task.eta_seconds else None
+    phase = task.delivery_phase or ("pending" if task.status == "open" else "to_pickup")
+    progress_text = PHASE_LABELS.get(phase, phase)
+    if eta_minutes is not None and phase in {"to_pickup", "delivering"}:
+        if phase == "to_pickup":
+            progress_text = f"跑手前往取货 · 预计 {eta_minutes} 分钟"
+        else:
+            progress_text = f"配送中 · 预计 {eta_minutes} 分钟送达"
+
+    return {
+        "id": task.id,
+        "type": "service",
+        "task_type": task.task_type,
+        "title": task.title,
+        "description": task.description,
+        "reward": float(task.reward),
+        "status": task.status,
+        "delivery_phase": phase,
+        "phase_label": PHASE_LABELS.get(phase, phase),
+        "progress_text": progress_text,
+        "pickup_location": task.pickup_location,
+        "delivery_location": task.delivery_location,
+        "pickup": {"lat": pickup_lat, "lng": pickup_lng, "label": task.pickup_location or "取货点"},
+        "delivery": {"lat": delivery_lat, "lng": delivery_lng, "label": task.delivery_location or "送达点"},
+        "runner": {
+            "lat": _num(task.runner_latitude),
+            "lng": _num(task.runner_longitude),
+            "updated_at": task.runner_location_updated_at,
+            "user": user_payload(task.runner) if task.runner else None,
+        },
+        "requester": user_payload(task.requester) if task.requester else None,
+        "travel_mode": task.travel_mode or "auto",
+        "travel_mode_label": MODE_LABELS.get(task.travel_mode or "auto", "智能"),
+        "eta_seconds": task.eta_seconds,
+        "eta_minutes": eta_minutes,
+        "distance_meters": task.distance_meters,
+        "desired_delivery_at": desired,
+        "accepted_at": task.accepted_at,
+        "picked_up_at": task.picked_up_at,
+        "completed_at": task.completed_at,
+        "late_complaint_at": task.late_complaint_at,
+        "can_complain_late": can_late_complain(task, current_user_id),
+        "role": role,
+        "image_url": task.image_url,
+        "created_at": task.created_at,
+        "latitude": pickup_lat or delivery_lat,
+        "longitude": pickup_lng or delivery_lng,
+    }
+
+
+def serialize_service_detail(db: Session, task: models.ServiceTask, user: models.User):
+    tracking = service_task_tracking_payload(task, user.id)
+    return {
+        "id": task.id,
+        "type": "service",
+        "task_type": task.task_type,
+        "title": task.title,
+        "description": task.description,
+        "price": float(task.reward),
+        "price_label": f"赏金 ¥{float(task.reward):.2f}",
+        "status": task.status,
+        "location": task.delivery_location,
+        "pickup_location": task.pickup_location,
+        "delivery_location": task.delivery_location,
+        "school": task.requester.profile.school if task.requester and task.requester.profile else None,
+        "images": [task.image_url] if task.image_url else [],
+        "author": {**user_payload(task.requester), "trust": compute_trust(db, task.requester_id)} if task.requester else None,
+        "runner": user_payload(task.runner) if task.runner else None,
+        "created_at": task.created_at,
+        "reaction": reaction_counts(db, "service", task.id, user.id),
+        "can_delete": task.requester_id == user.id,
+        "can_accept": task.status == "open" and task.requester_id != user.id,
+        "tracking": tracking,
+        "desired_delivery_at": task.desired_delivery_at or task.deadline,
+        "latitude": tracking.get("latitude"),
+        "longitude": tracking.get("longitude"),
+    }
 
 
 def get_conversation_for_user(db: Session, conversation_id: int, user_id: int):
@@ -713,26 +889,12 @@ def detail_payload(db: Session, item_type: str, item_id: int, user: models.User)
         }
     if normalized == "service":
         task = db.query(models.ServiceTask).options(
-            joinedload(models.ServiceTask.requester).joinedload(models.User.profile)
+            joinedload(models.ServiceTask.requester).joinedload(models.User.profile),
+            joinedload(models.ServiceTask.runner).joinedload(models.User.profile),
         ).filter_by(id=item_id).first()
         if not task:
             raise HTTPException(status_code=404, detail="内容不存在")
-        return {
-            "id": task.id,
-            "type": "service",
-            "title": task.title,
-            "description": task.description,
-            "price": float(task.reward),
-            "price_label": f"赏金 ¥{float(task.reward):.2f}",
-            "status": task.status,
-            "location": task.delivery_location,
-            "school": task.requester.profile.school if task.requester.profile else None,
-            "images": [task.image_url] if task.image_url else [],
-            "author": {**user_payload(task.requester), "trust": compute_trust(db, task.requester_id)},
-            "created_at": task.created_at,
-            "reaction": reaction_counts(db, "service", task.id, user.id),
-            "can_delete": task.requester_id == user.id,
-        }
+        return serialize_service_detail(db, task, user)
     if normalized == "wanted":
         wanted = db.query(models.WantedPost).options(
             joinedload(models.WantedPost.user).joinedload(models.User.profile)
@@ -840,13 +1002,18 @@ def get_feed(
                 "title": task.title,
                 "description": task.description,
                 "reward": float(task.reward),
+                "price_label": f"赏金 ¥{float(task.reward):.2f}",
                 "status": task.status,
+                "delivery_phase": task.delivery_phase or "pending",
                 "pickup_location": task.pickup_location,
+                "delivery_location": task.delivery_location,
                 "location": task.delivery_location,
+                "desired_delivery_at": task.desired_delivery_at or task.deadline,
                 "image_url": task.image_url,
                 "latitude": float(task.latitude) if task.latitude is not None else None,
                 "longitude": float(task.longitude) if task.longitude is not None else None,
                 "author": user_payload(task.requester),
+                "requester": user_payload(task.requester),
                 "school": task.requester.profile.school if task.requester.profile else None,
                 "created_at": task.created_at,
             })
@@ -922,24 +1089,44 @@ def get_map_tasks(
     db: Session = Depends(get_db),
     _: models.User = Depends(get_current_user),
 ):
+    """待接任务点：仅 open 状态，供校园雷达展示与点击跳转。"""
     tasks = db.query(models.ServiceTask).options(
         joinedload(models.ServiceTask.requester).joinedload(models.User.profile)
     ).filter(
         models.ServiceTask.status == "open"
-    ).order_by(models.ServiceTask.created_at.desc()).limit(30).all()
-    return [{
-        "id": task.id,
-        "task_type": task.task_type,
-        "title": task.title,
-        "reward": float(task.reward),
-        "pickup_location": task.pickup_location,
-        "delivery_location": task.delivery_location,
-        "latitude": float(task.latitude) if task.latitude is not None else None,
-        "longitude": float(task.longitude) if task.longitude is not None else None,
-        "requester": user_payload(task.requester),
-        "image_url": task.image_url,
-        "deadline": task.deadline,
-    } for task in tasks]
+    ).order_by(models.ServiceTask.created_at.desc()).limit(40).all()
+    result = []
+    for task in tasks:
+        plat = _num(task.pickup_latitude) if task.pickup_latitude is not None else _num(task.latitude)
+        plng = _num(task.pickup_longitude) if task.pickup_longitude is not None else _num(task.longitude)
+        dlat = _num(task.delivery_latitude)
+        dlng = _num(task.delivery_longitude)
+        # Prefer real coords; fall back to school center offset by id so markers still show
+        if plat is None or plng is None:
+            plat = 120.809261 + ((task.id % 17) - 8) * 0.00035
+            plng = 32.041042 + ((task.id % 13) - 6) * 0.00028
+        result.append({
+            "id": task.id,
+            "type": "service",
+            "task_type": task.task_type,
+            "title": task.title,
+            "reward": float(task.reward),
+            "status": task.status,
+            "delivery_phase": task.delivery_phase or "pending",
+            "pickup_location": task.pickup_location,
+            "delivery_location": task.delivery_location,
+            "latitude": plat,
+            "longitude": plng,
+            "pickup_latitude": plat,
+            "pickup_longitude": plng,
+            "delivery_latitude": dlat,
+            "delivery_longitude": dlng,
+            "desired_delivery_at": task.desired_delivery_at or task.deadline,
+            "requester": user_payload(task.requester),
+            "image_url": task.image_url,
+            "deadline": task.deadline,
+        })
+    return result
 
 
 @router.post("/listings", status_code=201)
@@ -982,16 +1169,32 @@ def create_task(
 ):
     assert_can_post(user)
     validate_amount(data.reward, "跑腿赏金")
-    task = models.ServiceTask(requester_id=user.id, **data.model_dump())
+    payload = data.model_dump()
+    # Map pin uses pickup if available, else delivery
+    if payload.get("pickup_latitude") is None and payload.get("delivery_latitude") is not None:
+        payload["latitude"] = payload.get("delivery_latitude")
+        payload["longitude"] = payload.get("delivery_longitude")
+    elif payload.get("pickup_latitude") is not None:
+        payload["latitude"] = payload.get("pickup_latitude")
+        payload["longitude"] = payload.get("pickup_longitude")
+    if payload.get("desired_delivery_at") and not payload.get("deadline"):
+        payload["deadline"] = payload["desired_delivery_at"]
+    task = models.ServiceTask(
+        requester_id=user.id,
+        delivery_phase="pending",
+        travel_mode="auto",
+        **payload,
+    )
     db.add(task)
     db.commit()
     db.refresh(task)
-    return {"message": "任务发布成功", "id": task.id, "type": "service"}
+    return {"message": "跑腿任务发布成功", "id": task.id, "type": "service"}
 
 
 @router.post("/tasks/{task_id}/accept")
 def accept_task(
     task_id: int,
+    data: TaskAcceptBody = TaskAcceptBody(),
     db: Session = Depends(get_db),
     user: models.User = Depends(get_current_user),
 ):
@@ -1004,6 +1207,20 @@ def accept_task(
         raise HTTPException(status_code=409, detail="任务已被接取")
     task.runner_id = user.id
     task.status = "accepted"
+    task.delivery_phase = "to_pickup"
+    task.accepted_at = datetime.utcnow()
+    mode = data.travel_mode or "auto"
+    if mode == "auto":
+        mode = suggest_travel_mode(data.distance_meters)
+    task.travel_mode = mode
+    if data.runner_latitude is not None and data.runner_longitude is not None:
+        task.runner_latitude = data.runner_latitude
+        task.runner_longitude = data.runner_longitude
+        task.runner_location_updated_at = datetime.utcnow()
+    if data.eta_seconds is not None:
+        task.eta_seconds = data.eta_seconds
+    if data.distance_meters is not None:
+        task.distance_meters = data.distance_meters
     conversation = find_or_create_conversation(
         db,
         user.id,
@@ -1017,7 +1234,7 @@ def accept_task(
         actor_id=user.id,
         notification_type="task_accepted",
         title="你的跑腿任务已被接单",
-        content=f"{user.username} 接下了“{task.title}”",
+        content=f"{user.username} 接下了“{task.title}”，正在前往取货",
         target_type="service",
         target_id=task.id,
     )
@@ -1026,12 +1243,235 @@ def accept_task(
         recipient_id=user.id,
         notification_type="task_accepted_self",
         title="接单成功",
-        content=f"你已接下“{task.title}”，可私信发布者确认取送细节",
+        content=f"你已接下“{task.title}”，请按导航前往取货点",
         target_type="service",
         target_id=task.id,
     )
     db.commit()
-    return {"message": "接单成功，双方已收到通知", "conversation_id": conversation.id}
+    db.refresh(task)
+    task = db.query(models.ServiceTask).options(
+        joinedload(models.ServiceTask.requester).joinedload(models.User.profile),
+        joinedload(models.ServiceTask.runner).joinedload(models.User.profile),
+    ).filter_by(id=task_id).first()
+    return {
+        "message": "接单成功，已进入取货导航",
+        "conversation_id": conversation.id,
+        "tracking": service_task_tracking_payload(task, user.id),
+    }
+
+
+@router.get("/tasks/active")
+def list_active_errands(
+    db: Session = Depends(get_db),
+    user: models.User = Depends(get_current_user),
+):
+    tasks = db.query(models.ServiceTask).options(
+        joinedload(models.ServiceTask.requester).joinedload(models.User.profile),
+        joinedload(models.ServiceTask.runner).joinedload(models.User.profile),
+    ).filter(
+        models.ServiceTask.status.in_(["accepted", "in_progress"]),
+        or_(
+            models.ServiceTask.requester_id == user.id,
+            models.ServiceTask.runner_id == user.id,
+        ),
+    ).order_by(models.ServiceTask.accepted_at.desc(), models.ServiceTask.created_at.desc()).limit(20).all()
+    return {
+        "items": [service_task_tracking_payload(task, user.id) for task in tasks],
+        "total": len(tasks),
+    }
+
+
+@router.get("/tasks/{task_id}/tracking")
+def get_task_tracking(
+    task_id: int,
+    db: Session = Depends(get_db),
+    user: models.User = Depends(get_current_user),
+):
+    task = db.query(models.ServiceTask).options(
+        joinedload(models.ServiceTask.requester).joinedload(models.User.profile),
+        joinedload(models.ServiceTask.runner).joinedload(models.User.profile),
+    ).filter_by(id=task_id).first()
+    if not task:
+        raise HTTPException(status_code=404, detail="任务不存在")
+    return {"item": service_task_tracking_payload(task, user.id)}
+
+
+@router.post("/tasks/{task_id}/location")
+def update_runner_location(
+    task_id: int,
+    data: TaskLocationBody,
+    db: Session = Depends(get_db),
+    user: models.User = Depends(get_current_user),
+):
+    task = db.query(models.ServiceTask).filter_by(id=task_id).with_for_update().first()
+    if not task:
+        raise HTTPException(status_code=404, detail="任务不存在")
+    if task.runner_id != user.id:
+        raise HTTPException(status_code=403, detail="仅接单跑手可更新位置")
+    if task.status not in {"accepted", "in_progress"}:
+        raise HTTPException(status_code=400, detail="任务未在配送中")
+    task.runner_latitude = data.latitude
+    task.runner_longitude = data.longitude
+    task.runner_location_updated_at = datetime.utcnow()
+    if data.eta_seconds is not None:
+        task.eta_seconds = data.eta_seconds
+    if data.distance_meters is not None:
+        task.distance_meters = data.distance_meters
+    if data.travel_mode and data.travel_mode != "auto":
+        task.travel_mode = data.travel_mode
+    db.commit()
+    db.refresh(task)
+    task = db.query(models.ServiceTask).options(
+        joinedload(models.ServiceTask.requester).joinedload(models.User.profile),
+        joinedload(models.ServiceTask.runner).joinedload(models.User.profile),
+    ).filter_by(id=task_id).first()
+    return {"message": "位置已更新", "tracking": service_task_tracking_payload(task, user.id)}
+
+
+@router.post("/tasks/{task_id}/picked-up")
+def mark_task_picked_up(
+    task_id: int,
+    data: Optional[TaskLocationBody] = None,
+    db: Session = Depends(get_db),
+    user: models.User = Depends(get_current_user),
+):
+    task = db.query(models.ServiceTask).filter_by(id=task_id).with_for_update().first()
+    if not task:
+        raise HTTPException(status_code=404, detail="任务不存在")
+    if task.runner_id != user.id:
+        raise HTTPException(status_code=403, detail="仅接单跑手可确认取货")
+    if task.delivery_phase not in {"to_pickup", "picked_up"}:
+        raise HTTPException(status_code=400, detail="当前状态无法确认取货")
+    task.delivery_phase = "delivering"
+    task.picked_up_at = datetime.utcnow()
+    if data and data.latitude is not None:
+        task.runner_latitude = data.latitude
+        task.runner_longitude = data.longitude
+        task.runner_location_updated_at = datetime.utcnow()
+        if data.eta_seconds is not None:
+            task.eta_seconds = data.eta_seconds
+        if data.distance_meters is not None:
+            task.distance_meters = data.distance_meters
+    create_notification(
+        db,
+        recipient_id=task.requester_id,
+        actor_id=user.id,
+        notification_type="task_picked_up",
+        title="跑手已取货",
+        content=f"“{task.title}”已取货，正在送往你填写的地址",
+        target_type="service",
+        target_id=task.id,
+    )
+    db.commit()
+    task = db.query(models.ServiceTask).options(
+        joinedload(models.ServiceTask.requester).joinedload(models.User.profile),
+        joinedload(models.ServiceTask.runner).joinedload(models.User.profile),
+    ).filter_by(id=task_id).first()
+    return {"message": "已确认取货，开始配送导航", "tracking": service_task_tracking_payload(task, user.id)}
+
+
+@router.post("/tasks/{task_id}/complete")
+def complete_task(
+    task_id: int,
+    db: Session = Depends(get_db),
+    user: models.User = Depends(get_current_user),
+):
+    task = db.query(models.ServiceTask).filter_by(id=task_id).with_for_update().first()
+    if not task:
+        raise HTTPException(status_code=404, detail="任务不存在")
+    if user.id not in {task.runner_id, task.requester_id}:
+        raise HTTPException(status_code=403, detail="无权完成该任务")
+    if task.status not in {"accepted", "in_progress"}:
+        raise HTTPException(status_code=400, detail="任务状态不可完成")
+    task.status = "completed"
+    task.delivery_phase = "delivered"
+    task.completed_at = datetime.utcnow()
+    task.eta_seconds = 0
+    create_notification(
+        db,
+        recipient_id=task.requester_id if user.id == task.runner_id else task.runner_id,
+        actor_id=user.id,
+        notification_type="task_completed",
+        title="跑腿任务已完成",
+        content=f"“{task.title}”已送达完成",
+        target_type="service",
+        target_id=task.id,
+    )
+    db.commit()
+    task = db.query(models.ServiceTask).options(
+        joinedload(models.ServiceTask.requester).joinedload(models.User.profile),
+        joinedload(models.ServiceTask.runner).joinedload(models.User.profile),
+    ).filter_by(id=task_id).first()
+    return {"message": "任务已完成", "tracking": service_task_tracking_payload(task, user.id)}
+
+
+@router.patch("/tasks/{task_id}/desired-time")
+def update_desired_delivery_time(
+    task_id: int,
+    data: TaskDesiredTimeBody,
+    db: Session = Depends(get_db),
+    user: models.User = Depends(get_current_user),
+):
+    task = db.query(models.ServiceTask).filter_by(id=task_id).with_for_update().first()
+    if not task:
+        raise HTTPException(status_code=404, detail="任务不存在")
+    if task.requester_id != user.id:
+        raise HTTPException(status_code=403, detail="仅发布者可修改期望送达时间")
+    if task.status == "completed":
+        raise HTTPException(status_code=400, detail="已完成任务不可修改时间")
+    task.desired_delivery_at = data.desired_delivery_at
+    task.deadline = data.desired_delivery_at
+    if task.runner_id:
+        create_notification(
+            db,
+            recipient_id=task.runner_id,
+            actor_id=user.id,
+            notification_type="task_time_updated",
+            title="期望送达时间已更新",
+            content=f"发布者更新了“{task.title}”的期望送达时间",
+            target_type="service",
+            target_id=task.id,
+        )
+    db.commit()
+    return {"message": "期望送达时间已更新", "desired_delivery_at": task.desired_delivery_at}
+
+
+@router.post("/tasks/{task_id}/late-complaint")
+def complain_late_delivery(
+    task_id: int,
+    db: Session = Depends(get_db),
+    user: models.User = Depends(get_current_user),
+):
+    task = db.query(models.ServiceTask).options(
+        joinedload(models.ServiceTask.runner),
+    ).filter_by(id=task_id).with_for_update().first()
+    if not task:
+        raise HTTPException(status_code=404, detail="任务不存在")
+    if not can_late_complain(task, user.id):
+        raise HTTPException(status_code=400, detail="暂不可投诉：需超过约定送达时间 20 分钟且尚未投诉")
+    task.late_complaint_at = datetime.utcnow()
+    # Trust event: unique on (user_id, event_type, occurred_on) — use task-scoped event_type
+    db.add(models.TrustScoreEvent(
+        user_id=task.runner_id,
+        event_type=f"late_task_{task.id}"[:40],
+        points_delta=-20,
+        reason=f"超时送达投诉：任务#{task.id} {task.title}"[:160],
+        related_type="service",
+        related_id=task.id,
+        occurred_on=date.today(),
+    ))
+    create_notification(
+        db,
+        recipient_id=task.runner_id,
+        actor_id=user.id,
+        notification_type="task_late_complaint",
+        title="超时送达投诉",
+        content=f"任务“{task.title}”超时超过 20 分钟，信任分 -20",
+        target_type="service",
+        target_id=task.id,
+    )
+    db.commit()
+    return {"message": "已提交超时投诉，跑手信任分 -20"}
 
 
 @router.post("/community", status_code=201)
@@ -1490,13 +1930,24 @@ def get_summary(
     ).filter(or_(models.Order.buyer_id == user.id, models.Order.seller_id == user.id)).order_by(
         models.Order.created_at.desc()
     ).first()
+    active_errand_rows = db.query(models.ServiceTask).options(
+        joinedload(models.ServiceTask.requester).joinedload(models.User.profile),
+        joinedload(models.ServiceTask.runner).joinedload(models.User.profile),
+    ).filter(
+        models.ServiceTask.status.in_(["accepted", "in_progress"]),
+        or_(
+            models.ServiceTask.requester_id == user.id,
+            models.ServiceTask.runner_id == user.id,
+        ),
+    ).order_by(models.ServiceTask.accepted_at.desc(), models.ServiceTask.created_at.desc()).limit(8).all()
+    active_errands = [service_task_tracking_payload(task, user.id) for task in active_errand_rows]
     return {
         "active_listings": db.query(models.Listing).filter(models.Listing.status == "available").count(),
         "open_tasks": db.query(models.ServiceTask).filter(models.ServiceTask.status == "open").count(),
         "community_posts": db.query(models.CommunityPost).count(),
         "my_orders": db.query(models.Order).filter(
             or_(models.Order.buyer_id == user.id, models.Order.seller_id == user.id)
-        ).count(),
+        ).count() + len(active_errands),
         "unread_messages": unread_messages,
         "unread_notifications": db.query(models.Notification).filter_by(
             recipient_id=user.id,
@@ -1504,6 +1955,7 @@ def get_summary(
         ).count(),
         "topics": topics,
         "nearby_users": nearby_users[:5],
+        "active_errands": active_errands,
         "recent_order": compact_order_payload(
             recent_order,
             "buyer" if recent_order and recent_order.buyer_id == user.id else "seller",

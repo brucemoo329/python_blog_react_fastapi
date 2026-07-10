@@ -35,9 +35,19 @@ const INITIAL_FORM = {
   description: '',
   price: '',
   location: '',
+  pickup: '',
+  taskType: 'express',
+  desiredTime: '',
   topic: '校园生活',
   images: [],
 }
+
+const SERVICE_TASK_TYPES = [
+  { id: 'express', label: '帮拿快递' },
+  { id: 'takeout', label: '帮拿外卖' },
+  { id: 'errand', label: '跑腿代办' },
+  { id: 'purchase', label: '代购（如山姆）' },
+]
 
 const MAX_CAMPUS_AMOUNT = 999999.99
 
@@ -128,12 +138,37 @@ export default function PublishDialog({ open, onOpenChange, initialType = 'listi
     try {
       let response
       if (type === 'service') {
+        if (!form.pickup?.trim() || !form.location?.trim()) {
+          setError('请填写取货/物品地址和送达门牌地址')
+          setSubmitting(false)
+          return
+        }
+        let pickupGeo = null
+        let deliveryGeo = null
+        try {
+          const { geocodeAddress } = await import('@/lib/amap')
+          ;[pickupGeo, deliveryGeo] = await Promise.all([
+            geocodeAddress(form.pickup.trim()),
+            geocodeAddress(form.location.trim()),
+          ])
+        } catch (geoError) {
+          // Keep publishing even if geocode fails; map will use school fallback.
+          console.warn('geocode failed', geoError)
+        }
         response = await createServiceTask({
-          task_type: 'errand',
+          task_type: form.taskType || 'errand',
           title: form.title,
           description: form.description,
           reward: Number(form.price || 1),
-          delivery_location: form.location || t('publish.defaultLocation', '校内'),
+          pickup_location: form.pickup.trim(),
+          delivery_location: form.location.trim(),
+          pickup_latitude: pickupGeo?.lat ?? null,
+          pickup_longitude: pickupGeo?.lng ?? null,
+          delivery_latitude: deliveryGeo?.lat ?? null,
+          delivery_longitude: deliveryGeo?.lng ?? null,
+          latitude: pickupGeo?.lat ?? deliveryGeo?.lat ?? null,
+          longitude: pickupGeo?.lng ?? deliveryGeo?.lng ?? null,
+          desired_delivery_at: form.desiredTime ? new Date(form.desiredTime).toISOString() : null,
           image_url: form.images[0] || null,
         })
       } else if (type === 'wanted') {
@@ -270,7 +305,67 @@ export default function PublishDialog({ open, onOpenChange, initialType = 'listi
                   onIndexChange={setPreviewIndex}
                 />
               </Field>
-              {type !== 'community' ? (
+              {type === 'service' ? (
+                <>
+                  <Field>
+                    <FieldLabel>跑腿类型</FieldLabel>
+                    <div className="publish-service-type-row">
+                      {SERVICE_TASK_TYPES.map((item) => (
+                        <button
+                          key={item.id}
+                          type="button"
+                          className={cn(form.taskType === item.id && 'is-active')}
+                          onClick={() => setForm((current) => ({ ...current, taskType: item.id }))}
+                        >
+                          {item.label}
+                        </button>
+                      ))}
+                    </div>
+                  </Field>
+                  <Field>
+                    <FieldLabel htmlFor="publish-pickup">取货 / 物品地址</FieldLabel>
+                    <Input
+                      id="publish-pickup"
+                      value={form.pickup}
+                      onChange={update('pickup')}
+                      placeholder="快递站/外卖店；代购可填「山姆」"
+                    />
+                  </Field>
+                  <Field>
+                    <FieldLabel htmlFor="publish-location">送达地址（精确到门牌）</FieldLabel>
+                    <Input
+                      id="publish-location"
+                      value={form.location}
+                      onChange={update('location')}
+                      placeholder="例如：南通理工学院西区 7 栋 502"
+                    />
+                  </Field>
+                  <div className="grid gap-4 sm:grid-cols-2">
+                    <Field>
+                      <FieldLabel htmlFor="publish-price">{priceLabel}</FieldLabel>
+                      <Input
+                        id="publish-price"
+                        type="number"
+                        min="1"
+                        max={MAX_CAMPUS_AMOUNT}
+                        value={form.price}
+                        onChange={update('price')}
+                        placeholder={hints.price}
+                      />
+                    </Field>
+                    <Field>
+                      <FieldLabel htmlFor="publish-desired">期望送达时间</FieldLabel>
+                      <Input
+                        id="publish-desired"
+                        type="datetime-local"
+                        value={form.desiredTime}
+                        onChange={update('desiredTime')}
+                      />
+                    </Field>
+                  </div>
+                </>
+              ) : null}
+              {type !== 'community' && type !== 'service' ? (
                 <div className="grid gap-4 sm:grid-cols-2">
                   <Field>
                     <FieldLabel htmlFor="publish-price">{priceLabel}</FieldLabel>

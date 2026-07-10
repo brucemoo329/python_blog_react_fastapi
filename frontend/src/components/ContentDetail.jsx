@@ -43,6 +43,9 @@ import {
   toggleReaction,
   toggleUserModeration,
 } from '@/api/marketplace'
+import ErrandTrackingMap from '@/components/ErrandTrackingMap'
+import { acceptServiceTask } from '@/api/marketplace'
+import { planRoute, getCurrentLngLat, distanceMeters, suggestTravelMode } from '@/lib/amap'
 import { t as translate, typeLabel } from '@/lib/i18n'
 import { cn } from '@/lib/utils'
 
@@ -118,8 +121,10 @@ export default function ContentDetail({
   onDeleted,
   onItemChange,
   onFeedRefresh,
+  onAcceptTask,
 }) {
   const t = (key, fallback = '') => translate(language, key, fallback)
+  const [accepting, setAccepting] = useState(false)
   const [detail, setDetail] = useState(null)
   const [comment, setComment] = useState('')
   const [shareText, setShareText] = useState('')
@@ -358,7 +363,72 @@ export default function ContentDetail({
         {item.source ? <button type="button" className="x-source-post" onClick={() => onOpenTarget?.({ type: item.source.type, id: item.source.id })}><Repeat2 /><span><small>转发自原内容</small><strong>{item.source.title}</strong></span></button> : null}
 
         <div className="x-post-context"><span><ShieldCheck /> {t('ui.trustScore')} {author.trust?.score ?? 800} · {item.school || '南通理工学院'} · {item.location || t('publish.location')}</span>{isTrade && item.price_label ? <strong>{item.price_label}</strong> : null}</div>
-        {isTrade && !item.can_delete ? <Button className="x-purchase-button" onClick={() => onPurchase?.(item)}><ShoppingBag />{item.type === 'service' ? t('detail.acceptNow') : item.type === 'wanted' ? t('detail.respondWanted') : t('detail.buyNow')}</Button> : null}
+        {item.type === 'service' ? (
+          <div className="x-service-meta">
+            {item.pickup_location ? <p>取货：{item.pickup_location}</p> : null}
+            {item.delivery_location ? <p>送达：{item.delivery_location}</p> : null}
+            {item.desired_delivery_at ? <p>期望送达：{new Date(item.desired_delivery_at).toLocaleString()}</p> : null}
+          </div>
+        ) : null}
+        {item.type === 'service' && item.can_accept ? (
+          <Button
+            className="x-purchase-button"
+            disabled={accepting}
+            onClick={async () => {
+              setAccepting(true)
+              try {
+                let payload = {}
+                try {
+                  const pos = await getCurrentLngLat()
+                  const origin = [pos.lng, pos.lat]
+                  const pickup = item.tracking?.pickup?.lng != null
+                    ? [item.tracking.pickup.lng, item.tracking.pickup.lat]
+                    : (item.longitude != null ? [Number(item.longitude), Number(item.latitude)] : null)
+                  let route = null
+                  if (pickup) route = await planRoute(origin, pickup, 'auto')
+                  const dist = route?.distance || distanceMeters(origin, pickup)
+                  payload = {
+                    runner_latitude: pos.lat,
+                    runner_longitude: pos.lng,
+                    travel_mode: route?.mode || suggestTravelMode(dist),
+                    eta_seconds: route?.duration || null,
+                    distance_meters: dist,
+                  }
+                } catch {
+                  /* accept without GPS */
+                }
+                const response = await acceptServiceTask(item.id, payload)
+                onNotice?.(response.message)
+                setDetail((current) => current ? { ...current, item: { ...current.item, status: 'accepted', can_accept: false, tracking: response.tracking } } : current)
+                onFeedRefresh?.()
+                onAcceptTask?.(item)
+              } catch (error) {
+                onNotice?.(error.response?.data?.detail || '接单失败')
+              } finally {
+                setAccepting(false)
+              }
+            }}
+          >
+            <ShoppingBag />{accepting ? '接单中…' : t('detail.acceptNow')}
+          </Button>
+        ) : null}
+        {item.type === 'service' && !item.can_accept && item.tracking && item.tracking.delivery_phase !== 'pending' ? (
+          <ErrandTrackingMap
+            taskId={item.id}
+            initialTracking={item.tracking}
+            currentUserId={currentUser?.id}
+            onNotice={onNotice}
+            onMessageRequester={() => onMessage?.(item)}
+          />
+        ) : null}
+        {item.type !== 'service' && isTrade && !item.can_delete ? (
+          <Button className="x-purchase-button" onClick={() => onPurchase?.(item)}>
+            <ShoppingBag />{item.type === 'wanted' ? t('detail.respondWanted') : t('detail.buyNow')}
+          </Button>
+        ) : null}
+        {item.type === 'service' && item.status === 'open' && !item.can_accept && item.can_delete ? (
+          <p className="x-service-owner-hint">等待同学接单；接单后将显示配送进度与导航。</p>
+        ) : null}
 
         <div className="x-post-actions">
           <button type="button" onClick={() => document.querySelector('.x-reply-composer textarea')?.focus()}><MessageCircle /> <span>{item.comment_count || 0}</span></button>
