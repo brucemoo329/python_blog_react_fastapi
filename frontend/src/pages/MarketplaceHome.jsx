@@ -48,6 +48,7 @@ import CheckoutPlaceholder from '@/components/CheckoutPlaceholder'
 import ContentDetail from '@/components/ContentDetail'
 import LineSidebar from '@/components/LineSidebar'
 import AdminPanel from '@/components/AdminPanel'
+import ImageLightbox from '@/components/ImageLightbox'
 import MessagesCenter from '@/components/MessagesCenter'
 import OrdersCenter from '@/components/OrdersCenter'
 import { LiquidGlassBar } from '@/components/ui/liquid-glass-button'
@@ -146,7 +147,7 @@ function relativeTime(value) {
   return `${Math.floor(minutes / 1440)} 天前`
 }
 
-function FeedCard({ item, saved, onOpen, onOpenUser, onSave, onReact, onShare, onMessage, onPurchase, onTopic }) {
+function FeedCard({ item, saved, onOpen, onOpenUser, onSave, onReact, onShare, onMessage, onPurchase, onTopic, onPreviewImage }) {
   const meta = TYPE_META[item.type] || TYPE_META.listing
   const Icon = meta.icon
   const author = item.seller || item.author || item.requester || {}
@@ -172,7 +173,17 @@ function FeedCard({ item, saved, onOpen, onOpenUser, onSave, onReact, onShare, o
         <h3>{item.title || '校园动态'}</h3>
         <p>{item.description}</p>
         {item.topic ? <button type="button" className="x-feed-topic" onClick={stop(() => onTopic(item.topic))}>#{item.topic}</button> : null}
-        {item.image_url ? <div className="x-feed-media"><img src={item.image_url} alt="" loading="lazy" /></div> : null}
+        {item.image_url ? (
+          <button
+            type="button"
+            className="x-feed-media"
+            onClick={stop(() => onPreviewImage?.(item.image_url))}
+            aria-label="查看大图"
+          >
+            <img src={item.image_url} alt="" loading="lazy" />
+            <span className="x-feed-media-hint">点击查看大图</span>
+          </button>
+        ) : null}
         {item.source ? <button type="button" className="x-feed-source" onClick={stop(() => onOpen({ type: item.source.type, id: item.source.id, title: item.source.title }))}><Repeat2 /> 原内容：{item.source.title}</button> : null}
         <div className="x-feed-context"><span><MapPin /> {item.school || item.location || '校内'}</span>{item.type !== 'community' ? <strong>{item.type === 'wanted' ? '预算 ' : ''}¥{price ?? '面议'}</strong> : null}</div>
         <div className="x-feed-actions">
@@ -211,6 +222,7 @@ export default function MarketplaceHome({ user, onLogout, onUserUpdate }) {
   const [quickChatRequest, setQuickChatRequest] = useState(null)
   const [initialConversationId, setInitialConversationId] = useState(null)
   const [selectedOrder, setSelectedOrder] = useState(null)
+  const [feedLightbox, setFeedLightbox] = useState({ open: false, images: [], index: 0 })
 
   const language = currentUser?.profile?.language || localStorage.getItem('campus_language') || 'zh-CN'
   const isAdmin = Boolean(currentUser?.is_admin)
@@ -630,7 +642,7 @@ export default function MarketplaceHome({ user, onLogout, onUserUpdate }) {
             <div className="campus-center">
               <Card className="pulse-composer"><CardContent><Avatar className="size-10"><AvatarImage src={displayAvatar || undefined} alt={displayName} /><AvatarFallback>{displayName.slice(0, 1)}</AvatarFallback></Avatar><button type="button" onClick={() => openPublish('community')}>分享校园动态、发布商品、服务或求助...</button><Button variant="secondary" onClick={() => openPublish('community')}><PenLine /> 发布</Button></CardContent><div className="pulse-quick-actions"><button type="button" onClick={() => openPublish('listing')}><ShoppingBag /> 发布二手</button><button type="button" onClick={() => { setView('radar'); setActiveNav('service') }}><Bike /> 跑腿代取</button><button type="button" onClick={() => openPublish('wanted')}><Search /> 发求购</button><button type="button" onClick={() => openPublish('community')}><MessageCircle /> 发话题</button></div></Card>
               <div className="pulse-view-switch"><div><button type="button" className={cn(view === 'pulse' && 'is-active')} onClick={() => setView('pulse')}><Compass /> 校园脉动</button><button type="button" className={cn(view === 'radar' && 'is-active')} onClick={() => setView('radar')}><Map /> 校园雷达</button></div><Badge variant="secondary"><span className="status-dot" /> 实时在线</Badge></div>
-              {view === 'radar' ? <CampusRadar tasks={tasks} onAcceptTask={handleAcceptTask} onOpenTask={handleAction} onLocate={(address) => setNotice(`定位成功：${address}`)} /> : <><Tabs value={filter} onValueChange={(value) => { setFilter(value); setTopicFilter('') }} className="pulse-filters"><TabsList><TabsTrigger value="all">全部</TabsTrigger><TabsTrigger value="listing">二手</TabsTrigger><TabsTrigger value="service">跑腿</TabsTrigger><TabsTrigger value="game">游戏</TabsTrigger><TabsTrigger value="wanted">求购</TabsTrigger><TabsTrigger value="community">社区</TabsTrigger></TabsList></Tabs>{topicFilter ? <div className="active-topic-filter"><span>#{topicFilter}</span><button type="button" onClick={() => setTopicFilter('')}>查看全部社区内容</button></div> : null}<div className="pulse-feed">{loading ? Array.from({ length: 3 }, (_, index) => <div key={index} className="x-feed-post"><Skeleton className="size-11 shrink-0 rounded-full" /><div className="flex flex-1 flex-col gap-3"><Skeleton className="h-5 w-2/3" /><Skeleton className="h-4 w-full" /><Skeleton className="h-28 w-full" /></div></div>) : filteredFeed.length ? filteredFeed.map((item) => <FeedCard key={itemKey(item)} item={item} saved={savedKeys.has(itemKey(item)) || item.favorited} onOpen={handleAction} onOpenUser={openUser} onSave={handleSave} onReact={handleFeedReact} onShare={handleFeedShare} onMessage={openChat} onPurchase={(entry) => setCheckoutItem(entry)} onTopic={openTopic} />) : <Card className="pulse-empty"><Search /><h3>没有找到相关内容</h3><p>换个关键词，或者成为第一个发布的人。</p><Button onClick={() => openPublish('listing')}>立即发布</Button></Card>}</div></>}
+              {view === 'radar' ? <CampusRadar tasks={tasks} onAcceptTask={handleAcceptTask} onOpenTask={handleAction} onLocate={(address) => setNotice(`定位成功：${address}`)} /> : <><Tabs value={filter} onValueChange={(value) => { setFilter(value); setTopicFilter('') }} className="pulse-filters"><TabsList><TabsTrigger value="all">全部</TabsTrigger><TabsTrigger value="listing">二手</TabsTrigger><TabsTrigger value="service">跑腿</TabsTrigger><TabsTrigger value="game">游戏</TabsTrigger><TabsTrigger value="wanted">求购</TabsTrigger><TabsTrigger value="community">社区</TabsTrigger></TabsList></Tabs>{topicFilter ? <div className="active-topic-filter"><span>#{topicFilter}</span><button type="button" onClick={() => setTopicFilter('')}>查看全部社区内容</button></div> : null}<div className="pulse-feed">{loading ? Array.from({ length: 3 }, (_, index) => <div key={index} className="x-feed-post"><Skeleton className="size-11 shrink-0 rounded-full" /><div className="flex flex-1 flex-col gap-3"><Skeleton className="h-5 w-2/3" /><Skeleton className="h-4 w-full" /><Skeleton className="h-28 w-full" /></div></div>) : filteredFeed.length ? filteredFeed.map((item) => <FeedCard key={itemKey(item)} item={item} saved={savedKeys.has(itemKey(item)) || item.favorited} onOpen={handleAction} onOpenUser={openUser} onSave={handleSave} onReact={handleFeedReact} onShare={handleFeedShare} onMessage={openChat} onPurchase={(entry) => setCheckoutItem(entry)} onTopic={openTopic} onPreviewImage={(src) => setFeedLightbox({ open: true, images: [src], index: 0 })} />) : <Card className="pulse-empty"><Search /><h3>没有找到相关内容</h3><p>换个关键词，或者成为第一个发布的人。</p><Button onClick={() => openPublish('listing')}>立即发布</Button></Card>}</div></>}
             </div>
 
             <aside className="campus-right-rail">
@@ -664,6 +676,7 @@ export default function MarketplaceHome({ user, onLogout, onUserUpdate }) {
       </LiquidGlassBar>
       {notice ? <div className="campus-notice" role="status"><CheckCircle2 /> {notice}</div> : null}
       <PublishDialog open={publishOpen} onOpenChange={setPublishOpen} initialType={publishType} onPublished={(response) => { setNotice(response?.message || '发布成功'); if (response?.type && response?.id) setSelectedDetail({ type: response.type, id: response.id }); loadData() }} />
+      <ImageLightbox open={feedLightbox.open} images={feedLightbox.images} index={feedLightbox.index} onClose={() => setFeedLightbox((current) => ({ ...current, open: false }))} onIndexChange={(index) => setFeedLightbox((current) => ({ ...current, index }))} />
       <QuickChat request={quickChatRequest} currentUser={currentUser} onClose={() => setQuickChatRequest(null)} onNotice={setNotice} onConversationUpdate={() => { loadNotifications(); getMarketplaceSummary().then((response) => setSummary((current) => ({ ...current, ...response }))).catch(() => {}) }} onOpenCenter={() => { setInitialConversationId(null); selectNav('messages'); setQuickChatRequest(null) }} />
     </main>
   )

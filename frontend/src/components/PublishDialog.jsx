@@ -12,6 +12,7 @@ import {
 import { Field, FieldGroup, FieldLabel } from '@/components/ui/field'
 import { Input } from '@/components/ui/input'
 import { Textarea } from '@/components/ui/textarea'
+import ImageLightbox from '@/components/ImageLightbox'
 import { cn } from '@/lib/utils'
 import {
   createCommunityPost,
@@ -74,7 +75,8 @@ const COPY_BY_TYPE = {
   },
 }
 
-function compressImage(file, maxSize = 900, quality = 0.74) {
+/** Keep uploads viewable: larger edge + higher quality (still base64-safe). */
+function compressImage(file, maxSize = 1600, quality = 0.86) {
   return new Promise((resolve, reject) => {
     const reader = new FileReader()
     reader.onerror = reject
@@ -100,6 +102,8 @@ export default function PublishDialog({ open, onOpenChange, initialType = 'listi
   const [form, setForm] = useState(INITIAL_FORM)
   const [submitting, setSubmitting] = useState(false)
   const [error, setError] = useState('')
+  const [previewOpen, setPreviewOpen] = useState(false)
+  const [previewIndex, setPreviewIndex] = useState(0)
 
   useEffect(() => {
     if (open) setType(initialType)
@@ -253,12 +257,26 @@ export default function PublishDialog({ open, onOpenChange, initialType = 'listi
                         <div className="publish-image-grid">
                           {form.images.map((image, index) => (
                             <div key={`${image.slice(0, 24)}-${index}`}>
-                              <img src={image} alt="" />
-                              <button type="button" onClick={() => removeImage(index)}><X /></button>
+                              <button
+                                type="button"
+                                className="publish-image-preview-btn"
+                                onClick={() => { setPreviewIndex(index); setPreviewOpen(true) }}
+                                aria-label={`预览第 ${index + 1} 张图`}
+                              >
+                                <img src={image} alt="" />
+                              </button>
+                              <button type="button" className="publish-image-remove" onClick={() => removeImage(index)} aria-label="移除图片"><X /></button>
                             </div>
                           ))}
                         </div>
                       ) : null}
+                      <ImageLightbox
+                        open={previewOpen}
+                        images={form.images}
+                        index={previewIndex}
+                        onClose={() => setPreviewOpen(false)}
+                        onIndexChange={setPreviewIndex}
+                      />
                     </Field>
                     {type !== 'community' ? (
                       <div className="grid gap-4 sm:grid-cols-2">

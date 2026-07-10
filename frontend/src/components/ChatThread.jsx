@@ -17,6 +17,7 @@ import { Avatar, AvatarFallback, AvatarImage } from '@/components/ui/avatar'
 import { Button } from '@/components/ui/button'
 import { Input } from '@/components/ui/input'
 import { Message, MessageAvatar, MessageContent, MessageFooter } from '@/components/ui/message'
+import ImageLightbox from '@/components/ImageLightbox'
 import {
   getConversationMessages,
   getUserShopItems,
@@ -74,6 +75,7 @@ export default function ChatThread({
   const [shopItems, setShopItems] = useState([])
   const [transfer, setTransfer] = useState({ amount: '', note: '' })
   const [messageMenu, setMessageMenu] = useState(null)
+  const [lightbox, setLightbox] = useState({ open: false, images: [], index: 0 })
   const albumRef = useRef(null)
   const cameraRef = useRef(null)
   const scrollerRef = useRef(null)
@@ -278,7 +280,16 @@ export default function ChatThread({
                   <div className="chat-reply-preview"><Quote /> {message.reply_to.sender?.nickname || message.reply_to.sender?.username}：{message.reply_to.content}</div>
                 ) : null}
                 <div className="chat-bubble" data-type={message.message_type}>
-                  {message.message_type === 'image' ? <img src={message.content} alt="聊天图片" /> : null}
+                  {message.message_type === 'image' ? (
+                    <button
+                      type="button"
+                      className="chat-image-btn"
+                      onClick={() => setLightbox({ open: true, images: [message.content], index: 0 })}
+                      aria-label="查看聊天大图"
+                    >
+                      <img src={message.content} alt="聊天图片" />
+                    </button>
+                  ) : null}
                   {message.message_type === 'location' ? (
                     <a
                       href={`https://uri.amap.com/marker?position=${meta?.longitude},${meta?.latitude}&name=${encodeURIComponent(meta?.label || '共享位置')}`}
@@ -411,6 +422,14 @@ export default function ChatThread({
           <input ref={cameraRef} hidden type="file" accept="image/*" capture="environment" onChange={sendImage} />
         </div>
       </div>
+
+      <ImageLightbox
+        open={lightbox.open}
+        images={lightbox.images}
+        index={lightbox.index}
+        onClose={() => setLightbox((current) => ({ ...current, open: false }))}
+        onIndexChange={(next) => setLightbox((current) => ({ ...current, index: next }))}
+      />
     </section>
   )
 }

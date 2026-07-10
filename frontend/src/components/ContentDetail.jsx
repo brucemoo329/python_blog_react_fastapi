@@ -30,6 +30,7 @@ import {
   DropdownMenuTrigger,
 } from '@/components/ui/dropdown-menu'
 import { Textarea } from '@/components/ui/textarea'
+import ImageLightbox from '@/components/ImageLightbox'
 import {
   createComment,
   deleteComment,
@@ -113,6 +114,8 @@ export default function ContentDetail({ target, currentUser, onBack, onNotice, o
   const [reportReason, setReportReason] = useState('疑似欺诈交易')
   const [loading, setLoading] = useState(true)
   const [reactBurst, setReactBurst] = useState('')
+  const [lightboxOpen, setLightboxOpen] = useState(false)
+  const [lightboxIndex, setLightboxIndex] = useState(0)
 
   const loadDetail = useCallback(async () => {
     if (!target?.id || !target?.type) return
@@ -277,7 +280,22 @@ export default function ContentDetail({ target, currentUser, onBack, onNotice, o
           {item.status && item.type === 'community' ? <button type="button" className="x-topic-tag" onClick={() => onTopic?.(item.status)}>#{item.status}</button> : null}
         </div>
 
-        {item.images?.length ? <div className={cn('x-post-images', item.images.length === 1 && 'is-single')}>{item.images.map((image, index) => <img key={`${image.slice(0, 24)}-${index}`} src={image} alt="" />)}</div> : null}
+        {item.images?.length ? (
+          <div className={cn('x-post-images', item.images.length === 1 && 'is-single')}>
+            {item.images.map((image, index) => (
+              <button
+                key={`${image.slice(0, 24)}-${index}`}
+                type="button"
+                className="x-post-image-btn"
+                onClick={() => { setLightboxIndex(index); setLightboxOpen(true) }}
+                aria-label={`查看第 ${index + 1} 张大图`}
+              >
+                <img src={image} alt="" />
+                <span className="x-post-image-hint">点击查看大图</span>
+              </button>
+            ))}
+          </div>
+        ) : null}
         {item.source ? <button type="button" className="x-source-post" onClick={() => onOpenTarget?.({ type: item.source.type, id: item.source.id })}><Repeat2 /><span><small>转发自原内容</small><strong>{item.source.title}</strong></span></button> : null}
 
         <div className="x-post-context"><span><ShieldCheck /> 信任 {author.trust?.score ?? 800} · {item.school || '南通理工学院'} · {item.location || '校内'}</span>{isTrade && item.price_label ? <strong>{item.price_label}</strong> : null}</div>
@@ -305,6 +323,14 @@ export default function ContentDetail({ target, currentUser, onBack, onNotice, o
       <Dialog open={reportOpen} onOpenChange={setReportOpen}>
         <DialogContent className="x-report-dialog"><DialogHeader><DialogTitle>举报这条内容</DialogTitle><DialogDescription>举报会进入平台核实流程，未核实前不会直接扣除对方信任分。</DialogDescription></DialogHeader><div className="x-report-options">{['疑似欺诈交易', '违规商品或服务', '骚扰或辱骂', '垃圾广告', '其他问题'].map((reason) => <button key={reason} type="button" className={reportReason === reason ? 'is-active' : ''} onClick={() => setReportReason(reason)}><Flag /> {reason}</button>)}</div><DialogFooter><Button variant="outline" onClick={() => setReportOpen(false)}>取消</Button><Button variant="destructive" onClick={report}>提交举报</Button></DialogFooter></DialogContent>
       </Dialog>
+
+      <ImageLightbox
+        open={lightboxOpen}
+        images={item.images || []}
+        index={lightboxIndex}
+        onClose={() => setLightboxOpen(false)}
+        onIndexChange={setLightboxIndex}
+      />
     </div>
   )
 }
