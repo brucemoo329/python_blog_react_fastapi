@@ -50,6 +50,7 @@ import LineSidebar from '@/components/LineSidebar'
 import AdminPanel from '@/components/AdminPanel'
 import MessagesCenter from '@/components/MessagesCenter'
 import OrdersCenter from '@/components/OrdersCenter'
+import { LiquidGlassBar } from '@/components/ui/liquid-glass-button'
 import Particles from '@/components/Particles'
 import ProfileCenter from '@/components/ProfileCenter'
 import PublicProfile from '@/components/PublicProfile'
@@ -634,7 +635,25 @@ export default function MarketplaceHome({ user, onLogout, onUserUpdate }) {
         )}
       </section>
 
-      <nav className="campus-mobile-nav" aria-label="移动端导航">{MOBILE_NAV_ITEMS.map((item) => { const Icon = item.icon; return <button key={item.id} type="button" className={cn(activeNav === item.id && 'is-active')} onClick={() => selectNav(item.id)}><Icon /><span>{item.labels?.[langGroup] || item.label}</span>{item.id === 'messages' && summary.unread_messages ? <em>{summary.unread_messages}</em> : null}</button> })}</nav>
+      <LiquidGlassBar className="campus-mobile-nav" filterId="campus-mobile-nav-glass">
+        <nav className="campus-mobile-nav-inner" aria-label="移动端导航">
+          {MOBILE_NAV_ITEMS.map((item) => {
+            const Icon = item.icon
+            return (
+              <button
+                key={item.id}
+                type="button"
+                className={cn('campus-mobile-nav-item', activeNav === item.id && 'is-active')}
+                onClick={() => selectNav(item.id)}
+              >
+                <span className="campus-mobile-nav-icon"><Icon /></span>
+                <span className="campus-mobile-nav-label">{item.labels?.[langGroup] || item.label}</span>
+                {item.id === 'messages' && summary.unread_messages ? <em>{summary.unread_messages}</em> : null}
+              </button>
+            )
+          })}
+        </nav>
+      </LiquidGlassBar>
       {notice ? <div className="campus-notice" role="status"><CheckCircle2 /> {notice}</div> : null}
       <PublishDialog open={publishOpen} onOpenChange={setPublishOpen} initialType={publishType} onPublished={(response) => { setNotice(response?.message || '发布成功'); if (response?.type && response?.id) setSelectedDetail({ type: response.type, id: response.id }); loadData() }} />
       <QuickChat request={quickChatRequest} currentUser={currentUser} onClose={() => setQuickChatRequest(null)} onNotice={setNotice} onConversationUpdate={() => { loadNotifications(); getMarketplaceSummary().then((response) => setSummary((current) => ({ ...current, ...response }))).catch(() => {}) }} onOpenCenter={() => { setInitialConversationId(null); selectNav('messages'); setQuickChatRequest(null) }} />
