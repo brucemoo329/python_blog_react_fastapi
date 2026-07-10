@@ -56,8 +56,13 @@ export default function Register({ onNavigateLogin, onLogin }) {
         ? `${response.message || '验证码已发送'}（开发码 ${response.dev_code}）`
         : (response.message || '验证码已发送，请查收邮件（QQ/Gmail/Outlook 等均可）');
       setMessage({ type: 'success', text: hint });
-      setCooldown(response.cooldown || 60);
+      setCooldown(Number(response.cooldown) || 30);
     } catch (error) {
+      const detail = error.response?.data?.detail || '';
+      const match = String(detail).match(/(\d+)\s*秒/);
+      if (error.response?.status === 429 && match) {
+        setCooldown(Number(match[1]) || 30);
+      }
       setMessage({ type: 'error', text: getErrorMessage(error) });
     } finally {
       setCodeLoading(false);

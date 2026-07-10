@@ -23,8 +23,9 @@ from app import models
 
 EMAIL_RE = re.compile(r"^[A-Za-z0-9._%+\-]+@[A-Za-z0-9.\-]+\.[A-Za-z]{2,}$")
 CODE_TTL_MINUTES = int(os.getenv("EMAIL_CODE_TTL_MINUTES", "10"))
-SEND_COOLDOWN_SECONDS = int(os.getenv("EMAIL_SEND_COOLDOWN_SECONDS", "60"))
-MAX_SENDS_PER_HOUR = int(os.getenv("EMAIL_MAX_SENDS_PER_HOUR", "8"))
+# 冷却默认 30 秒，避免用户误点后久等；可用环境变量覆盖
+SEND_COOLDOWN_SECONDS = int(os.getenv("EMAIL_SEND_COOLDOWN_SECONDS", "30"))
+MAX_SENDS_PER_HOUR = int(os.getenv("EMAIL_MAX_SENDS_PER_HOUR", "20"))
 MAX_VERIFY_ATTEMPTS = int(os.getenv("EMAIL_MAX_VERIFY_ATTEMPTS", "5"))
 
 Purpose = Literal["login", "register", "reset"]
@@ -140,8 +141,17 @@ def create_and_send_code(
         .order_by(models.EmailVerificationCode.created_at.desc())
         .first()
     )
-    if recent:
-        raise HTTPException(status_code=429, detail=f"发送过于频繁，请 {SEND_COOLDOWN_SECONDS} 秒后再试")
+    if recent and recent.created_at:
+        created = recent.created_at
+        if created.tzinfo is not None:
+            created = created.replace(tzinfo=None)
+        elapsed = (now - created).total_seconds()
+        wait = max(1, int(SEND_COOLDOWN_SECONDS - elapsed))
+        raise HTTPException(
+            status_code=429,
+            detail=f"发送过于频繁，请 {wait} 秒后再试",
+            headers={"Retry-After": str(wait)},
+        )
 
     hour_count = (
         db.query(models.EmailVerificationCode)
@@ -152,21 +162,12 @@ def create_and_send_code(
         .count()
     )
     if hour_count >= MAX_SENDS_PER_HOUR:
-        raise HTTPException(status_code=429, detail="该邮箱一小时内验证码次数过多，请稍后再试")
+        raise HTTPException(
+            status_code=429,
+            detail=f"该邮箱一小时内验证码次数过多（最多 {MAX_SENDS_PER_HOUR} 次），请稍后再试",
+        )
 
     code = generate_code(6)
-    row = models.EmailVerificationCode(
-        email=email,
-        code=code,
-        purpose=purpose,
-        expires_at=now + timedelta(minutes=CODE_TTL_MINUTES),
-        used=False,
-        attempts=0,
-        client_ip=(client_ip or "")[:64] or None,
-    )
-    db.add(row)
-    db.commit()
-
     subject = f"【校园集市】{_purpose_label(purpose)}验证码"
     body = (
         f"你好，\n\n"
@@ -185,20 +186,31 @@ def create_and_send_code(
         "cooldown": SEND_COOLDOWN_SECONDS,
     }
 
-    if _dev_mode() and not _smtp_configured():
-        # 开发模式：不真实发信，返回验证码便于联调（生产务必配置 SMTP）
-        print(f"[EMAIL_DEV] {purpose} code for {email}: {code}")
-        response["message"] = f"开发模式：验证码已生成（未配置 SMTP，不会真实发信）"
-        response["dev_code"] = code
-        return response
+    # 先发信成功再落库，避免 SMTP 失败也占用冷却名额
+    try:
+        if _dev_mode() and not _smtp_configured():
+            print(f"[EMAIL_DEV] {purpose} code for {email}: {code}")
+            response["message"] = "开发模式：验证码已生成（未配置 SMTP，不会真实发信）"
+            response["dev_code"] = code
+        elif _dev_mode() and _smtp_configured():
+            send_email_message(email, subject, body)
+            response["dev_code"] = code
+        else:
+            send_email_message(email, subject, body)
+    except HTTPException:
+        raise
 
-    if _dev_mode() and _smtp_configured():
-        # 已配置 SMTP 且显式 dev：仍真实发信，但额外带回调试码（仅测试用）
-        send_email_message(email, subject, body)
-        response["dev_code"] = code
-        return response
-
-    send_email_message(email, subject, body)
+    row = models.EmailVerificationCode(
+        email=email,
+        code=code,
+        purpose=purpose,
+        expires_at=now + timedelta(minutes=CODE_TTL_MINUTES),
+        used=False,
+        attempts=0,
+        client_ip=(client_ip or "")[:64] or None,
+    )
+    db.add(row)
+    db.commit()
     return response
 
 

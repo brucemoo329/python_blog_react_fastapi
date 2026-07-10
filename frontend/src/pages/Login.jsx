@@ -137,8 +137,13 @@ export default function Login({ onLogin, onNavigateRegister }) {
         ? `${response.message || t('login.codeSent')}（开发码 ${response.dev_code}）`
         : (response.message || t('login.codeSent'));
       setMessage({ type: 'success', text: hint });
-      setCooldown(response.cooldown || 60);
+      setCooldown(Number(response.cooldown) || 30);
     } catch (error) {
+      const detail = error.response?.data?.detail || '';
+      const match = String(detail).match(/(\d+)\s*秒/);
+      if (error.response?.status === 429 && match) {
+        setCooldown(Number(match[1]) || 30);
+      }
       setMessage({ type: 'error', text: getErrorMessage(error, language) });
     } finally {
       setCodeLoading(false);
