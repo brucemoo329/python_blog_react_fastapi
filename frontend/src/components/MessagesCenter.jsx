@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useState } from 'react'
+import { useCallback, useEffect, useRef, useState } from 'react'
 import { ArrowLeft, MessageCircle, Search } from 'lucide-react'
 import { Avatar, AvatarFallback, AvatarImage } from '@/components/ui/avatar'
 import { Badge } from '@/components/ui/badge'
@@ -13,21 +13,32 @@ export default function MessagesCenter({ currentUser, initialConversationId, onB
   const [activeId, setActiveId] = useState(initialConversationId || null)
   const [search, setSearch] = useState('')
   const [loading, setLoading] = useState(true)
+  const noticeRef = useRef(onNotice)
+  const unreadChangeRef = useRef(onUnreadChange)
+  const initialIdRef = useRef(initialConversationId)
+  const requestSeqRef = useRef(0)
+
+  useEffect(() => { noticeRef.current = onNotice }, [onNotice])
+  useEffect(() => { unreadChangeRef.current = onUnreadChange }, [onUnreadChange])
+  useEffect(() => { initialIdRef.current = initialConversationId }, [initialConversationId])
 
   const loadConversations = useCallback(async (silent = false) => {
+    const seq = ++requestSeqRef.current
     if (!silent) setLoading(true)
     try {
       const response = await getConversations()
+      if (seq !== requestSeqRef.current) return
       const items = response.items || []
       setConversations(items)
-      setActiveId((current) => current || initialConversationId || items[0]?.id || null)
-      onUnreadChange?.(items.reduce((total, item) => total + (item.unread || 0), 0))
+      setActiveId((current) => current || initialIdRef.current || items[0]?.id || null)
+      unreadChangeRef.current?.(items.reduce((total, item) => total + (item.unread || 0), 0))
     } catch (error) {
-      if (!silent) onNotice?.(error.response?.data?.detail || '消息中心加载失败')
+      if (seq !== requestSeqRef.current) return
+      if (!silent) noticeRef.current?.(error.response?.data?.detail || '消息中心加载失败')
     } finally {
-      if (!silent) setLoading(false)
+      if (seq === requestSeqRef.current && !silent) setLoading(false)
     }
-  }, [initialConversationId, onUnreadChange, onNotice])
+  }, [])
 
   useEffect(() => {
     loadConversations()
@@ -53,7 +64,7 @@ export default function MessagesCenter({ currentUser, initialConversationId, onB
         <div className="messages-conversation-list">
           {loading ? <div className="chat-empty">会话加载中...</div> : null}
           {!loading && !filtered.length ? <div className="chat-empty">还没有私信，去帖子里和同学聊聊。</div> : null}
-          {filtered.map((conversation) => {
+          {!loading && filtered.map((conversation) => {
             const user = conversation.user || {}
             return (
               <button key={conversation.id} type="button" className={cn(activeId === conversation.id && 'is-active')} onClick={() => setActiveId(conversation.id)}>

@@ -76,8 +76,16 @@ export default function ChatThread({ conversation, currentUser, compact = false,
     if (!silent) setLoading(true)
     try {
       const response = await getConversationMessages(conversation.id)
-      setMessages(response.items || [])
-      conversationUpdateRef.current?.()
+      const items = response.items || []
+      setMessages((previous) => {
+        const changed = previous.length !== items.length
+          || previous[previous.length - 1]?.id !== items[items.length - 1]?.id
+        // Avoid refreshing the conversation list on every silent poll.
+        if (!silent || changed) {
+          queueMicrotask(() => conversationUpdateRef.current?.())
+        }
+        return items
+      })
     } catch (error) {
       if (!silent) noticeRef.current?.(error.response?.data?.detail || '聊天记录加载失败')
     } finally {

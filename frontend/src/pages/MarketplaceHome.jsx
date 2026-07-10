@@ -227,6 +227,13 @@ export default function MarketplaceHome({ user, onLogout, onUserUpdate }) {
     }
   }, [])
 
+  const handleUnreadMessagesChange = useCallback((count) => {
+    setSummary((current) => {
+      if (current.unread_messages === count) return current
+      return { ...current, unread_messages: count }
+    })
+  }, [])
+
   const loadData = useCallback(async () => {
     setLoading(true)
     try {
@@ -467,7 +474,7 @@ export default function MarketplaceHome({ user, onLogout, onUserUpdate }) {
         ) : publicUserId ? <PublicProfile userId={publicUserId} onBack={() => setPublicUserId(null)} onOpenItem={handleAction} onMessage={(source) => openChat(source)} onNotice={setNotice} /> : activeNav === 'profile' ? (
           <ProfileCenter user={currentUser} onLogout={onLogout} onNotice={setNotice} onProfileChange={handleProfileChange} onOpenItem={handleAction} onOpenUser={openUser} />
         ) : activeNav === 'messages' ? (
-          <MessagesCenter currentUser={currentUser} initialConversationId={initialConversationId} onBack={() => selectNav('home')} onNotice={setNotice} onUnreadChange={(count) => setSummary((current) => ({ ...current, unread_messages: count }))} />
+          <MessagesCenter currentUser={currentUser} initialConversationId={initialConversationId} onBack={() => selectNav('home')} onNotice={setNotice} onUnreadChange={handleUnreadMessagesChange} />
         ) : (
           <div className="campus-main">
             <div className="campus-center">

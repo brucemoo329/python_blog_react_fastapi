@@ -1926,9 +1926,22 @@ def conversation_payload(db: Session, conversation: models.Conversation, current
             context = compact_content_payload(detail)
         except HTTPException:
             context = None
+    if other:
+        user_data = user_payload(other)
+    else:
+        user_data = {
+            "id": other_id,
+            "username": "已注销用户",
+            "email": None,
+            "avatar_url": None,
+            "nickname": "已注销用户",
+            "school": None,
+            "is_online": False,
+            "last_active_at": None,
+        }
     return {
         "id": conversation.id,
-        "user": user_payload(other),
+        "user": user_data,
         "last_message": message_payload(db, last_message, current_user_id) if last_message else None,
         "unread": unread,
         "context": context,
