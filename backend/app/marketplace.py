@@ -1951,6 +1951,16 @@ def get_notifications(
     rows = db.query(models.Notification).options(
         joinedload(models.Notification.actor).joinedload(models.User.profile)
     ).filter_by(recipient_id=user.id).order_by(models.Notification.created_at.desc()).limit(limit).all()
+    actor_ids = {row.actor_id for row in rows if row.actor_id}
+    following_ids = set()
+    if actor_ids:
+        following_ids = {
+            row.following_id
+            for row in db.query(models.UserFollow).filter(
+                models.UserFollow.follower_id == user.id,
+                models.UserFollow.following_id.in_(actor_ids),
+            ).all()
+        }
     return {
         "items": [{
             "id": row.id,
@@ -1961,6 +1971,7 @@ def get_notifications(
             "target_id": row.target_id,
             "is_read": row.is_read,
             "actor": user_payload(row.actor) if row.actor else None,
+            "is_following_actor": bool(row.actor_id and row.actor_id in following_ids),
             "created_at": row.created_at,
         } for row in rows],
         "unread": sum(1 for row in rows if not row.is_read),

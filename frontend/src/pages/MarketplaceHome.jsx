@@ -24,6 +24,7 @@ import {
   TrendingUp,
   Shield,
   Trash2,
+  UserCheck,
   UserPlus,
   UserRound,
 } from 'lucide-react'
@@ -546,10 +547,22 @@ export default function MarketplaceHome({ user, onLogout, onUserUpdate }) {
     }
   }
 
-  const followBack = async (event, actor) => {
+  const followBack = async (event, notification) => {
     event.stopPropagation()
+    const actor = notification?.actor
+    if (!actor?.id) return
     try {
       const response = await toggleFollow(actor.id)
+      setNotifications((current) => current.map((item) => {
+        if (item.id === notification.id) {
+          return { ...item, is_following_actor: Boolean(response.followed) }
+        }
+        // Keep other follow notices for the same actor consistent.
+        if (item.type === 'follow' && item.actor?.id === actor.id) {
+          return { ...item, is_following_actor: Boolean(response.followed) }
+        }
+        return item
+      }))
       setNotice(response.followed ? `已关注 ${actor.nickname || actor.username}` : '已取消关注')
     } catch (error) {
       setNotice(error.response?.data?.detail || '回关失败')
@@ -607,7 +620,12 @@ export default function MarketplaceHome({ user, onLogout, onUserUpdate }) {
                         </span>
                       </button>
                       {notification.type === 'follow' && notification.actor ? (
-                        <em onClick={(event) => followBack(event, notification.actor)}><UserPlus /> 回关</em>
+                        <em
+                          className={cn('notification-follow-btn', notification.is_following_actor && 'is-following')}
+                          onClick={(event) => followBack(event, notification)}
+                        >
+                          {notification.is_following_actor ? <><UserCheck /> 已关注</> : <><UserPlus /> 回关</>}
+                        </em>
                       ) : null}
                       <button type="button" className="notification-delete" aria-label="删除通知" onClick={(event) => removeNotification(event, notification.id)}><Trash2 /></button>
                     </div>
