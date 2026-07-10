@@ -14,7 +14,14 @@ import { Button } from '@/components/ui/button'
 import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card'
 import { Tabs, TabsList, TabsTrigger } from '@/components/ui/tabs'
 import { cn } from '@/lib/utils'
-import { createAMapGeolocation, describeAMapLocateResult, loadAMap, MARKER_HTML } from '@/lib/amap'
+import {
+  createAMapGeolocation,
+  describeAMapLocateResult,
+  loadAMap,
+  MARKER_HTML,
+  resolveSchoolLocation,
+  schoolFallbackLngLat,
+} from '@/lib/amap'
 import { getGeolocationBlockReason, geolocationErrorMessage, isSecureGeolocationContext } from '@/lib/geolocation'
 
 const TASK_META = {
@@ -24,22 +31,30 @@ const TASK_META = {
   purchase: { label: '代购', icon: Box },
 }
 
-const SCHOOL_CENTER = [120.809261, 32.041042]
-
-export default function CampusRadar({ tasks, onAcceptTask, onOpenTask, onLocate }) {
+export default function CampusRadar({ tasks, school = '南通理工学院', onAcceptTask, onOpenTask, onLocate }) {
   const [filter, setFilter] = useState('all')
   const [selectedTaskId, setSelectedTaskId] = useState(tasks[0]?.id)
   const [mapStatus, setMapStatus] = useState('地图加载中...')
   const [isLocating, setIsLocating] = useState(false)
+  const [schoolPoint, setSchoolPoint] = useState(() => {
+    const fb = schoolFallbackLngLat(school)
+    return { lng: fb[0], lat: fb[1], name: school }
+  })
   const mapContainerRef = useRef(null)
   const mapRef = useRef(null)
   const amapRef = useRef(null)
   const geolocationRef = useRef(null)
   const taskMarkersRef = useRef([])
   const userMarkerRef = useRef(null)
+  const schoolMarkerRef = useRef(null)
   const visibleTasks = useMemo(
     () => tasks.filter((task) => filter === 'all' || task.task_type === filter),
     [filter, tasks],
+  )
+
+  const schoolCenter = useMemo(
+    () => [schoolPoint.lng, schoolPoint.lat],
+    [schoolPoint.lng, schoolPoint.lat],
   )
 
   const locateUser = useCallback(() => {
@@ -83,19 +98,31 @@ export default function CampusRadar({ tasks, onAcceptTask, onOpenTask, onLocate 
 
       const block = getGeolocationBlockReason()
       setMapStatus(block === 'insecure' ? geolocationErrorMessage('insecure') : parsed.message)
-      map.setZoomAndCenter(16, SCHOOL_CENTER)
+      map.setZoomAndCenter(16, schoolCenter)
     })
-  }, [onLocate])
+  }, [onLocate, schoolCenter])
+
+  // Resolve school location via AMap when profile school changes
+  useEffect(() => {
+    let cancelled = false
+    resolveSchoolLocation(school).then((point) => {
+      if (cancelled) return
+      setSchoolPoint(point)
+      setMapStatus(`已标注学校：${point.name}${point.approximate ? '（近似）' : ''} · 待接任务可点`)
+    })
+    return () => { cancelled = true }
+  }, [school])
 
   useEffect(() => {
     let disposed = false
+    const center = schoolFallbackLngLat(school)
 
     loadAMap()
       .then((AMap) => {
         if (disposed || !mapContainerRef.current) return
         amapRef.current = AMap
         const map = new AMap.Map(mapContainerRef.current, {
-          center: SCHOOL_CENTER,
+          center,
           zoom: 16,
           viewMode: '2D',
           mapStyle: 'amap://styles/darkblue',
@@ -103,15 +130,10 @@ export default function CampusRadar({ tasks, onAcceptTask, onOpenTask, onLocate 
         })
         map.addControl(new AMap.Scale())
         map.addControl(new AMap.ToolBar({ position: { right: '12px', bottom: '18px' } }))
-        map.add(new AMap.Marker({
-          position: SCHOOL_CENTER,
-          title: '南通理工学院',
-          label: { content: '南通理工学院', direction: 'top' },
-        }))
         mapRef.current = map
         geolocationRef.current = createAMapGeolocation(AMap)
         map.addControl(geolocationRef.current)
-        setMapStatus('待接跑腿任务 · 点击地图标记或列表查看详情')
+        setMapStatus(`校园雷达 · ${school || '本校'} 待接任务`)
       })
       .catch((error) => {
         console.error('AMap load error:', error)
@@ -122,6 +144,7 @@ export default function CampusRadar({ tasks, onAcceptTask, onOpenTask, onLocate 
       disposed = true
       taskMarkersRef.current = []
       userMarkerRef.current = null
+      schoolMarkerRef.current = null
       geolocationRef.current = null
       if (mapRef.current) {
         mapRef.current.destroy()
@@ -129,6 +152,31 @@ export default function CampusRadar({ tasks, onAcceptTask, onOpenTask, onLocate 
       }
     }
   }, [])
+
+  // Update school marker when geocoded school point is ready
+  useEffect(() => {
+    const map = mapRef.current
+    const AMap = amapRef.current
+    if (!map || !AMap || !schoolPoint) return
+    const position = [schoolPoint.lng, schoolPoint.lat]
+    if (schoolMarkerRef.current) {
+      map.remove(schoolMarkerRef.current)
+      schoolMarkerRef.current = null
+    }
+    schoolMarkerRef.current = new AMap.Marker({
+      position,
+      title: schoolPoint.name,
+      zIndex: 80,
+      content: `<div class="errand-marker errand-marker-school"><span>校</span></div>`,
+      label: {
+        content: schoolPoint.name,
+        direction: 'top',
+        offset: new AMap.Pixel(0, -4),
+      },
+    })
+    map.add(schoolMarkerRef.current)
+    map.setZoomAndCenter(16, position)
+  }, [schoolPoint])
 
   useEffect(() => {
     const map = mapRef.current

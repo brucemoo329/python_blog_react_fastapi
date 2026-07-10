@@ -1,4 +1,4 @@
-import { useEffect, useMemo, useState } from 'react'
+import { useEffect, useMemo, useRef, useState } from 'react'
 import { Gamepad2, ImagePlus, PackagePlus, PenLine, Search, Send, Sparkles, X } from 'lucide-react'
 import { Button } from '@/components/ui/button'
 import {
@@ -12,6 +12,7 @@ import {
 import { Field, FieldGroup, FieldLabel } from '@/components/ui/field'
 import { Input } from '@/components/ui/input'
 import { Textarea } from '@/components/ui/textarea'
+import DesiredTimePicker, { defaultDesiredTime } from '@/components/DesiredTimePicker'
 import ImageLightbox from '@/components/ImageLightbox'
 import { TOPIC_KEYS, t as translate } from '@/lib/i18n'
 import { cn } from '@/lib/utils'
@@ -51,7 +52,6 @@ const SERVICE_TASK_TYPES = [
 
 const MAX_CAMPUS_AMOUNT = 999999.99
 
-/** Keep uploads viewable: larger edge + higher quality (still base64-safe). */
 function compressImage(file, maxSize = 1600, quality = 0.86) {
   return new Promise((resolve, reject) => {
     const reader = new FileReader()
@@ -73,6 +73,16 @@ function compressImage(file, maxSize = 1600, quality = 0.86) {
   })
 }
 
+function withTimeout(promise, ms, label) {
+  let timer
+  return Promise.race([
+    promise,
+    new Promise((_, reject) => {
+      timer = window.setTimeout(() => reject(new Error(`${label}超时`)), ms)
+    }),
+  ]).finally(() => window.clearTimeout(timer))
+}
+
 export default function PublishDialog({ open, onOpenChange, initialType = 'listing', onPublished, language = 'zh-CN' }) {
   const [type, setType] = useState(initialType)
   const [form, setForm] = useState(INITIAL_FORM)
@@ -80,6 +90,7 @@ export default function PublishDialog({ open, onOpenChange, initialType = 'listi
   const [error, setError] = useState('')
   const [previewOpen, setPreviewOpen] = useState(false)
   const [previewIndex, setPreviewIndex] = useState(0)
+  const submitLock = useRef(false)
 
   const t = (key, fallback = '') => translate(language, key, fallback)
 
@@ -103,8 +114,21 @@ export default function PublishDialog({ open, onOpenChange, initialType = 'listi
     }
   }, [language, type])
 
+  // Reset stuck "发布中" when dialog opens/closes
   useEffect(() => {
-    if (open) setType(initialType)
+    if (open) {
+      setType(initialType)
+      setSubmitting(false)
+      submitLock.current = false
+      setError('')
+      setForm((current) => ({
+        ...current,
+        desiredTime: current.desiredTime || defaultDesiredTime(1),
+      }))
+    } else {
+      setSubmitting(false)
+      submitLock.current = false
+    }
   }, [initialType, open])
 
   const update = (field) => (event) => {
@@ -123,8 +147,19 @@ export default function PublishDialog({ open, onOpenChange, initialType = 'listi
     setForm((current) => ({ ...current, images: current.images.filter((_, itemIndex) => itemIndex !== index) }))
   }
 
+  const safeGeocode = async (address) => {
+    try {
+      const { geocodeAddress } = await import('@/lib/amap')
+      return await withTimeout(geocodeAddress(address, '南通', 5000), 7000, '地址解析')
+    } catch {
+      return null
+    }
+  }
+
   const submit = async (event) => {
     event.preventDefault()
+    if (submitLock.current || submitting) return
+
     if (!form.description.trim() || (type !== 'community' && !form.title.trim())) {
       setError(t('publish.error.incomplete', '请把标题和内容补充完整'))
       return
@@ -133,61 +168,63 @@ export default function PublishDialog({ open, onOpenChange, initialType = 'listi
       setError(t('publish.error.amount', '金额不能超过 999999.99 元'))
       return
     }
+    if (type === 'service' && (!form.pickup?.trim() || !form.location?.trim())) {
+      setError('请填写取货/物品地址和送达门牌地址')
+      return
+    }
+
+    submitLock.current = true
     setSubmitting(true)
     setError('')
+
     try {
       let response
       if (type === 'service') {
-        if (!form.pickup?.trim() || !form.location?.trim()) {
-          setError('请填写取货/物品地址和送达门牌地址')
-          setSubmitting(false)
-          return
-        }
-        let pickupGeo = null
-        let deliveryGeo = null
-        try {
-          const { geocodeAddress } = await import('@/lib/amap')
-          ;[pickupGeo, deliveryGeo] = await Promise.all([
-            geocodeAddress(form.pickup.trim()),
-            geocodeAddress(form.location.trim()),
-          ])
-        } catch (geoError) {
-          // Keep publishing even if geocode fails; map will use school fallback.
-          console.warn('geocode failed', geoError)
-        }
-        response = await createServiceTask({
-          task_type: form.taskType || 'errand',
-          title: form.title,
-          description: form.description,
-          reward: Number(form.price || 1),
-          pickup_location: form.pickup.trim(),
-          delivery_location: form.location.trim(),
-          pickup_latitude: pickupGeo?.lat ?? null,
-          pickup_longitude: pickupGeo?.lng ?? null,
-          delivery_latitude: deliveryGeo?.lat ?? null,
-          delivery_longitude: deliveryGeo?.lng ?? null,
-          latitude: pickupGeo?.lat ?? deliveryGeo?.lat ?? null,
-          longitude: pickupGeo?.lng ?? deliveryGeo?.lng ?? null,
-          desired_delivery_at: form.desiredTime ? new Date(form.desiredTime).toISOString() : null,
-          image_url: form.images[0] || null,
-        })
+        // Geocode with hard timeout so publish never hangs on "发布中"
+        const [pickupGeo, deliveryGeo] = await Promise.all([
+          safeGeocode(form.pickup.trim()),
+          safeGeocode(form.location.trim()),
+        ])
+
+        response = await withTimeout(
+          createServiceTask({
+            task_type: form.taskType || 'errand',
+            title: form.title,
+            description: form.description,
+            reward: Number(form.price || 1),
+            pickup_location: form.pickup.trim(),
+            delivery_location: form.location.trim(),
+            pickup_latitude: pickupGeo?.lat ?? null,
+            pickup_longitude: pickupGeo?.lng ?? null,
+            delivery_latitude: deliveryGeo?.lat ?? null,
+            delivery_longitude: deliveryGeo?.lng ?? null,
+            latitude: pickupGeo?.lat ?? deliveryGeo?.lat ?? null,
+            longitude: pickupGeo?.lng ?? deliveryGeo?.lng ?? null,
+            desired_delivery_at: form.desiredTime
+              ? new Date(form.desiredTime).toISOString()
+              : new Date(defaultDesiredTime(1)).toISOString(),
+            image_url: form.images[0] || null,
+          }),
+          20000,
+          '发布请求',
+        )
       } else if (type === 'wanted') {
-        response = await createWantedPost({
+        response = await withTimeout(createWantedPost({
           title: form.title,
           description: form.description,
           budget_max: form.price ? Number(form.price) : null,
           location_name: form.location,
           image_url: form.images[0] || null,
-        })
+        }), 20000, '发布请求')
       } else if (type === 'community') {
-        response = await createCommunityPost({
+        response = await withTimeout(createCommunityPost({
           title: form.title || null,
           content: form.description,
           topic: form.topic || '校园生活',
           image_url: form.images[0] || null,
-        })
+        }), 20000, '发布请求')
       } else {
-        response = await createListing({
+        response = await withTimeout(createListing({
           title: form.title,
           description: form.description,
           price: Number(form.price || 1),
@@ -195,15 +232,23 @@ export default function PublishDialog({ open, onOpenChange, initialType = 'listi
           condition: 'good',
           location_name: form.location,
           image_urls: form.images,
-        })
+        }), 20000, '发布请求')
       }
-      setForm(INITIAL_FORM)
+
+      setForm({ ...INITIAL_FORM, desiredTime: defaultDesiredTime(1) })
+      setSubmitting(false)
+      submitLock.current = false
       onOpenChange(false)
       onPublished?.(response || { message: t('publish.success', '发布成功，已经出现在校园信息流中') })
     } catch (publishError) {
-      setError(publishError.response?.data?.detail || t('publish.fail', '发布失败，请确认后端服务已启动'))
-    } finally {
+      const detail = publishError?.response?.data?.detail
+      setError(
+        typeof detail === 'string'
+          ? detail
+          : publishError?.message || t('publish.fail', '发布失败，请确认后端服务已启动'),
+      )
       setSubmitting(false)
+      submitLock.current = false
     }
   }
 
@@ -213,8 +258,16 @@ export default function PublishDialog({ open, onOpenChange, initialType = 'listi
       ? t('publish.budget')
       : t('publish.price')
 
+  const handleOpenChange = (next) => {
+    if (!next) {
+      setSubmitting(false)
+      submitLock.current = false
+    }
+    onOpenChange(next)
+  }
+
   return (
-    <Dialog open={open} onOpenChange={onOpenChange}>
+    <Dialog open={open} onOpenChange={handleOpenChange}>
       <DialogContent className="publish-dialog sm:max-w-[620px]">
         <DialogHeader>
           <DialogTitle className="flex items-center gap-2">
@@ -234,6 +287,7 @@ export default function PublishDialog({ open, onOpenChange, initialType = 'listi
                     type="button"
                     className={cn(type === item.id && 'is-active')}
                     onClick={() => setType(item.id)}
+                    disabled={submitting}
                   >
                     <Icon />
                     {item.label}
@@ -251,6 +305,7 @@ export default function PublishDialog({ open, onOpenChange, initialType = 'listi
                   value={form.title}
                   onChange={update('title')}
                   placeholder={hints.title}
+                  disabled={submitting}
                 />
               </Field>
               <Field>
@@ -261,12 +316,13 @@ export default function PublishDialog({ open, onOpenChange, initialType = 'listi
                   onChange={update('description')}
                   placeholder={hints.description}
                   rows={4}
+                  disabled={submitting}
                 />
               </Field>
               {type === 'community' ? (
                 <Field>
                   <FieldLabel htmlFor="publish-topic">{t('publish.topic')}</FieldLabel>
-                  <select id="publish-topic" className="publish-topic-select" value={form.topic} onChange={update('topic')}>
+                  <select id="publish-topic" className="publish-topic-select" value={form.topic} onChange={update('topic')} disabled={submitting}>
                     {topics.map((topic) => (
                       <option key={topic.value} value={topic.value}>#{topic.label}</option>
                     ))}
@@ -278,7 +334,7 @@ export default function PublishDialog({ open, onOpenChange, initialType = 'listi
                 <label className="publish-image-picker">
                   <ImagePlus />
                   <span>{t('publish.uploadHint')}</span>
-                  <input hidden type="file" accept="image/*" multiple onChange={addImages} />
+                  <input hidden type="file" accept="image/*" multiple onChange={addImages} disabled={submitting} />
                 </label>
                 {form.images.length ? (
                   <div className="publish-image-grid">
@@ -316,6 +372,7 @@ export default function PublishDialog({ open, onOpenChange, initialType = 'listi
                           type="button"
                           className={cn(form.taskType === item.id && 'is-active')}
                           onClick={() => setForm((current) => ({ ...current, taskType: item.id }))}
+                          disabled={submitting}
                         >
                           {item.label}
                         </button>
@@ -329,6 +386,7 @@ export default function PublishDialog({ open, onOpenChange, initialType = 'listi
                       value={form.pickup}
                       onChange={update('pickup')}
                       placeholder="快递站/外卖店；代购可填「山姆」"
+                      disabled={submitting}
                     />
                   </Field>
                   <Field>
@@ -338,31 +396,29 @@ export default function PublishDialog({ open, onOpenChange, initialType = 'listi
                       value={form.location}
                       onChange={update('location')}
                       placeholder="例如：南通理工学院西区 7 栋 502"
+                      disabled={submitting}
                     />
                   </Field>
-                  <div className="grid gap-4 sm:grid-cols-2">
-                    <Field>
-                      <FieldLabel htmlFor="publish-price">{priceLabel}</FieldLabel>
-                      <Input
-                        id="publish-price"
-                        type="number"
-                        min="1"
-                        max={MAX_CAMPUS_AMOUNT}
-                        value={form.price}
-                        onChange={update('price')}
-                        placeholder={hints.price}
-                      />
-                    </Field>
-                    <Field>
-                      <FieldLabel htmlFor="publish-desired">期望送达时间</FieldLabel>
-                      <Input
-                        id="publish-desired"
-                        type="datetime-local"
-                        value={form.desiredTime}
-                        onChange={update('desiredTime')}
-                      />
-                    </Field>
-                  </div>
+                  <Field>
+                    <FieldLabel htmlFor="publish-price">{priceLabel}</FieldLabel>
+                    <Input
+                      id="publish-price"
+                      type="number"
+                      min="1"
+                      max={MAX_CAMPUS_AMOUNT}
+                      value={form.price}
+                      onChange={update('price')}
+                      placeholder={hints.price}
+                      disabled={submitting}
+                    />
+                  </Field>
+                  <Field>
+                    <FieldLabel>期望送达时间</FieldLabel>
+                    <DesiredTimePicker
+                      value={form.desiredTime || defaultDesiredTime(1)}
+                      onChange={(desiredTime) => setForm((current) => ({ ...current, desiredTime }))}
+                    />
+                  </Field>
                 </>
               ) : null}
               {type !== 'community' && type !== 'service' ? (
@@ -377,6 +433,7 @@ export default function PublishDialog({ open, onOpenChange, initialType = 'listi
                       value={form.price}
                       onChange={update('price')}
                       placeholder={hints.price}
+                      disabled={submitting}
                     />
                   </Field>
                   <Field>
@@ -386,6 +443,7 @@ export default function PublishDialog({ open, onOpenChange, initialType = 'listi
                       value={form.location}
                       onChange={update('location')}
                       placeholder={hints.location}
+                      disabled={submitting}
                     />
                   </Field>
                 </div>
@@ -394,7 +452,7 @@ export default function PublishDialog({ open, onOpenChange, initialType = 'listi
             {error ? <p className="publish-error" role="alert">{error}</p> : null}
           </div>
           <DialogFooter className="mt-4">
-            <Button type="button" variant="outline" onClick={() => onOpenChange(false)}>
+            <Button type="button" variant="outline" onClick={() => handleOpenChange(false)} disabled={submitting}>
               {t('publish.cancel')}
             </Button>
             <Button type="submit" disabled={submitting}>

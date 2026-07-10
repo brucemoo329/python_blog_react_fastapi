@@ -103,18 +103,47 @@ export function suggestTravelMode(meters) {
   return 'drive'
 }
 
-export function geocodeAddress(address, city = '南通') {
-  return loadAMap().then((AMap) => new Promise((resolve, reject) => {
+function withTimeout(promise, ms, label = '操作') {
+  let timer
+  const timeout = new Promise((_, reject) => {
+    timer = window.setTimeout(() => reject(new Error(`${label}超时，请检查网络后重试`)), ms)
+  })
+  return Promise.race([promise, timeout]).finally(() => window.clearTimeout(timer))
+}
+
+/** Known campus coords fallback when geocode is slow/unavailable. */
+const SCHOOL_FALLBACKS = {
+  南通理工学院: [120.809261, 32.041042],
+  南通理工学院南通校区: [120.809261, 32.041042],
+  南通理工学院海安校区: [120.4675, 32.5458],
+}
+
+export function schoolFallbackLngLat(schoolName) {
+  if (!schoolName) return SCHOOL_FALLBACKS['南通理工学院']
+  if (SCHOOL_FALLBACKS[schoolName]) return SCHOOL_FALLBACKS[schoolName]
+  const hit = Object.keys(SCHOOL_FALLBACKS).find((key) => schoolName.includes(key) || key.includes(schoolName))
+  return hit ? SCHOOL_FALLBACKS[hit] : SCHOOL_FALLBACKS['南通理工学院']
+}
+
+export function geocodeAddress(address, city = '南通', timeoutMs = 6000) {
+  const work = loadAMap().then((AMap) => new Promise((resolve, reject) => {
     if (!address?.trim()) {
       reject(new Error('地址为空'))
       return
     }
-    const geocoder = new AMap.Geocoder({ city, radius: 2000 })
+    let settled = false
+    const done = (fn, value) => {
+      if (settled) return
+      settled = true
+      fn(value)
+    }
+
+    const geocoder = new AMap.Geocoder({ city, radius: 5000 })
     geocoder.getLocation(address, (status, result) => {
       if (status === 'complete' && result?.geocodes?.length) {
         const g = result.geocodes[0]
         const location = g.location
-        resolve({
+        done(resolve, {
           lng: location.lng,
           lat: location.lat,
           formatted: g.formattedAddress || address,
@@ -123,22 +152,59 @@ export function geocodeAddress(address, city = '南通') {
         return
       }
       // Place search fallback for short names like "山姆"
-      const place = new AMap.PlaceSearch({ city, pageSize: 1 })
-      place.search(address, (pStatus, pResult) => {
-        const poi = pResult?.poiList?.pois?.[0]
-        if (pStatus === 'complete' && poi?.location) {
-          resolve({
-            lng: poi.location.lng,
-            lat: poi.location.lat,
-            formatted: poi.name || address,
-            raw: poi,
-          })
-          return
-        }
-        reject(new Error(`无法解析地址：${address}`))
-      })
+      try {
+        const place = new AMap.PlaceSearch({ city, pageSize: 1 })
+        place.search(address, (pStatus, pResult) => {
+          const poi = pResult?.poiList?.pois?.[0]
+          if (pStatus === 'complete' && poi?.location) {
+            done(resolve, {
+              lng: poi.location.lng,
+              lat: poi.location.lat,
+              formatted: poi.name || address,
+              raw: poi,
+            })
+            return
+          }
+          // School name fallback
+          const fb = schoolFallbackLngLat(address)
+          if (fb && /学院|大学|学校|校区/.test(address)) {
+            done(resolve, { lng: fb[0], lat: fb[1], formatted: address, approximate: true })
+            return
+          }
+          done(reject, new Error(`无法解析地址：${address}`))
+        })
+      } catch (error) {
+        done(reject, error)
+      }
     })
   }))
+
+  return withTimeout(work, timeoutMs, '地址解析').catch((error) => {
+    const fb = schoolFallbackLngLat(address)
+    if (fb && /学院|大学|学校|校区|山姆|快递|食堂/.test(address || '')) {
+      return { lng: fb[0], lat: fb[1], formatted: address, approximate: true, fallback: true }
+    }
+    throw error
+  })
+}
+
+/** Geocode school and never hang — always resolves with a lng/lat. */
+export function resolveSchoolLocation(schoolName, timeoutMs = 5000) {
+  const name = schoolName || '南通理工学院'
+  const fallback = schoolFallbackLngLat(name)
+  return geocodeAddress(name, '南通', timeoutMs)
+    .then((geo) => ({
+      lng: geo.lng,
+      lat: geo.lat,
+      name,
+      approximate: Boolean(geo.approximate || geo.fallback),
+    }))
+    .catch(() => ({
+      lng: fallback[0],
+      lat: fallback[1],
+      name,
+      approximate: true,
+    }))
 }
 
 /**
