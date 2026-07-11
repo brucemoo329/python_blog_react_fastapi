@@ -15,6 +15,10 @@
    top = two liquid-glass pills on sides
    scroll = crossfade + scale into one full GlassSurface bar */
 .landing-header {
+  /* Soft ink on frosted glass — readable over dark hero and light page, not pure white */
+  --header-text: rgba(28, 58, 54, 0.78);
+  --header-text-muted: rgba(28, 58, 54, 0.56);
+  --header-text-strong: rgba(24, 57, 54, 0.92);
   --m: 0;
   position: fixed;
   top: 14px;
@@ -25,6 +29,27 @@
   height: 70px;
   margin: 0 auto;
   pointer-events: none;
+}
+
+/* Brand / nav / login: soft dark teal instead of white */
+.landing-header .campus-brand.is-inverted {
+  color: var(--header-text-strong);
+}
+
+.landing-header .campus-brand.is-inverted .campus-brand__copy small {
+  color: var(--header-text-muted);
+}
+
+.landing-header .rb-gooey-nav li {
+  color: var(--header-text-muted);
+}
+
+.landing-header .rb-gooey-nav li.is-active {
+  color: var(--header-text-strong);
+}
+
+.landing-header .rb-gooey-nav li:hover {
+  color: var(--header-text);
 }
 
 .landing-header__split,
@@ -168,12 +193,12 @@
 }
 
 .landing-language-switcher {
-  color: rgba(255, 255, 255, 0.9);
+  color: var(--header-text, rgba(28, 58, 54, 0.78));
 }
 
 .landing-language-switcher:hover {
-  background: rgba(255, 255, 255, 0.13);
-  color: #fff;
+  background: rgba(24, 57, 54, 0.07);
+  color: var(--header-text-strong, rgba(24, 57, 54, 0.92));
 }
 
 .landing-link-button,
@@ -194,7 +219,12 @@
   height: 40px;
   padding: 0 14px;
   background: transparent;
-  color: rgba(255, 255, 255, 0.82);
+  color: var(--header-text, rgba(28, 58, 54, 0.78));
+}
+
+.landing-link-button:hover {
+  color: var(--header-text-strong, rgba(24, 57, 54, 0.92));
+  background: rgba(24, 57, 54, 0.05);
 }
 
 .landing-solid-button {
