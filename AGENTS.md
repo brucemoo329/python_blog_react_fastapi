@@ -307,9 +307,12 @@ EMAIL_REQUIRE_CODE_ON_REGISTER=1
 - 订单申诉：`GET /marketplace/admin/appeals`、`POST /marketplace/admin/appeals/{id}/handle`（`approved` 恢复信任分 / `rejected` 驳回）
 - 客服工单：`GET /marketplace/admin/support-tickets`、`POST /marketplace/admin/support-tickets/{id}/handle`
 - 用户与处罚：`GET /marketplace/admin/users`、`PUT /marketplace/admin/users/{id}/penalties`
+- 删除账户（软删）：`DELETE /marketplace/admin/users/{id}` — `is_deleted=1`、`is_active=0`；评论等痕迹保留，头像变灰默认；主页返回「此账号已被禁用」
+- 删除记录（清除）：`DELETE /marketplace/admin/users/{id}/record` — 仅已软删用户；脱敏并 `is_purged=1`，从管理列表隐藏；订单/评论 FK 仍保留
+- 停用账户：`PUT .../penalties` 设 `is_active=false`，他人访问主页同样显示「此账号已被禁用」
 - 官方通知：`POST /marketplace/admin/notices`
-- 前端：`AdminPanel.jsx`
-- 后端：`backend/app/admin_panel.py`
+- 前端：`AdminPanel.jsx`、`PublicProfile.jsx`、`user_payload` 灰头像
+- 后端：`backend/app/admin_panel.py`、`marketplace.py`
 - 启动时自动确保管理员账号 `admin` 存在
 
 ## 数据库记录规则
@@ -393,8 +396,9 @@ EMAIL_REQUIRE_CODE_ON_REGISTER=1
 
 ### users 管理字段
 
-- 新增：`is_admin`、`can_comment`、`can_post`、`ban_reason`
-- 使用 API：登录返回、管理后台处罚、发帖/评论权限校验
+- 字段：`is_admin`、`can_comment`、`can_post`、`ban_reason`、`is_deleted`、`is_purged`、`is_active`
+- 使用 API：登录返回、管理后台处罚/删除/清除记录、发帖/评论权限校验
+- 展示规则：停用或删除后 `user_payload` 不返回真实头像（灰默认头像）；公开主页 `account_disabled=true` 文案「此账号已被禁用」
 
 ### marketplace_orders 扩展
 
