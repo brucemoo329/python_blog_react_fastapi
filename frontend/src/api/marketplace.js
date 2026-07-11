@@ -1,15 +1,15 @@
 import request from './request'
 
-export function getMarketplaceFeed(params) {
-  return request.get('/marketplace/feed', { params })
-}
-
 export function getInboxUnread() {
   return request.get('/marketplace/inbox/unread')
 }
 
-export function getMarketplaceSummary() {
-  return request.get('/marketplace/summary')
+export function getMarketplaceSummary(params = {}) {
+  return request.get('/marketplace/summary', { params, timeout: 15000 })
+}
+
+export function getMarketplaceFeed(params) {
+  return request.get('/marketplace/feed', { params, timeout: 20000 })
 }
 
 export function getMapTasks() {

@@ -454,23 +454,46 @@ export default function MarketplaceHome({ user, onLogout, onUserUpdate }) {
   const loadData = useCallback(async () => {
     setLoading(true)
     try {
-      const [feedResponse, taskResponse, summaryResponse] = await Promise.all([
+      // Do not wipe the page if one of three requests fails/timeouts
+      const [feedSettled, taskSettled, summarySettled] = await Promise.allSettled([
         getMarketplaceFeed({ kind: filter === 'all' ? 'all' : filter, search, topic: topicFilter }),
         getMapTasks(),
-        getMarketplaceSummary(),
+        getMarketplaceSummary({ light: 1 }),
       ])
-      const items = feedResponse.items || []
-      setFeed(items)
-      setTasks(taskResponse || [])
-      setSummary((current) => ({ ...current, ...summaryResponse }))
-      setSavedKeys(new Set(items.filter((item) => item.favorited).map(itemKey)))
-      if (summaryResponse.profile) {
-        setCurrentUser((current) => ({ ...current, profile: { ...(current?.profile || {}), ...summaryResponse.profile }, trust: summaryResponse.trust || current?.trust }))
-        if (summaryResponse.profile.school) setCampus(summaryResponse.profile.school)
+      const errors = []
+      if (feedSettled.status === 'fulfilled') {
+        const items = feedSettled.value?.items || []
+        setFeed(items)
+        setSavedKeys(new Set(items.filter((item) => item.favorited).map(itemKey)))
+      } else {
+        errors.push('信息流')
+      }
+      if (taskSettled.status === 'fulfilled') {
+        setTasks(taskSettled.value || [])
+      } else {
+        errors.push('雷达')
+      }
+      if (summarySettled.status === 'fulfilled') {
+        const summaryResponse = summarySettled.value || {}
+        setSummary((current) => ({ ...current, ...summaryResponse }))
+        if (summaryResponse.profile) {
+          setCurrentUser((current) => ({
+            ...current,
+            profile: { ...(current?.profile || {}), ...summaryResponse.profile },
+            trust: summaryResponse.trust || current?.trust,
+          }))
+          if (summaryResponse.profile.school) setCampus(summaryResponse.profile.school)
+        }
+      } else {
+        errors.push('摘要')
+      }
+      if (errors.length === 3) {
+        setNotice('校园数据加载失败，请稍后重试')
+      } else if (errors.length) {
+        setNotice(`${errors.join('、')}加载较慢，已显示可用内容`)
       }
     } catch (error) {
-      setFeed([])
-      setTasks([])
+      // Keep existing feed/tasks so the home page does not "disappear"
       setNotice(error.response?.data?.detail || '校园数据加载失败，请稍后重试')
     } finally {
       setLoading(false)

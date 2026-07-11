@@ -915,18 +915,20 @@ def messages_payload_batch(db: Session, messages: list, current_user_id: int, *,
 
 
 def listing_payload(listing):
+    raw_image = listing.images[0].image_url if listing.images else None
     return {
         "id": listing.id,
         "type": "game" if listing.trade_type == "digital" else "listing",
         "title": listing.title,
-        "description": listing.description,
+        "description": safe_text(listing.description, 280),
         "price": float(listing.price),
         "original_price": float(listing.original_price) if listing.original_price else None,
         "condition": listing.condition,
         "trade_type": listing.trade_type,
         "status": listing.status,
         "location": listing.location_name,
-        "image_url": listing.images[0].image_url if listing.images else None,
+        "image_url": safe_media_url(raw_image),
+        "has_image": bool(raw_image),
         "seller": user_payload(listing.seller),
         "school": listing.campus,
         "view_count": listing.view_count or 0,
@@ -967,6 +969,25 @@ def trust_grade(score: int):
     if score >= 480:
         return "观察中"
     return "需谨慎"
+
+
+def safe_media_url(url, *, max_len: int = 800) -> Optional[str]:
+    """Never put multi-MB base64 blobs into list/feed/order cards (kills 2GB servers)."""
+    if not url:
+        return None
+    text = str(url)
+    if text.startswith("data:"):
+        return None
+    if len(text) > max_len:
+        return None
+    return text
+
+
+def safe_text(value, max_len: int = 240) -> str:
+    if value is None:
+        return ""
+    text = str(value)
+    return text if len(text) <= max_len else text[:max_len] + "…"
 
 
 def compute_trust(db: Session, user_id: int):
@@ -1074,7 +1095,7 @@ def compact_order_payload(order, role: str):
         "amount": float(order.amount),
         "status": order.status,
         "status_label": status_label,
-        "image_url": image_url,
+        "image_url": safe_media_url(image_url),
         "listing_id": order.listing_id,
         "service_task_id": order.service_task_id,
         "delivery_method": order.delivery_method,
@@ -1688,7 +1709,8 @@ def get_feed(
                 "delivery_location": task.delivery_location,
                 "location": task.delivery_location,
                 "desired_delivery_at": task.desired_delivery_at or task.deadline,
-                "image_url": task.image_url,
+                "image_url": safe_media_url(task.image_url),
+                "has_image": bool(task.image_url),
                 "latitude": float(task.latitude) if task.latitude is not None else None,
                 "longitude": float(task.longitude) if task.longitude is not None else None,
                 "pickup_latitude": float(task.pickup_latitude) if task.pickup_latitude is not None else None,
@@ -1719,12 +1741,13 @@ def get_feed(
                 "id": wanted.id,
                 "type": "wanted",
                 "title": wanted.title,
-                "description": wanted.description,
+                "description": safe_text(wanted.description, 280),
                 "budget_min": float(wanted.budget_min) if wanted.budget_min else None,
                 "budget_max": float(wanted.budget_max) if wanted.budget_max else None,
                 "location": wanted.location_name,
                 "status": wanted.status,
-                "image_url": wanted.image_url,
+                "image_url": safe_media_url(wanted.image_url),
+                "has_image": bool(wanted.image_url),
                 "author": user_payload(wanted.user),
                 "school": wanted.user.profile.school if wanted.user.profile else None,
                 "created_at": wanted.created_at,
@@ -1750,11 +1773,12 @@ def get_feed(
                 "id": post.id,
                 "type": "community",
                 "title": post.title,
-                "description": post.content,
+                "description": safe_text(post.content, 280),
                 "topic": post.topic,
-                "image_url": post.image_url,
-                "like_count": post.like_count,
-                "comment_count": post.comment_count,
+                "image_url": safe_media_url(post.image_url),
+                "has_image": bool(post.image_url),
+                "like_count": post.like_count or 0,
+                "comment_count": post.comment_count or 0,
                 "source": {
                     "type": post.source_type,
                     "id": post.source_id,
@@ -1774,13 +1798,71 @@ def get_feed(
         -(item["created_at"].timestamp() if item.get("created_at") else 0),
     ))
     result = items[:50]
+    # Feed metrics: few batched queries instead of content_metrics N+1 (was 4+ queries × 50)
+    target_keys = [(item["type"], item["id"]) for item in result]
+    my_react_map = {}
+    like_map = {}
+    dislike_map = {}
+    if target_keys:
+        from functools import reduce
+        import operator
+        or_filters = [
+            ((models.ContentReaction.target_type == t) & (models.ContentReaction.target_id == i))
+            for t, i in target_keys
+        ]
+        cond = reduce(operator.or_, or_filters)
+        for t, i, rtype, cnt in (
+            db.query(
+                models.ContentReaction.target_type,
+                models.ContentReaction.target_id,
+                models.ContentReaction.reaction_type,
+                func.count(models.ContentReaction.id),
+            )
+            .filter(cond)
+            .group_by(
+                models.ContentReaction.target_type,
+                models.ContentReaction.target_id,
+                models.ContentReaction.reaction_type,
+            )
+            .all()
+        ):
+            if rtype == "like":
+                like_map[(t, i)] = int(cnt)
+            elif rtype == "dislike":
+                dislike_map[(t, i)] = int(cnt)
+        for row in db.query(models.ContentReaction).filter(
+            models.ContentReaction.user_id == user.id,
+            cond,
+        ).all():
+            my_react_map[(row.target_type, row.target_id)] = row.reaction_type
+    author_ids = {
+        (item.get("seller") or item.get("author") or item.get("requester") or {}).get("id")
+        for item in result
+    }
+    author_ids.discard(None)
+    author_ids.discard(0)
+    following_ids = set()
+    if author_ids:
+        following_ids = {
+            row.following_id
+            for row in db.query(models.UserFollow.following_id).filter(
+                models.UserFollow.follower_id == user.id,
+                models.UserFollow.following_id.in_(author_ids),
+            ).all()
+        }
     for item in result:
-        item.update(content_metrics(db, user.id, item["type"], item["id"]))
-        item["author_is_followed"] = is_following(
-            db,
-            user.id,
-            (item.get("seller") or item.get("author") or {}).get("id", 0),
-        )
+        key = (item["type"], item["id"])
+        my_r = my_react_map.get(key)
+        likes = int(item.get("like_count") or like_map.get(key) or 0)
+        dislikes = int(item.get("dislike_count") or dislike_map.get(key) or 0)
+        item["reaction"] = {"likes": likes, "dislikes": dislikes, "my_reaction": my_r}
+        item["like_count"] = likes
+        item["dislike_count"] = dislikes
+        item.setdefault("comment_count", int(item.get("comment_count") or 0))
+        item.setdefault("repost_count", 0)
+        item.setdefault("favorited", False)
+        owner_id = (item.get("seller") or item.get("author") or item.get("requester") or {}).get("id")
+        item["author_is_followed"] = bool(owner_id and owner_id in following_ids)
     return {"items": result, "total": len(items)}
 
 
@@ -2702,11 +2784,14 @@ def get_inbox_unread(
 
 @router.get("/summary")
 def get_summary(
+    light: int = Query(default=0, ge=0, le=1),
     db: Session = Depends(get_db),
     user: models.User = Depends(get_current_user),
 ):
+    """Homepage summary. light=1 skips nearby users / topic heavy queries."""
     profile = ensure_user_profile(db, user)
     trust = compute_trust(db, user.id)
+    # Unread via same cheap path as /inbox/unread
     conversation_ids = [
         row.id for row in db.query(models.Conversation.id).filter(
             or_(models.Conversation.user_a_id == user.id, models.Conversation.user_b_id == user.id)
@@ -2720,6 +2805,30 @@ def get_summary(
             models.Message.is_read.is_(False),
         ).count()
 
+    if light:
+        return {
+            "profile": {
+                "nickname": profile.nickname or user.username,
+                "avatar_url": safe_media_url(profile.avatar_url),
+                "school": profile.school,
+                "language": profile.language,
+                "signature": profile.signature,
+            },
+            "trust": trust,
+            "unread_messages": int(unread_messages),
+            "unread_notifications": db.query(func.count(models.Notification.id)).filter(
+                models.Notification.recipient_id == user.id,
+                models.Notification.is_read.is_(False),
+            ).scalar() or 0,
+            "topics": [],
+            "nearby_users": [],
+            "active_errands": [],
+            "active_listings": 0,
+            "open_tasks": 0,
+            "community_posts": 0,
+            "my_orders": 0,
+        }
+
     topics = [
         {"name": name, "count": int(count)}
         for name, count in db.query(
@@ -2731,10 +2840,10 @@ def get_summary(
 
     publisher_ids = []
     publisher_queries = [
-        db.query(models.Listing.seller_id).order_by(models.Listing.created_at.desc()).limit(30).all(),
-        db.query(models.ServiceTask.requester_id).order_by(models.ServiceTask.created_at.desc()).limit(30).all(),
-        db.query(models.WantedPost.user_id).order_by(models.WantedPost.created_at.desc()).limit(30).all(),
-        db.query(models.CommunityPost.author_id).order_by(models.CommunityPost.created_at.desc()).limit(30).all(),
+        db.query(models.Listing.seller_id).order_by(models.Listing.created_at.desc()).limit(12).all(),
+        db.query(models.ServiceTask.requester_id).order_by(models.ServiceTask.created_at.desc()).limit(12).all(),
+        db.query(models.WantedPost.user_id).order_by(models.WantedPost.created_at.desc()).limit(12).all(),
+        db.query(models.CommunityPost.author_id).order_by(models.CommunityPost.created_at.desc()).limit(12).all(),
     ]
     for rows in publisher_queries:
         for row in rows:
@@ -2747,7 +2856,7 @@ def get_summary(
             models.UserModeration.action == "block",
         ).all()
     }
-    publisher_ids = [candidate_id for candidate_id in publisher_ids if candidate_id not in hidden_ids]
+    publisher_ids = [candidate_id for candidate_id in publisher_ids if candidate_id not in hidden_ids][:12]
     nearby_users = []
     if publisher_ids:
         users = db.query(models.User).options(joinedload(models.User.profile)).filter(
@@ -3712,8 +3821,9 @@ def list_my_orders(
     db: Session = Depends(get_db),
     user: models.User = Depends(get_current_user),
 ):
+    # Avoid joinedload listing.images (LONGTEXT base64) — order cards use safe_media_url only
     query = db.query(models.Order).options(
-        joinedload(models.Order.listing).joinedload(models.Listing.images),
+        joinedload(models.Order.listing),
         joinedload(models.Order.service_task),
         joinedload(models.Order.buyer).joinedload(models.User.profile),
         joinedload(models.Order.seller).joinedload(models.User.profile),

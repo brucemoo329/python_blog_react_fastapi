@@ -34,6 +34,7 @@ services:
     restart: unless-stopped
     environment:
       DATABASE_URL: ${DATABASE_URL:?请在 .env 中设置 DATABASE_URL}
+      UVICORN_WORKERS: ${UVICORN_WORKERS:-2}
       TZ: Asia/Shanghai
       # 邮箱验证码（QQ/Gmail/Outlook 等任意邮箱）：配置 SMTP 后真实发信
       SMTP_HOST: ${SMTP_HOST:-}

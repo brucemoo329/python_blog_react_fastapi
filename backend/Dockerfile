@@ -16,4 +16,6 @@ COPY seed_marketplace.py .
 
 EXPOSE 8000
 
-CMD ["uvicorn", "app.main:app", "--host", "0.0.0.0", "--port", "8000"]
+# Two workers make independent requests (feed, chat and admin) progress in parallel
+# on the server's two vCPUs. Override UVICORN_WORKERS in .env when resizing.
+CMD ["sh", "-c", "uvicorn app.main:app --host 0.0.0.0 --port 8000 --workers ${UVICORN_WORKERS:-2} --timeout-keep-alive 10"]
