@@ -163,7 +163,8 @@ export default function ChatThread({
     setShopOpen(false)
     setLoading(true)
     refresh(false)
-    const timer = window.setInterval(() => refresh(true), 5000)
+    // Silent poll every 6s; avoid stacking with parent conversation list refresh
+    const timer = window.setInterval(() => refresh(true), 6000)
     return () => window.clearInterval(timer)
   }, [conversation?.id, refresh])
 

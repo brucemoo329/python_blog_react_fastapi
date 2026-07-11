@@ -776,34 +776,112 @@ def find_or_create_conversation(
     return conversation
 
 
-def message_payload(db: Session, message: models.Message, current_user_id: int):
+def _message_content_preview(message: models.Message, max_len: int = 120) -> str:
+    """Avoid shipping multi-MB base64 images into list payloads."""
+    content = message.content or ""
+    mtype = message.message_type or "text"
+    if mtype == "image" or content.startswith("data:image"):
+        return "[图片]"
+    if mtype == "product":
+        return content[:max_len] if content else "[商品卡片]"
+    if mtype == "order":
+        return content[:max_len] if content else "[订单卡片]"
+    if mtype == "location":
+        return content[:max_len] if content else "[位置]"
+    if len(content) > max_len:
+        return content[:max_len] + "…"
+    return content
+
+
+def build_message_reaction_maps(db: Session, message_ids: list, current_user_id: int):
+    """Batch-load reactions for many messages (avoids N+1)."""
+    reaction_map: dict = {}
+    my_map: dict = {}
+    if not message_ids:
+        return reaction_map, my_map
+    rows = (
+        db.query(
+            models.MessageReaction.message_id,
+            models.MessageReaction.emoji,
+            func.count(models.MessageReaction.id),
+        )
+        .filter(models.MessageReaction.message_id.in_(message_ids))
+        .group_by(models.MessageReaction.message_id, models.MessageReaction.emoji)
+        .all()
+    )
+    for mid, emoji, count in rows:
+        reaction_map.setdefault(mid, []).append((emoji, int(count)))
+    mine = (
+        db.query(models.MessageReaction.message_id, models.MessageReaction.emoji)
+        .filter(
+            models.MessageReaction.message_id.in_(message_ids),
+            models.MessageReaction.user_id == current_user_id,
+        )
+        .all()
+    )
+    for mid, emoji in mine:
+        my_map.setdefault(mid, set()).add(emoji)
+    return reaction_map, my_map
+
+
+def message_payload(
+    db: Session,
+    message: models.Message,
+    current_user_id: int,
+    *,
+    reaction_map: Optional[dict] = None,
+    my_reaction_map: Optional[dict] = None,
+    lightweight: bool = False,
+):
     metadata = None
-    if message.metadata_json:
+    if message.metadata_json and not lightweight:
         try:
             metadata = json.loads(message.metadata_json)
         except (TypeError, ValueError):
             metadata = None
-    reaction_rows = db.query(models.MessageReaction.emoji, func.count(models.MessageReaction.id)).filter_by(
-        message_id=message.id,
-    ).group_by(models.MessageReaction.emoji).all()
-    my_reactions = {
-        row.emoji for row in db.query(models.MessageReaction).filter_by(
+
+    if lightweight:
+        reaction_rows = []
+        my_reactions = set()
+    elif reaction_map is not None:
+        reaction_rows = reaction_map.get(message.id, [])
+        my_reactions = my_reaction_map.get(message.id, set()) if my_reaction_map else set()
+    else:
+        reaction_rows = db.query(models.MessageReaction.emoji, func.count(models.MessageReaction.id)).filter_by(
             message_id=message.id,
-            user_id=current_user_id,
-        ).all()
-    }
+        ).group_by(models.MessageReaction.emoji).all()
+        my_reactions = {
+            row.emoji for row in db.query(models.MessageReaction).filter_by(
+                message_id=message.id,
+                user_id=current_user_id,
+            ).all()
+        }
+
     reply = None
-    if message.reply_to:
+    if message.reply_to and not lightweight:
+        reply_content = message.reply_to.content or ""
+        if reply_content.startswith("data:image") or (message.reply_to.message_type or "") == "image":
+            reply_content = "[图片]"
+        else:
+            reply_content = reply_content[:160]
         reply = {
             "id": message.reply_to.id,
-            "content": message.reply_to.content[:160],
-            "sender": user_payload(message.reply_to.sender),
+            "content": reply_content,
+            "sender": user_payload(message.reply_to.sender) if message.reply_to.sender else None,
         }
+
+    content = message.content
+    if lightweight:
+        content = _message_content_preview(message, 120)
+    elif content and content.startswith("data:image") and (message.message_type or "text") == "image":
+        # Keep full image in thread; list endpoints use lightweight=True
+        pass
+
     return {
         "id": message.id,
         "conversation_id": message.conversation_id,
-        "sender": user_payload(message.sender),
-        "content": message.content,
+        "sender": user_payload(message.sender) if message.sender else None,
+        "content": content,
         "message_type": message.message_type or "text",
         "metadata": metadata,
         "reply_to": reply,
@@ -815,6 +893,25 @@ def message_payload(db: Session, message: models.Message, current_user_id: int):
         "created_at": message.created_at,
         "is_mine": message.sender_id == current_user_id,
     }
+
+
+def messages_payload_batch(db: Session, messages: list, current_user_id: int, *, lightweight: bool = False):
+    if not messages:
+        return []
+    reaction_map, my_map = ({}, {}) if lightweight else build_message_reaction_maps(
+        db, [m.id for m in messages], current_user_id
+    )
+    return [
+        message_payload(
+            db,
+            msg,
+            current_user_id,
+            reaction_map=reaction_map,
+            my_reaction_map=my_map,
+            lightweight=lightweight,
+        )
+        for msg in messages
+    ]
 
 
 def listing_payload(listing):
@@ -2564,6 +2661,45 @@ def share_content(
     return {"message": "已转发到校园社区", "id": post.id, "type": "community", "source_repost_count": source.get("repost_count", 0) + 1}
 
 
+@router.get("/inbox/unread")
+def get_inbox_unread(
+    db: Session = Depends(get_db),
+    user: models.User = Depends(get_current_user),
+):
+    """Lightweight poll target for message alerts — avoid full /summary cost."""
+    conversation_ids = [
+        row.id
+        for row in db.query(models.Conversation.id)
+        .filter(or_(models.Conversation.user_a_id == user.id, models.Conversation.user_b_id == user.id))
+        .all()
+    ]
+    unread_messages = 0
+    if conversation_ids:
+        unread_messages = (
+            db.query(func.count(models.Message.id))
+            .filter(
+                models.Message.conversation_id.in_(conversation_ids),
+                models.Message.sender_id != user.id,
+                models.Message.is_read.is_(False),
+            )
+            .scalar()
+            or 0
+        )
+    unread_notifications = (
+        db.query(func.count(models.Notification.id))
+        .filter(
+            models.Notification.recipient_id == user.id,
+            models.Notification.is_read.is_(False),
+        )
+        .scalar()
+        or 0
+    )
+    return {
+        "unread_messages": int(unread_messages),
+        "unread_notifications": int(unread_notifications),
+    }
+
+
 @router.get("/summary")
 def get_summary(
     db: Session = Depends(get_db),
@@ -3283,19 +3419,34 @@ def get_public_user_profile(
     }
 
 
-def conversation_payload(db: Session, conversation: models.Conversation, current_user_id: int):
+def conversation_payload(
+    db: Session,
+    conversation: models.Conversation,
+    current_user_id: int,
+    *,
+    other_user=None,
+    last_message=None,
+    unread: Optional[int] = None,
+    include_context: bool = False,
+):
+    """Build one conversation card. Prefer preloaded other_user / last_message / unread for list APIs."""
     other_id = conversation.user_b_id if conversation.user_a_id == current_user_id else conversation.user_a_id
-    other = db.query(models.User).options(joinedload(models.User.profile)).filter_by(id=other_id).first()
-    last_message = db.query(models.Message).options(
-        joinedload(models.Message.sender).joinedload(models.User.profile)
-    ).filter_by(conversation_id=conversation.id).order_by(models.Message.created_at.desc()).first()
-    unread = db.query(models.Message).filter(
-        models.Message.conversation_id == conversation.id,
-        models.Message.sender_id != current_user_id,
-        models.Message.is_read.is_(False),
-    ).count()
+    other = other_user
+    if other is None:
+        other = db.query(models.User).options(joinedload(models.User.profile)).filter_by(id=other_id).first()
+    if last_message is None:
+        last_message = db.query(models.Message).options(
+            joinedload(models.Message.sender).joinedload(models.User.profile)
+        ).filter_by(conversation_id=conversation.id).order_by(models.Message.created_at.desc()).first()
+    if unread is None:
+        unread = db.query(models.Message).filter(
+            models.Message.conversation_id == conversation.id,
+            models.Message.sender_id != current_user_id,
+            models.Message.is_read.is_(False),
+        ).count()
+    # Skip heavy detail_payload in list views (was loading full post + images per conversation)
     context = None
-    if conversation.context_type and conversation.context_id:
+    if include_context and conversation.context_type and conversation.context_id:
         try:
             detail = detail_payload(db, conversation.context_type, conversation.context_id, db.get(models.User, current_user_id))
             context = compact_content_payload(detail)
@@ -3317,8 +3468,8 @@ def conversation_payload(db: Session, conversation: models.Conversation, current
     return {
         "id": conversation.id,
         "user": user_data,
-        "last_message": message_payload(db, last_message, current_user_id) if last_message else None,
-        "unread": unread,
+        "last_message": message_payload(db, last_message, current_user_id, lightweight=True) if last_message else None,
+        "unread": int(unread or 0),
         "context": context,
         "updated_at": conversation.updated_at,
     }
@@ -3346,31 +3497,115 @@ def start_conversation(
 def get_conversations(
     db: Session = Depends(get_db),
     user: models.User = Depends(get_current_user),
+    limit: int = Query(default=40, ge=1, le=100),
 ):
-    rows = db.query(models.Conversation).filter(
-        or_(models.Conversation.user_a_id == user.id, models.Conversation.user_b_id == user.id)
-    ).order_by(models.Conversation.updated_at.desc()).all()
-    return {"items": [conversation_payload(db, row, user.id) for row in rows]}
+    """Session list — batched queries (no per-conversation detail_payload / reaction N+1)."""
+    rows = (
+        db.query(models.Conversation)
+        .filter(or_(models.Conversation.user_a_id == user.id, models.Conversation.user_b_id == user.id))
+        .order_by(models.Conversation.updated_at.desc())
+        .limit(limit)
+        .all()
+    )
+    if not rows:
+        return {"items": []}
+
+    conv_ids = [row.id for row in rows]
+    other_ids = [
+        (row.user_b_id if row.user_a_id == user.id else row.user_a_id) for row in rows
+    ]
+    others = {
+        u.id: u
+        for u in db.query(models.User).options(joinedload(models.User.profile)).filter(
+            models.User.id.in_(other_ids or [-1])
+        ).all()
+    }
+
+    # Last message per conversation via max(id)
+    max_id_rows = (
+        db.query(models.Message.conversation_id, func.max(models.Message.id))
+        .filter(models.Message.conversation_id.in_(conv_ids))
+        .group_by(models.Message.conversation_id)
+        .all()
+    )
+    max_ids = [mid for _, mid in max_id_rows if mid]
+    last_by_conv = {}
+    if max_ids:
+        for msg in (
+            db.query(models.Message)
+            .options(joinedload(models.Message.sender).joinedload(models.User.profile))
+            .filter(models.Message.id.in_(max_ids))
+            .all()
+        ):
+            last_by_conv[msg.conversation_id] = msg
+
+    unread_by_conv = {
+        cid: int(cnt)
+        for cid, cnt in (
+            db.query(models.Message.conversation_id, func.count(models.Message.id))
+            .filter(
+                models.Message.conversation_id.in_(conv_ids),
+                models.Message.sender_id != user.id,
+                models.Message.is_read.is_(False),
+            )
+            .group_by(models.Message.conversation_id)
+            .all()
+        )
+    }
+
+    items = []
+    for row in rows:
+        other_id = row.user_b_id if row.user_a_id == user.id else row.user_a_id
+        items.append(
+            conversation_payload(
+                db,
+                row,
+                user.id,
+                other_user=others.get(other_id),
+                last_message=last_by_conv.get(row.id),
+                unread=unread_by_conv.get(row.id, 0),
+                include_context=False,
+            )
+        )
+    return {"items": items}
 
 
 @router.get("/conversations/{conversation_id}/messages")
 def get_conversation_messages(
     conversation_id: int,
+    limit: int = Query(default=100, ge=1, le=200),
     db: Session = Depends(get_db),
     user: models.User = Depends(get_current_user),
 ):
     conversation = get_conversation_for_user(db, conversation_id, user.id)
-    db.query(models.Message).filter(
+    # Mark read only if there are unread (avoid useless write locks)
+    unread_exists = db.query(models.Message.id).filter(
         models.Message.conversation_id == conversation.id,
         models.Message.sender_id != user.id,
         models.Message.is_read.is_(False),
-    ).update({"is_read": True}, synchronize_session=False)
-    db.commit()
-    rows = db.query(models.Message).options(
-        joinedload(models.Message.sender).joinedload(models.User.profile),
-        joinedload(models.Message.reply_to).joinedload(models.Message.sender).joinedload(models.User.profile),
-    ).filter_by(conversation_id=conversation.id).order_by(models.Message.created_at.asc()).limit(300).all()
-    return {"items": [message_payload(db, row, user.id) for row in rows]}
+    ).first()
+    if unread_exists:
+        db.query(models.Message).filter(
+            models.Message.conversation_id == conversation.id,
+            models.Message.sender_id != user.id,
+            models.Message.is_read.is_(False),
+        ).update({"is_read": True}, synchronize_session=False)
+        db.commit()
+
+    # Load newest N then reverse for chronological UI (faster than scanning full history)
+    rows = (
+        db.query(models.Message)
+        .options(
+            joinedload(models.Message.sender).joinedload(models.User.profile),
+            joinedload(models.Message.reply_to).joinedload(models.Message.sender).joinedload(models.User.profile),
+        )
+        .filter_by(conversation_id=conversation.id)
+        .order_by(models.Message.id.desc())
+        .limit(limit)
+        .all()
+    )
+    rows = list(reversed(rows))
+    return {"items": messages_payload_batch(db, rows, user.id, lightweight=False)}
 
 
 @router.post("/conversations/{conversation_id}/messages", status_code=201)
@@ -3431,7 +3666,15 @@ def send_conversation_message(
             target_id=conversation.id,
         )
     db.commit()
-    db.refresh(message)
+    message = (
+        db.query(models.Message)
+        .options(
+            joinedload(models.Message.sender).joinedload(models.User.profile),
+            joinedload(models.Message.reply_to).joinedload(models.Message.sender).joinedload(models.User.profile),
+        )
+        .filter_by(id=message.id)
+        .first()
+    )
     return {"message": "发送成功", "item": message_payload(db, message, user.id)}
 
 

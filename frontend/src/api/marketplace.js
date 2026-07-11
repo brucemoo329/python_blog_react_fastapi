@@ -4,6 +4,10 @@ export function getMarketplaceFeed(params) {
   return request.get('/marketplace/feed', { params })
 }
 
+export function getInboxUnread() {
+  return request.get('/marketplace/inbox/unread')
+}
+
 export function getMarketplaceSummary() {
   return request.get('/marketplace/summary')
 }
@@ -156,15 +160,21 @@ export function startConversation(data) {
 }
 
 export function getConversations() {
-  return request.get('/marketplace/conversations')
+  return request.get('/marketplace/conversations', { params: { limit: 40 } })
 }
 
 export function getConversationMessages(conversationId) {
-  return request.get(`/marketplace/conversations/${conversationId}/messages`)
+  return request.get(`/marketplace/conversations/${conversationId}/messages`, {
+    params: { limit: 100 },
+    timeout: 20000,
+  })
 }
 
 export function sendConversationMessage(conversationId, data) {
-  return request.post(`/marketplace/conversations/${conversationId}/messages`, data)
+  // Images as base64 can be large — allow longer timeout than default 10s
+  return request.post(`/marketplace/conversations/${conversationId}/messages`, data, {
+    timeout: 60000,
+  })
 }
 
 export function toggleMessageReaction(messageId, emoji) {

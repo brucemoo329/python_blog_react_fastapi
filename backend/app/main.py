@@ -77,6 +77,12 @@ def ensure_runtime_schema():
         "ALTER TABLE marketplace_service_tasks ADD COLUMN completed_at DATETIME NULL",
         "ALTER TABLE marketplace_service_tasks ADD COLUMN late_complaint_at DATETIME NULL",
         "ALTER TABLE users ADD COLUMN email_verified TINYINT(1) DEFAULT 0",
+        # Performance indexes for chat / inbox (ignore if already exist)
+        "CREATE INDEX idx_msg_conv_id ON marketplace_messages (conversation_id, id)",
+        "CREATE INDEX idx_msg_conv_unread ON marketplace_messages (conversation_id, is_read, sender_id)",
+        "CREATE INDEX idx_msg_reaction_msg ON message_reactions (message_id)",
+        "CREATE INDEX idx_conv_updated ON marketplace_conversations (updated_at)",
+        "CREATE INDEX idx_notif_recipient_read ON user_notifications (recipient_id, is_read)",
     ]
     with engine.begin() as conn:
         for statement in statements:

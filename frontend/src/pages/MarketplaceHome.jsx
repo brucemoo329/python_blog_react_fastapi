@@ -70,6 +70,7 @@ import {
   getMapTasks,
   getMarketplaceFeed,
   getMarketplaceSummary,
+  getInboxUnread,
   getNotifications,
   getOrderDetail,
   markAllNotificationsRead,
@@ -417,16 +418,16 @@ export default function MarketplaceHome({ user, onLogout, onUserUpdate }) {
     })
   }, [])
 
-  /** Lightweight inbox poll so alerts work even outside Messages page */
+  /** Lightweight inbox poll (not full /summary) so alerts stay cheap */
   const pollInboxSummary = useCallback(async () => {
     try {
-      const summaryResponse = await getMarketplaceSummary()
-      const nextUnread = Number(summaryResponse?.unread_messages || 0)
+      const inbox = await getInboxUnread()
+      const nextUnread = Number(inbox?.unread_messages || 0)
       handleUnreadMessagesChange(nextUnread)
       setSummary((current) => ({
         ...current,
         unread_messages: nextUnread,
-        unread_notifications: summaryResponse?.unread_notifications ?? current.unread_notifications,
+        unread_notifications: inbox?.unread_notifications ?? current.unread_notifications,
       }))
     } catch {
       /* ignore poll errors */
@@ -487,10 +488,10 @@ export default function MarketplaceHome({ user, onLogout, onUserUpdate }) {
     return () => window.clearInterval(timer)
   }, [loadNotifications])
 
-  // Poll message unread for sound / OS notification (desktop + mobile browser, HTTPS)
+  // Poll message unread for sound / OS notification (lightweight endpoint, 15s)
   useEffect(() => {
     pollInboxSummary()
-    const timer = window.setInterval(pollInboxSummary, 8000)
+    const timer = window.setInterval(pollInboxSummary, 15000)
     return () => window.clearInterval(timer)
   }, [pollInboxSummary])
 

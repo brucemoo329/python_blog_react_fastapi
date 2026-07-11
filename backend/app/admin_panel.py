@@ -15,7 +15,7 @@ from app.marketplace import (
     get_current_user,
     get_db,
     user_payload,
-    compute_trust,
+    trust_grade,
 )
 
 router = APIRouter(prefix="/marketplace/admin", tags=["campus-admin"])
@@ -82,53 +82,74 @@ CONTENT_LABELS = {
 }
 
 
+def _admin_image_url(url):
+    """Never return multi-MB base64 images in admin list payloads."""
+    if not url:
+        return None
+    text = str(url)
+    if text.startswith("data:") or len(text) > 500:
+        return None
+    return text
+
+
+def _admin_text(value, max_len=120):
+    if not value:
+        return ""
+    text = str(value)
+    return text if len(text) <= max_len else text[:max_len] + "…"
+
+
 def content_row_payload(item_type: str, item):
     if item_type == "listing":
         return {
             "id": item.id,
             "type": "listing" if item.trade_type != "digital" else "game",
             "title": item.title,
-            "description": item.description,
+            "description": _admin_text(item.description),
             "status": item.status,
             "price_label": f"¥{float(item.price):.0f}",
             "author_id": item.seller_id,
             "created_at": item.created_at,
-            "image_url": item.images[0].image_url if getattr(item, "images", None) else None,
+            "image_url": None,
+            "has_image": False,
         }
     if item_type == "service":
         return {
             "id": item.id,
             "type": "service",
             "title": item.title,
-            "description": item.description,
+            "description": _admin_text(item.description),
             "status": item.status,
             "price_label": f"赏金 ¥{float(item.reward):.0f}",
             "author_id": item.requester_id,
             "created_at": item.created_at,
-            "image_url": item.image_url,
+            "image_url": _admin_image_url(item.image_url),
+            "has_image": bool(item.image_url),
         }
     if item_type == "wanted":
         return {
             "id": item.id,
             "type": "wanted",
             "title": item.title,
-            "description": item.description,
+            "description": _admin_text(item.description),
             "status": item.status,
             "price_label": f"预算 ¥{float(item.budget_max):.0f}" if item.budget_max else "预算面议",
             "author_id": item.user_id,
             "created_at": item.created_at,
-            "image_url": item.image_url,
+            "image_url": _admin_image_url(item.image_url),
+            "has_image": bool(item.image_url),
         }
     return {
         "id": item.id,
         "type": "community",
         "title": item.title or (item.content[:40] if item.content else "社区帖"),
-        "description": item.content,
+        "description": _admin_text(item.content),
         "status": item.topic,
         "price_label": None,
         "author_id": item.author_id,
         "created_at": item.created_at,
-        "image_url": item.image_url,
+        "image_url": _admin_image_url(item.image_url),
+        "has_image": bool(item.image_url),
     }
 
 
@@ -172,38 +193,37 @@ def admin_overview(
     db: Session = Depends(get_db),
     admin: models.User = Depends(require_admin),
 ):
-    """统计口径与「内容管理」列表一致（不按 open/available 过滤），避免卡片数字为 0 点进去却有数据。"""
-    listing_total = db.query(models.Listing).filter(models.Listing.trade_type != "digital").count()
-    game_total = db.query(models.Listing).filter(models.Listing.trade_type == "digital").count()
-    service_total = db.query(models.ServiceTask).count()
-    service_open = db.query(models.ServiceTask).filter(models.ServiceTask.status == "open").count()
-    listing_available = db.query(models.Listing).filter(
+    """统计口径与「内容管理」列表一致；用尽量少的 COUNT 查询。"""
+    listing_total = db.query(func.count(models.Listing.id)).filter(models.Listing.trade_type != "digital").scalar() or 0
+    game_total = db.query(func.count(models.Listing.id)).filter(models.Listing.trade_type == "digital").scalar() or 0
+    service_total = db.query(func.count(models.ServiceTask.id)).scalar() or 0
+    service_open = db.query(func.count(models.ServiceTask.id)).filter(models.ServiceTask.status == "open").scalar() or 0
+    listing_available = db.query(func.count(models.Listing.id)).filter(
         models.Listing.trade_type != "digital",
         models.Listing.status == "available",
-    ).count()
+    ).scalar() or 0
+    wanted_total = db.query(func.count(models.WantedPost.id)).scalar() or 0
+    community_total = db.query(func.count(models.CommunityPost.id)).scalar() or 0
     return {
-        "users": db.query(models.User).count(),
-        # 卡片主数字：与内容管理点进去看到的总量一致
-        "active_listings": listing_total,
-        "listings_available": listing_available,
-        "open_tasks": service_total,
-        "tasks_open": service_open,
-        "tasks_accepted": db.query(models.ServiceTask).filter(models.ServiceTask.status == "accepted").count(),
-        "tasks_completed": db.query(models.ServiceTask).filter(models.ServiceTask.status == "completed").count(),
-        "pending_reports": db.query(models.Report).filter(models.Report.status == "pending").count(),
-        "reports_total": db.query(models.Report).count(),
-        "pending_appeals": db.query(models.OrderAppeal).filter(models.OrderAppeal.status == "pending").count(),
-        "appeals_total": db.query(models.OrderAppeal).count(),
-        "pending_tickets": db.query(models.SupportTicket).filter(models.SupportTicket.status == "pending").count(),
-        "pending_after_sales": db.query(models.AfterSaleRequest).filter(models.AfterSaleRequest.status == "admin_pending").count(),
-        "tickets_total": db.query(models.SupportTicket).count(),
-        "orders": db.query(models.Order).count(),
-        "community_posts": db.query(models.CommunityPost).count(),
-        "wanted_posts": db.query(models.WantedPost).count(),
-        "game_listings": game_total,
-        "contents_total": listing_total + game_total + service_total
-            + db.query(models.WantedPost).count()
-            + db.query(models.CommunityPost).count(),
+        "users": db.query(func.count(models.User.id)).scalar() or 0,
+        "active_listings": int(listing_total),
+        "listings_available": int(listing_available),
+        "open_tasks": int(service_total),
+        "tasks_open": int(service_open),
+        "tasks_accepted": db.query(func.count(models.ServiceTask.id)).filter(models.ServiceTask.status == "accepted").scalar() or 0,
+        "tasks_completed": db.query(func.count(models.ServiceTask.id)).filter(models.ServiceTask.status == "completed").scalar() or 0,
+        "pending_reports": db.query(func.count(models.Report.id)).filter(models.Report.status == "pending").scalar() or 0,
+        "reports_total": db.query(func.count(models.Report.id)).scalar() or 0,
+        "pending_appeals": db.query(func.count(models.OrderAppeal.id)).filter(models.OrderAppeal.status == "pending").scalar() or 0,
+        "appeals_total": db.query(func.count(models.OrderAppeal.id)).scalar() or 0,
+        "pending_tickets": db.query(func.count(models.SupportTicket.id)).filter(models.SupportTicket.status == "pending").scalar() or 0,
+        "pending_after_sales": db.query(func.count(models.AfterSaleRequest.id)).filter(models.AfterSaleRequest.status == "admin_pending").scalar() or 0,
+        "tickets_total": db.query(func.count(models.SupportTicket.id)).scalar() or 0,
+        "orders": db.query(func.count(models.Order.id)).scalar() or 0,
+        "community_posts": int(community_total),
+        "wanted_posts": int(wanted_total),
+        "game_listings": int(game_total),
+        "contents_total": int(listing_total + game_total + service_total + wanted_total + community_total),
     }
 
 
@@ -218,7 +238,8 @@ def admin_list_contents(
     items = []
     keyword = keyword.strip()
     if content_type in {"all", "listing", "game"}:
-        query = db.query(models.Listing).options(joinedload(models.Listing.images))
+        # Do not joinedload images (LONGTEXT base64) — list only needs metadata
+        query = db.query(models.Listing)
         if content_type == "game":
             query = query.filter(models.Listing.trade_type == "digital")
         elif content_type == "listing":
@@ -511,16 +532,37 @@ def admin_list_users(
             models.UserProfile.nickname.contains(key),
         ))
     rows = query.order_by(models.User.id.desc()).limit(limit).all()
+    user_ids = [u.id for u in rows]
+    # One grouped query for event points instead of full compute_trust per user (was 6+ queries each)
+    points_map = {}
+    if user_ids:
+        for uid, pts in (
+            db.query(
+                models.TrustScoreEvent.user_id,
+                func.coalesce(func.sum(models.TrustScoreEvent.points_delta), 0),
+            )
+            .filter(
+                models.TrustScoreEvent.user_id.in_(user_ids),
+                ~models.TrustScoreEvent.event_type.in_(["daily_login", "profile_visit"]),
+            )
+            .group_by(models.TrustScoreEvent.user_id)
+            .all()
+        ):
+            points_map[uid] = int(pts or 0)
+
     items = []
     for user in rows:
-        # Admin list needs real identity fields even when public payload is masked
         profile = getattr(user, "profile", None)
+        raw_avatar = None if (not user.is_active or getattr(user, "is_deleted", False)) else (profile.avatar_url if profile else None)
+        if raw_avatar and (str(raw_avatar).startswith("data:") or len(str(raw_avatar)) > 500):
+            raw_avatar = None
+        score = max(0, min(1000, 800 + points_map.get(user.id, 0)))
         items.append({
             "id": user.id,
             "username": user.username,
             "email": user.email,
             "nickname": (profile.nickname if profile and profile.nickname else user.username),
-            "avatar_url": None if (not user.is_active or getattr(user, "is_deleted", False)) else (profile.avatar_url if profile else None),
+            "avatar_url": raw_avatar,
             "is_admin": bool(getattr(user, "is_admin", False)),
             "is_deleted": bool(getattr(user, "is_deleted", False)),
             "is_purged": bool(getattr(user, "is_purged", False)),
@@ -528,7 +570,7 @@ def admin_list_users(
             "can_comment": bool(getattr(user, "can_comment", True)),
             "can_post": bool(getattr(user, "can_post", True)),
             "ban_reason": getattr(user, "ban_reason", None),
-            "trust": compute_trust(db, user.id),
+            "trust": {"score": score, "grade": trust_grade(score)},
             "account_disabled": (not user.is_active) or bool(getattr(user, "is_deleted", False)),
         })
     return {"items": items}

@@ -41,6 +41,7 @@ export default function MessagesCenter({ currentUser, initialConversationId, onB
   const initialIdRef = useRef(initialConversationId)
   const requestSeqRef = useRef(0)
   const isMobileRef = useRef(isMobile)
+  const lastListRefreshRef = useRef(0)
   const t = (key, fallback = '') => translate(language, key, fallback)
 
   useEffect(() => { noticeRef.current = onNotice }, [onNotice])
@@ -73,7 +74,8 @@ export default function MessagesCenter({ currentUser, initialConversationId, onB
 
   useEffect(() => {
     loadConversations()
-    const timer = window.setInterval(() => loadConversations(true), 7000)
+    // 10s is enough for list badges; chat thread has its own poll
+    const timer = window.setInterval(() => loadConversations(true), 10000)
     return () => window.clearInterval(timer)
   }, [loadConversations])
 
@@ -204,7 +206,14 @@ export default function MessagesCenter({ currentUser, initialConversationId, onB
               conversation={active}
               currentUser={currentUser}
               onNotice={onNotice}
-              onConversationUpdate={() => loadConversations(true)}
+              onConversationUpdate={() => {
+                // Throttle list refresh so every chat poll does not re-fetch all sessions
+                const now = Date.now()
+                if (now - lastListRefreshRef.current > 4000) {
+                  lastListRefreshRef.current = now
+                  loadConversations(true)
+                }
+              }}
               onOpenOrder={onOpenOrder}
               onPurchase={onPurchase}
             />
