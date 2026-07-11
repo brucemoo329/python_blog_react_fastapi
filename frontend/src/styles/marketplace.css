@@ -4745,6 +4745,7 @@
 }
 
 .campus-shell--daylight .checkout-page,
+.campus-shell--daylight .checkout-placeholder,
 .campus-shell--daylight .public-profile-page,
 .campus-shell--daylight .profile-center,
 .campus-shell--daylight .orders-center,
@@ -4753,16 +4754,24 @@
   color: #183936;
 }
 
+.campus-shell--daylight .checkout-main-card,
 .campus-shell--daylight .checkout-safety,
 .campus-shell--daylight .public-profile-feed,
 .campus-shell--daylight .profile-card,
 .campus-shell--daylight .detail-card,
 .campus-shell--daylight .order-detail-card {
   border-color: rgba(24, 57, 54, 0.1);
-  border-radius: 8px;
+  border-radius: 12px;
   background: #fff;
   color: #183936;
   box-shadow: 0 14px 42px rgba(24, 68, 61, 0.07);
+}
+
+.campus-shell--daylight .checkout-back {
+  color: #4d645f;
+}
+.campus-shell--daylight .checkout-back:hover {
+  color: #0f8c74;
 }
 
 .campus-shell--daylight .checkout-main-card h1,
@@ -4777,8 +4786,17 @@
   color: #183936;
 }
 
+.campus-shell--daylight .checkout-main-card > header > strong {
+  color: #e44f39;
+}
+
 .campus-shell--daylight .checkout-product p,
+.campus-shell--daylight .checkout-product small,
+.campus-shell--daylight .checkout-safety p,
 .campus-shell--daylight .checkout-safety li,
+.campus-shell--daylight .checkout-dev-note,
+.campus-shell--daylight .checkout-methods small,
+.campus-shell--daylight .checkout-seller span,
 .campus-shell--daylight .public-profile-feed small,
 .campus-shell--daylight .profile-form-grid label,
 .campus-shell--daylight .profile-edit-form label,
@@ -4791,6 +4809,24 @@
 .campus-shell--daylight .public-profile-feed > button > span {
   background: #e7f2ee;
   color: #0f8c74;
+}
+
+.campus-shell--daylight .checkout-seller {
+  border-top-color: rgba(24, 57, 54, 0.09);
+  border-bottom-color: rgba(24, 57, 54, 0.09);
+}
+
+.campus-shell--daylight .checkout-methods {
+  opacity: 1;
+}
+.campus-shell--daylight .checkout-methods > div {
+  border-color: rgba(24, 57, 54, 0.1);
+  background: #f7fbf9;
+  color: #183936;
+}
+.campus-shell--daylight .checkout-methods > div.is-active {
+  border-color: rgba(15, 159, 131, 0.45);
+  background: #edf8f4;
 }
 
 .campus-shell--daylight .public-profile-feed > button {

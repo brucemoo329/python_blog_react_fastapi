@@ -79,19 +79,19 @@ export default function LandingHeader({
     </div>
   )
 
-  // Shared liquid-glass props (React Bits advanced look)
+  // Heavier React Bits liquid-glass (stronger frost + distortion)
   const glassFx = {
-    borderWidth: 0.07,
-    brightness: 55,
-    opacity: 0.92,
-    blur: 11,
-    displace: 0.5,
-    backgroundOpacity: 0.14,
-    saturation: 1.45,
-    distortionScale: -140,
-    redOffset: 0,
-    greenOffset: 10,
-    blueOffset: 20,
+    borderWidth: 0.09,
+    brightness: 62,
+    opacity: 0.95,
+    blur: 14,
+    displace: 1.2,
+    backgroundOpacity: 0.28,
+    saturation: 1.75,
+    distortionScale: -200,
+    redOffset: 2,
+    greenOffset: 12,
+    blueOffset: 22,
     mixBlendMode: 'difference',
   }
 
@@ -118,7 +118,7 @@ export default function LandingHeader({
           height={58}
           borderRadius={999}
           {...glassFx}
-          backgroundOpacity={0.12}
+          backgroundOpacity={0.26}
           style={{ minWidth: 'fit-content' }}
         >
           <div className="landing-header__cluster is-left">
@@ -133,7 +133,7 @@ export default function LandingHeader({
           height={58}
           borderRadius={999}
           {...glassFx}
-          backgroundOpacity={0.12}
+          backgroundOpacity={0.26}
           style={{ minWidth: 'fit-content', marginLeft: 'auto' }}
         >
           <div className="landing-header__cluster is-right">{actions}</div>
@@ -157,10 +157,10 @@ export default function LandingHeader({
           height={66}
           borderRadius={22}
           {...glassFx}
-          backgroundOpacity={0.16}
-          blur={12}
-          distortionScale={-160}
-          displace={0.7}
+          backgroundOpacity={0.32}
+          blur={16}
+          distortionScale={-210}
+          displace={1.4}
         >
           <nav className="landing-header__inner" aria-label="站点导航">
             <div className="landing-header__cluster is-left">

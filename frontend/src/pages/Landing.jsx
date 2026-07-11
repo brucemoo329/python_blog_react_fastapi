@@ -224,13 +224,14 @@ export default function Landing({ onNavigateLogin, onNavigateRegister, onEnterMa
           </div>
         </div>
 
-        <GlassSurface className="landing-hero__metrics" width="min(1020px, calc(100% - 40px))" height="auto" backgroundOpacity={0.24}>
+        {/* Original metrics strip (not liquid glass) */}
+        <div className="landing-hero__metrics">
           <div className="landing-metric-grid">
             <div><strong>5</strong><span>{copy.metrics[0]}</span></div>
             <div><strong>1</strong><span>{copy.metrics[1]}</span></div>
             <div><strong>800</strong><span>{copy.metrics[2]}</span></div>
           </div>
-        </GlassSurface>
+        </div>
       </section>
 
       <section className="landing-intro">

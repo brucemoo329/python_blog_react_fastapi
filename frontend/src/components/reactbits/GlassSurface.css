@@ -59,26 +59,26 @@
     inset 0 -1px 0 0 rgba(255, 255, 255, 0.2);
 }
 
-/* Campus landing hero: slightly darker frost for green/photo backgrounds */
+/* Campus landing: heavier frost so liquid glass reads clearly on photo bg */
 .glass-surface--campus.glass-surface--fallback,
 .landing-header .glass-surface--fallback {
-  background: rgba(255, 255, 255, 0.14);
-  backdrop-filter: blur(16px) saturate(1.65) brightness(1.08);
-  -webkit-backdrop-filter: blur(16px) saturate(1.65) brightness(1.08);
-  border: 1px solid rgba(255, 255, 255, 0.28);
+  background: rgba(255, 255, 255, 0.28);
+  backdrop-filter: blur(22px) saturate(1.9) brightness(1.12);
+  -webkit-backdrop-filter: blur(22px) saturate(1.9) brightness(1.12);
+  border: 1px solid rgba(255, 255, 255, 0.42);
   box-shadow:
-    0 12px 36px rgba(4, 18, 16, 0.28),
-    inset 0 1px 0 rgba(255, 255, 255, 0.35),
-    inset 0 -1px 0 rgba(255, 255, 255, 0.12);
+    0 16px 48px rgba(4, 18, 16, 0.34),
+    inset 0 1px 0 rgba(255, 255, 255, 0.5),
+    inset 0 -1px 0 rgba(255, 255, 255, 0.18);
 }
 
 .glass-surface--campus.glass-surface--svg,
 .landing-header .glass-surface--svg {
-  background: hsl(0 0% 100% / var(--glass-frost, 0.12));
+  background: hsl(0 0% 100% / var(--glass-frost, 0.28));
   box-shadow:
-    0 0 2px 1px color-mix(in oklch, white, transparent 70%) inset,
-    0 0 12px 4px color-mix(in oklch, white, transparent 88%) inset,
-    0 12px 40px rgba(4, 18, 16, 0.22);
+    0 0 2px 1px color-mix(in oklch, white, transparent 55%) inset,
+    0 0 16px 6px color-mix(in oklch, white, transparent 78%) inset,
+    0 16px 48px rgba(4, 18, 16, 0.3);
 }
 
 @media (prefers-color-scheme: dark) {

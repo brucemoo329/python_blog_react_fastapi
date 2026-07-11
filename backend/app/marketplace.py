@@ -1246,34 +1246,56 @@ def get_feed(
 ):
     items = []
     profile = ensure_user_profile(db, user)
-    campus_user_ids = None
-    if profile.school and profile.school != "未选择学校":
-        campus_user_ids = [row[0] for row in db.query(models.UserProfile.user_id).filter(
-            models.UserProfile.school == profile.school,
-        ).all()]
+    my_school = (profile.school or "").strip()
+    # Soft campus preference only — never hard-hide other schools (or your own posts)
+    same_school_ids = None
+    if my_school and my_school != "未选择学校":
+        same_school_ids = {
+            row[0] for row in db.query(models.UserProfile.user_id).filter(
+                models.UserProfile.school == my_school,
+            ).all()
+        }
+        same_school_ids.add(user.id)
     hidden_user_ids = {
         row.target_user_id for row in db.query(models.UserModeration).filter(
             models.UserModeration.user_id == user.id,
             models.UserModeration.action.in_(["mute", "block"]),
         ).all()
     }
+
+    def _school_rank(owner_id, campus_label=None):
+        if same_school_ids is None:
+            return 0
+        if owner_id == user.id:
+            return 0
+        if owner_id in same_school_ids:
+            return 0
+        if campus_label and campus_label == my_school:
+            return 0
+        return 1  # other schools still visible, sorted later
+
     if kind in {"all", "listing", "game"}:
         query = db.query(models.Listing).options(
             joinedload(models.Listing.seller).joinedload(models.User.profile),
             joinedload(models.Listing.images),
-        )
+        ).filter(models.Listing.status == "available")
         if hidden_user_ids:
             query = query.filter(~models.Listing.seller_id.in_(hidden_user_ids))
-        if campus_user_ids is not None:
-            query = query.filter(models.Listing.seller_id.in_(campus_user_ids or [-1]))
         if kind == "game":
             query = query.filter(models.Listing.trade_type == "digital")
+        elif kind == "listing":
+            query = query.filter(models.Listing.trade_type != "digital")
         if search:
             query = query.filter(or_(
                 models.Listing.title.contains(search),
                 models.Listing.description.contains(search),
             ))
-        items.extend(listing_payload(row) for row in query.order_by(models.Listing.created_at.desc()).limit(30))
+        rows = query.order_by(models.Listing.created_at.desc()).limit(60).all()
+        rows.sort(key=lambda row: (
+            _school_rank(row.seller_id, row.campus),
+            -(row.created_at.timestamp() if row.created_at else 0),
+        ))
+        items.extend(listing_payload(row) for row in rows[:30])
 
     if kind in {"all", "service"}:
         query = db.query(models.ServiceTask).options(
@@ -1282,13 +1304,16 @@ def get_feed(
         )
         if hidden_user_ids:
             query = query.filter(~models.ServiceTask.requester_id.in_(hidden_user_ids))
-        if campus_user_ids is not None:
-            query = query.filter(models.ServiceTask.requester_id.in_(campus_user_ids or [-1]))
         if search:
             query = query.filter(or_(models.ServiceTask.title.contains(search), models.ServiceTask.description.contains(search)))
         # 信息流只展示待接单；进行中的任务走导航/右侧进度，避免接单后仍像「可接」
         query = query.filter(models.ServiceTask.status == "open")
-        for task in query.order_by(models.ServiceTask.created_at.desc()).limit(20):
+        task_rows = query.order_by(models.ServiceTask.created_at.desc()).limit(40).all()
+        task_rows.sort(key=lambda task: (
+            _school_rank(task.requester_id),
+            -(task.created_at.timestamp() if task.created_at else 0),
+        ))
+        for task in task_rows[:20]:
             items.append({
                 "id": task.id,
                 "type": "service",
@@ -1322,11 +1347,14 @@ def get_feed(
         )
         if hidden_user_ids:
             query = query.filter(~models.WantedPost.user_id.in_(hidden_user_ids))
-        if campus_user_ids is not None:
-            query = query.filter(models.WantedPost.user_id.in_(campus_user_ids or [-1]))
         if search:
             query = query.filter(or_(models.WantedPost.title.contains(search), models.WantedPost.description.contains(search)))
-        for wanted in query.order_by(models.WantedPost.created_at.desc()).limit(20):
+        wanted_rows = query.order_by(models.WantedPost.created_at.desc()).limit(40).all()
+        wanted_rows.sort(key=lambda wanted: (
+            _school_rank(wanted.user_id),
+            -(wanted.created_at.timestamp() if wanted.created_at else 0),
+        ))
+        for wanted in wanted_rows[:20]:
             items.append({
                 "id": wanted.id,
                 "type": "wanted",
@@ -1348,13 +1376,16 @@ def get_feed(
         )
         if hidden_user_ids:
             query = query.filter(~models.CommunityPost.author_id.in_(hidden_user_ids))
-        if campus_user_ids is not None:
-            query = query.filter(models.CommunityPost.author_id.in_(campus_user_ids or [-1]))
         if search:
             query = query.filter(or_(models.CommunityPost.title.contains(search), models.CommunityPost.content.contains(search)))
         if topic:
             query = query.filter(models.CommunityPost.topic == topic)
-        for post in query.order_by(models.CommunityPost.created_at.desc()).limit(20):
+        community_rows = query.order_by(models.CommunityPost.created_at.desc()).limit(40).all()
+        community_rows.sort(key=lambda post: (
+            _school_rank(post.author_id),
+            -(post.created_at.timestamp() if post.created_at else 0),
+        ))
+        for post in community_rows[:20]:
             items.append({
                 "id": post.id,
                 "type": "community",
@@ -1374,7 +1405,14 @@ def get_feed(
                 "created_at": post.created_at,
             })
 
-    items.sort(key=lambda item: item["created_at"] or datetime.min, reverse=True)
+    def _owner_id(item):
+        owner = item.get("seller") or item.get("author") or item.get("requester") or {}
+        return owner.get("id")
+
+    items.sort(key=lambda item: (
+        _school_rank(_owner_id(item), item.get("school")),
+        -(item["created_at"].timestamp() if item.get("created_at") else 0),
+    ))
     result = items[:50]
     for item in result:
         item.update(content_metrics(db, user.id, item["type"], item["id"]))
@@ -2298,12 +2336,16 @@ def get_summary(
             reverse=True,
         )
 
+    # Right-rail "my orders" must hide soft-deleted records for this user
     recent_order = db.query(models.Order).options(
         joinedload(models.Order.listing),
         joinedload(models.Order.service_task),
-    ).filter(or_(models.Order.buyer_id == user.id, models.Order.seller_id == user.id)).order_by(
-        models.Order.created_at.desc()
-    ).first()
+    ).filter(
+        or_(
+            (models.Order.buyer_id == user.id) & (models.Order.buyer_deleted.is_(False)),
+            (models.Order.seller_id == user.id) & (models.Order.seller_deleted.is_(False)),
+        )
+    ).order_by(models.Order.created_at.desc()).first()
     active_errand_rows = db.query(models.ServiceTask).options(
         joinedload(models.ServiceTask.requester).joinedload(models.User.profile),
         joinedload(models.ServiceTask.runner).joinedload(models.User.profile),
