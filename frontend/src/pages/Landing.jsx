@@ -321,7 +321,14 @@ export default function Landing({ onNavigateLogin, onNavigateRegister, onEnterMa
       </section>
 
       <section className="landing-final-cta">
-        <GlassSurface className="landing-final-cta__glass" backgroundOpacity={0.48}>
+        <GlassSurface
+          className="landing-final-cta__glass"
+          width="100%"
+          height="auto"
+          borderRadius={28}
+          backgroundOpacity={0.48}
+          blur={14}
+        >
           <div className="landing-final-cta__content">
             <div>
               <p className="landing-section-label">READY WHEN YOU ARE</p>

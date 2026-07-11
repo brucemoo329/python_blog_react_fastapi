@@ -1,5 +1,6 @@
 import AMapLoader from '@amap/amap-jsapi-loader'
 import { getGeolocationBlockReason, geolocationErrorMessage } from '@/lib/geolocation'
+import { schoolCityHint, schoolCoord } from '@/lib/schools'
 
 let amapPromise
 
@@ -111,15 +112,16 @@ function withTimeout(promise, ms, label = '操作') {
   return Promise.race([promise, timeout]).finally(() => window.clearTimeout(timer))
 }
 
-/** Known campus coords fallback when geocode is slow/unavailable. */
-const SCHOOL_FALLBACKS = {
-  南通理工学院: [120.809261, 32.041042],
-  南通理工学院南通校区: [120.809261, 32.041042],
-  南通理工学院海安校区: [120.4675, 32.5458],
+/** Known campus coords — delegates to shared catalog (never force Nantong for other unis). */
+export function schoolFallbackLngLat(schoolName) {
+  const known = schoolCoord(schoolName)
+  if (known) return known
+  // Unknown school: null so caller can geocode instead of wrong campus
+  return null
 }
 
-/** Campus landmark offsets around 南通理工主校区 (lng, lat). */
-const CAMPUS_LANDMARKS = [
+/** Nantong-specific landmarks only (do not apply to other universities). */
+const NANTONG_LANDMARKS = [
   { keys: ['北门'], point: [120.8098, 32.0438] },
   { keys: ['南门'], point: [120.8091, 32.0386] },
   { keys: ['东门'], point: [120.8122, 32.0412] },
@@ -139,33 +141,33 @@ const CAMPUS_LANDMARKS = [
   { keys: ['山姆'], point: [120.875, 32.02] },
 ]
 
-export function schoolFallbackLngLat(schoolName) {
-  if (!schoolName) return SCHOOL_FALLBACKS['南通理工学院']
-  if (SCHOOL_FALLBACKS[schoolName]) return SCHOOL_FALLBACKS[schoolName]
-  const hit = Object.keys(SCHOOL_FALLBACKS).find((key) => schoolName.includes(key) || key.includes(schoolName))
-  return hit ? SCHOOL_FALLBACKS[hit] : SCHOOL_FALLBACKS['南通理工学院']
-}
-
-export function campusLandmarkLngLat(address) {
+export function campusLandmarkLngLat(address, schoolContext = '') {
   if (!address) return null
   const text = String(address)
-  for (const item of CAMPUS_LANDMARKS) {
-    if (item.keys.some((k) => text.includes(k))) return item.point
+  const ctx = String(schoolContext || address)
+  // Only use Nantong micro-landmarks for Nantong Institute of Technology context
+  if (/南通理工/.test(ctx) || /南通理工/.test(text)) {
+    for (const item of NANTONG_LANDMARKS) {
+      if (item.keys.some((k) => text.includes(k))) return item.point
+    }
+    if (/南通理工|海安校区|南通校区/.test(text)) {
+      return schoolFallbackLngLat(text) || schoolFallbackLngLat('南通理工学院')
+    }
   }
-  // 南通理工 + 门牌
-  if (/南通理工|理工学院|校区/.test(text)) {
-    return schoolFallbackLngLat(text)
-  }
+  // Other universities: use school center if address mentions the school
+  const schoolPt = schoolCoord(text) || schoolCoord(ctx)
+  if (schoolPt && /大学|学院|校区|学校/.test(text)) return schoolPt
   return null
 }
 
-export function geocodeAddress(address, city = '南通', timeoutMs = 6000) {
+export function geocodeAddress(address, city, timeoutMs = 6000) {
   if (!address?.trim()) {
     return Promise.reject(new Error('地址为空'))
   }
-  // Prefer campus landmark map for 北门/男4 等
+  const resolvedCity = city || schoolCityHint(address) || '全国'
+  // Prefer known school / campus landmark (no wrong city bias)
   const landmark = campusLandmarkLngLat(address)
-  if (landmark && /理工|学院|校区|门|栋|食堂|快递|山姆|操场|图书馆|男|女/.test(address)) {
+  if (landmark) {
     return Promise.resolve({
       lng: landmark[0],
       lat: landmark[1],
@@ -183,7 +185,7 @@ export function geocodeAddress(address, city = '南通', timeoutMs = 6000) {
       fn(value)
     }
 
-    const geocoder = new AMap.Geocoder({ city, radius: 5000 })
+    const geocoder = new AMap.Geocoder({ city: resolvedCity, radius: 8000 })
     geocoder.getLocation(address, (status, result) => {
       if (status === 'complete' && result?.geocodes?.length) {
         const g = result.geocodes[0]
@@ -196,9 +198,8 @@ export function geocodeAddress(address, city = '南通', timeoutMs = 6000) {
         })
         return
       }
-      // Place search fallback for short names like "山姆"
       try {
-        const place = new AMap.PlaceSearch({ city, pageSize: 1 })
+        const place = new AMap.PlaceSearch({ city: resolvedCity === '全国' ? '全国' : resolvedCity, pageSize: 1 })
         place.search(address, (pStatus, pResult) => {
           const poi = pResult?.poiList?.pois?.[0]
           if (pStatus === 'complete' && poi?.location) {
@@ -210,9 +211,8 @@ export function geocodeAddress(address, city = '南通', timeoutMs = 6000) {
             })
             return
           }
-          // School name fallback
           const fb = schoolFallbackLngLat(address)
-          if (fb && /学院|大学|学校|校区/.test(address)) {
+          if (fb) {
             done(resolve, { lng: fb[0], lat: fb[1], formatted: address, approximate: true })
             return
           }
@@ -225,35 +225,40 @@ export function geocodeAddress(address, city = '南通', timeoutMs = 6000) {
   }))
 
   return withTimeout(work, timeoutMs, '地址解析').catch((error) => {
-    const landmark = campusLandmarkLngLat(address)
-    if (landmark) {
-      return { lng: landmark[0], lat: landmark[1], formatted: address, approximate: true, fallback: true }
+    const landmarkAgain = campusLandmarkLngLat(address)
+    if (landmarkAgain) {
+      return { lng: landmarkAgain[0], lat: landmarkAgain[1], formatted: address, approximate: true, fallback: true }
     }
     const fb = schoolFallbackLngLat(address)
-    if (fb && /学院|大学|学校|校区|山姆|快递|食堂|门|栋/.test(address || '')) {
+    if (fb) {
       return { lng: fb[0], lat: fb[1], formatted: address, approximate: true, fallback: true }
     }
     throw error
   })
 }
 
-/** Geocode school and never hang — always resolves with a lng/lat. */
-export function resolveSchoolLocation(schoolName, timeoutMs = 5000) {
+/** Geocode school and never hang — always resolves with a lng/lat for that school. */
+export function resolveSchoolLocation(schoolName, timeoutMs = 6000) {
   const name = schoolName || '南通理工学院'
   const fallback = schoolFallbackLngLat(name)
-  return geocodeAddress(name, '南通', timeoutMs)
+  const city = schoolCityHint(name)
+  return geocodeAddress(name, city, timeoutMs)
     .then((geo) => ({
       lng: geo.lng,
       lat: geo.lat,
       name,
       approximate: Boolean(geo.approximate || geo.fallback),
     }))
-    .catch(() => ({
-      lng: fallback[0],
-      lat: fallback[1],
-      name,
-      approximate: true,
-    }))
+    .catch(() => {
+      if (fallback) {
+        return { lng: fallback[0], lat: fallback[1], name, approximate: true }
+      }
+      // Absolute last resort: Beijing center only if name looks Beijing; else Nantong
+      if (/清华|北大|北京/.test(name)) {
+        return { lng: 116.397, lat: 39.908, name, approximate: true }
+      }
+      return { lng: 120.809261, lat: 32.041042, name, approximate: true }
+    })
 }
 
 function pushLngLat(path, point) {

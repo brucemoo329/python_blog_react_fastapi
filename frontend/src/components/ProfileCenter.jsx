@@ -50,8 +50,7 @@ import {
   updateUserProfile,
 } from '@/api/marketplace'
 import { LANGUAGES, t as translate } from '@/lib/i18n'
-
-const SCHOOLS = ['南通理工学院', '南通理工学院南通校区', '南通理工学院海安校区']
+import { SCHOOL_LIST, campusesForSchool } from '@/lib/schools'
 
 const BACKGROUND_THEMES = [
   { value: 'teal', label: '青绿校园' },
@@ -175,6 +174,10 @@ export default function ProfileCenter({ user, language = 'zh-CN', onLogout, onNo
   const backgroundInputRef = useRef(null)
   const [data, setData] = useState(EMPTY_PROFILE)
   const [form, setForm] = useState(EMPTY_PROFILE.profile)
+  const schoolChoices = useMemo(() => {
+    const campuses = campusesForSchool(form.school || user?.profile?.school)
+    return [...new Set([...SCHOOL_LIST, ...campuses])]
+  }, [form.school, user?.profile?.school])
   const t = (key, fallback = '') => translate(language, key, fallback)
   const settingLabel = (key) => t(SETTING_I18N[key] || 'profile.settings', SETTING_I18N[key] || key)
   const [activePanel, setActivePanel] = useState('profile')
@@ -572,7 +575,7 @@ export default function ProfileCenter({ user, language = 'zh-CN', onLogout, onNo
               )}
               {activePanel === 'school' && (
                 <div className="settings-form">
-                  {SCHOOLS.map((school) => (
+                  {schoolChoices.map((school) => (
                     <button key={school} type="button" className="profile-choice" onClick={() => saveSettingProfile({ school }, `${t('profile.switchedTo', '已切换到')}${school}`)}>
                       <School /> {school} {form.school === school ? <Badge>{t('profile.current')}</Badge> : null}
                     </button>
@@ -718,7 +721,7 @@ export default function ProfileCenter({ user, language = 'zh-CN', onLogout, onNo
             <div>
               <Label>学校</Label>
               <select value={form.school || ''} onChange={(event) => updateForm('school', event.target.value)}>
-                {SCHOOLS.map((school) => <option key={school} value={school}>{school}</option>)}
+                {schoolChoices.map((school) => <option key={school} value={school}>{school}</option>)}
               </select>
             </div>
             <div>

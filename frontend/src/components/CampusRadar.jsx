@@ -37,7 +37,8 @@ export default function CampusRadar({ tasks, school = '南通理工学院', onAc
   const [mapStatus, setMapStatus] = useState('地图加载中...')
   const [isLocating, setIsLocating] = useState(false)
   const [schoolPoint, setSchoolPoint] = useState(() => {
-    const fb = schoolFallbackLngLat(school)
+    // Prefer known coords for this school only — never force another university's campus
+    const fb = schoolFallbackLngLat(school) || [116.397, 39.908]
     return { lng: fb[0], lat: fb[1], name: school }
   })
   const mapContainerRef = useRef(null)
@@ -105,34 +106,52 @@ export default function CampusRadar({ tasks, school = '南通理工学院', onAc
   // Resolve school location via AMap when profile school changes
   useEffect(() => {
     let cancelled = false
+    const instant = schoolFallbackLngLat(school)
+    if (instant) {
+      setSchoolPoint({ lng: instant[0], lat: instant[1], name: school, approximate: true })
+    }
     resolveSchoolLocation(school).then((point) => {
       if (cancelled) return
       setSchoolPoint(point)
       setMapStatus(`已标注学校：${point.name}${point.approximate ? '（近似）' : ''} · 待接任务可点`)
+      // Pan map immediately when school changes
+      if (mapRef.current) {
+        try {
+          mapRef.current.setZoomAndCenter(16, [point.lng, point.lat])
+        } catch { /* ignore */ }
+      }
     })
     return () => { cancelled = true }
   }, [school])
 
   useEffect(() => {
     let disposed = false
-    const center = schoolFallbackLngLat(school)
+    const center = schoolFallbackLngLat(school) || [schoolPoint.lng, schoolPoint.lat]
 
     loadAMap()
       .then((AMap) => {
         if (disposed || !mapContainerRef.current) return
         amapRef.current = AMap
-        const map = new AMap.Map(mapContainerRef.current, {
-          center,
-          zoom: 16,
-          viewMode: '2D',
-          mapStyle: 'amap://styles/whitesmoke',
-          resizeEnable: true,
-        })
-        map.addControl(new AMap.Scale())
-        map.addControl(new AMap.ToolBar({ position: { right: '12px', bottom: '18px' } }))
-        mapRef.current = map
-        geolocationRef.current = createAMapGeolocation(AMap)
-        map.addControl(geolocationRef.current)
+        // Reuse map if exists; only create once
+        if (!mapRef.current) {
+          const map = new AMap.Map(mapContainerRef.current, {
+            center,
+            zoom: 16,
+            viewMode: '2D',
+            mapStyle: 'amap://styles/whitesmoke',
+            resizeEnable: true,
+          })
+          map.addControl(new AMap.Scale())
+          map.addControl(new AMap.ToolBar({ position: { right: '12px', bottom: '18px' } }))
+          mapRef.current = map
+          geolocationRef.current = createAMapGeolocation(AMap)
+          map.addControl(geolocationRef.current)
+          try {
+            map.setZoomAndCenter(16, center)
+          } catch { /* ignore */ }
+        } else {
+          mapRef.current.setZoomAndCenter(16, center)
+        }
         setMapStatus(`校园雷达 · ${school || '本校'} 待接任务`)
       })
       .catch((error) => {
@@ -142,14 +161,18 @@ export default function CampusRadar({ tasks, school = '南通理工学院', onAc
 
     return () => {
       disposed = true
-      taskMarkersRef.current = []
-      userMarkerRef.current = null
-      schoolMarkerRef.current = null
-      geolocationRef.current = null
-      if (mapRef.current) {
-        mapRef.current.destroy()
-        mapRef.current = null
-      }
+      // Do not destroy map on school change — only on unmount handled below
+    }
+  }, [school])
+
+  useEffect(() => () => {
+    taskMarkersRef.current = []
+    userMarkerRef.current = null
+    schoolMarkerRef.current = null
+    geolocationRef.current = null
+    if (mapRef.current) {
+      mapRef.current.destroy()
+      mapRef.current = null
     }
   }, [])
 

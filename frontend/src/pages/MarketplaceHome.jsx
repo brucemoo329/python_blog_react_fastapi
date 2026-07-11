@@ -82,6 +82,7 @@ import {
 } from '@/api/marketplace'
 import { cn } from '@/lib/utils'
 import { navLabel, normalizeLang, t as translate, writeStoredLanguage } from '@/lib/i18n'
+import { campusesForSchool } from '@/lib/schools'
 import '@/styles/marketplace.css'
 
 const NAV_DEFS = [
@@ -246,6 +247,10 @@ export default function MarketplaceHome({ user, onLogout, onUserUpdate }) {
   const language = normalizeLang(currentUser?.profile?.language || localStorage.getItem('campus_language') || 'zh-CN')
   const isAdmin = Boolean(currentUser?.is_admin)
   const t = useCallback((key, fallback = '') => translate(language, key, fallback), [language])
+  const campusOptions = useMemo(
+    () => campusesForSchool(campus || currentUser?.profile?.school),
+    [campus, currentUser?.profile?.school],
+  )
   const navItems = useMemo(
     () => NAV_DEFS.map((item) => ({ ...item, label: navLabel(language, item.id) })),
     [language],
@@ -684,7 +689,7 @@ export default function MarketplaceHome({ user, onLogout, onUserUpdate }) {
         <header className="campus-topbar">
           <DropdownMenu>
             <DropdownMenuTrigger asChild><Button variant="outline" className="campus-selector"><MapPin /> {campus} <ChevronDown /></Button></DropdownMenuTrigger>
-            <DropdownMenuContent align="start"><DropdownMenuLabel>{t('ui.campusLabel')}</DropdownMenuLabel><DropdownMenuGroup>{['南通理工学院南通校区', '南通理工学院海安校区'].map((school) => <DropdownMenuItem key={school} onClick={async () => { try { const response = await updateUserProfile({ school }); handleProfileChange({ ...currentUser, profile: { ...(currentUser?.profile || {}), ...response.profile } }); setNotice(`${school}`) } catch (error) { setNotice(error.response?.data?.detail || '学校保存失败') } }}>{school}</DropdownMenuItem>)}</DropdownMenuGroup></DropdownMenuContent>
+            <DropdownMenuContent align="start"><DropdownMenuLabel>{t('ui.campusLabel')}</DropdownMenuLabel><DropdownMenuGroup>{campusOptions.map((school) => <DropdownMenuItem key={school} onClick={async () => { try { const response = await updateUserProfile({ school }); handleProfileChange({ ...currentUser, profile: { ...(currentUser?.profile || {}), ...response.profile, school } }); setCampus(school); setNotice(`${school}`) } catch (error) { setNotice(error.response?.data?.detail || '学校保存失败') } }}>{school}</DropdownMenuItem>)}</DropdownMenuGroup></DropdownMenuContent>
           </DropdownMenu>
           <InputGroup className="campus-search"><InputGroupAddon><Search /></InputGroupAddon><InputGroupInput value={search} onChange={(event) => setSearch(event.target.value)} placeholder={t('ui.search')} /></InputGroup>
           <div className="campus-top-actions">

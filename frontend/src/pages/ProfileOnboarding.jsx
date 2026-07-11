@@ -5,9 +5,10 @@ import CampusBrand from '../components/CampusBrand.jsx'
 import BlurText from '../components/reactbits/BlurText.jsx'
 import GlassSurface from '../components/reactbits/GlassSurface.jsx'
 import Stepper, { Step } from '../components/reactbits/Stepper.jsx'
+import { SCHOOL_LIST } from '../lib/schools.js'
 import '../styles/onboarding.css'
 
-const SCHOOLS = ['北京大学', '清华大学', '复旦大学', '上海交通大学', '浙江大学', '南京大学', '武汉大学', '中山大学', '南通理工学院']
+const SCHOOLS = SCHOOL_LIST
 const THEMES = [
   { id: 'teal', label: '薄荷校园' },
   { id: 'violet', label: '晚霞紫' },

@@ -16,6 +16,48 @@ from app.db import SessionLocal
 router = APIRouter(prefix="/marketplace", tags=["campus-marketplace"])
 MAX_CAMPUS_AMOUNT = Decimal("999999.99")
 
+# Campus centers (lng, lat) — keep in sync with frontend/src/lib/schools.js
+SCHOOL_COORDS = {
+    "北京大学": (116.3109, 39.9928),
+    "北京大学燕园": (116.3109, 39.9928),
+    "北京大学医学部": (116.356, 39.986),
+    "清华大学": (116.3269, 40.003),
+    "清华大学本部": (116.3269, 40.003),
+    "清华大学深圳国际研究生院": (113.979, 22.597),
+    "复旦大学": (121.5037, 31.2989),
+    "复旦大学邯郸校区": (121.5037, 31.2989),
+    "复旦大学江湾校区": (121.5045, 31.337),
+    "上海交通大学": (121.4365, 31.0252),
+    "上海交通大学闵行校区": (121.4365, 31.0252),
+    "上海交通大学徐汇校区": (121.4368, 31.2005),
+    "浙江大学": (120.0869, 30.3086),
+    "浙江大学紫金港校区": (120.0869, 30.3086),
+    "浙江大学玉泉校区": (120.1233, 30.2635),
+    "南京大学": (118.7802, 32.0563),
+    "南京大学鼓楼校区": (118.7802, 32.0563),
+    "南京大学仙林校区": (118.958, 32.119),
+    "武汉大学": (114.3655, 30.538),
+    "中山大学": (113.298, 23.096),
+    "中山大学南校区": (113.298, 23.096),
+    "中山大学东校区": (113.392, 23.065),
+    "南通理工学院": (120.809261, 32.041042),
+    "南通理工学院南通校区": (120.809261, 32.041042),
+    "南通理工学院海安校区": (120.4675, 32.5458),
+}
+
+
+def school_center_lng_lat(school_name: Optional[str] = None):
+    """Return (lng, lat) for a school name; default Nantong only when unknown/empty."""
+    name = (school_name or "").strip()
+    if not name or name == "未选择学校":
+        return 120.809261, 32.041042
+    if name in SCHOOL_COORDS:
+        return SCHOOL_COORDS[name]
+    for key, coords in SCHOOL_COORDS.items():
+        if key in name or name in key:
+            return coords
+    return 120.809261, 32.041042
+
 
 def get_db():
     db = SessionLocal()
@@ -493,15 +535,16 @@ def service_task_tracking_payload(
     pickup_lng = _num(task.pickup_longitude) if task.pickup_longitude is not None else _num(task.longitude)
     delivery_lat = _num(task.delivery_latitude)
     delivery_lng = _num(task.delivery_longitude)
-    # Address-only tasks: still expose campus-center fallbacks so clients can navigate
+    # Address-only tasks: campus-center fallbacks by requester school (not always Nantong)
+    school_name = None
+    if getattr(task, "requester", None) and getattr(task.requester, "profile", None):
+        school_name = task.requester.profile.school
+    base_lng, base_lat = school_center_lng_lat(school_name)
     if pickup_lat is None or pickup_lng is None:
-        # 南通理工学院主校区
-        base_lng, base_lat = 120.809261, 32.041042
         offset = ((task.id or 0) % 17 - 8) * 0.00028
         pickup_lng = pickup_lng if pickup_lng is not None else base_lng + offset
         pickup_lat = pickup_lat if pickup_lat is not None else base_lat + offset * 0.7
     if delivery_lat is None or delivery_lng is None:
-        base_lng, base_lat = 120.809261, 32.041042
         offset = ((task.id or 0) % 13 - 6) * 0.00032
         delivery_lng = delivery_lng if delivery_lng is not None else base_lng - offset
         delivery_lat = delivery_lat if delivery_lat is not None else base_lat - offset * 0.6
@@ -1454,15 +1497,23 @@ def get_map_tasks(
         ).filter(models.UserProfile.school == profile.school)
     tasks = tasks.order_by(models.ServiceTask.created_at.desc()).limit(40).all()
     result = []
+    viewer_lng, viewer_lat = school_center_lng_lat(profile.school if profile else None)
     for task in tasks:
         plat = _num(task.pickup_latitude) if task.pickup_latitude is not None else _num(task.latitude)
         plng = _num(task.pickup_longitude) if task.pickup_longitude is not None else _num(task.longitude)
         dlat = _num(task.delivery_latitude)
         dlng = _num(task.delivery_longitude)
-        # Prefer real coords; fall back to school center offset by id so markers still show
+        # Prefer real coords; fall back to school center (viewer/requester school), fix lat/lng order
         if plat is None or plng is None:
-            plat = 120.809261 + ((task.id % 17) - 8) * 0.00035
-            plng = 32.041042 + ((task.id % 13) - 6) * 0.00028
+            req_school = None
+            if task.requester and getattr(task.requester, "profile", None):
+                req_school = task.requester.profile.school
+            base_lng, base_lat = school_center_lng_lat(req_school or (profile.school if profile else None))
+            plng = base_lng + ((task.id % 17) - 8) * 0.00035
+            plat = base_lat + ((task.id % 13) - 6) * 0.00028
+        if dlat is None or dlng is None:
+            dlat = dlat if dlat is not None else viewer_lat
+            dlng = dlng if dlng is not None else viewer_lng
         result.append({
             "id": task.id,
             "type": "service",
