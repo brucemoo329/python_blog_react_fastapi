@@ -1221,10 +1221,24 @@ def make_order_no(prefix: str = "CP") -> str:
 
 
 def get_or_create_service_order(db: Session, task: models.ServiceTask) -> models.Order:
-    """跑腿接单后生成双边可见订单：buyer=发布者，seller=跑手。"""
-    existing = db.query(models.Order).filter_by(service_task_id=task.id).first()
-    if existing:
-        return existing
+    """跑腿接单后生成双边可见订单：buyer=发布者，seller=跑手。
+
+    若同一任务曾有已取消/已完成订单，则新建一笔订单，避免复用旧单。
+    """
+    active = (
+        db.query(models.Order)
+        .filter(
+            models.Order.service_task_id == task.id,
+            models.Order.status.notin_(["cancelled", "completed", "refunded"]),
+        )
+        .order_by(models.Order.id.desc())
+        .first()
+    )
+    if active:
+        # Keep seller aligned with current runner
+        if task.runner_id and active.seller_id != task.runner_id:
+            active.seller_id = task.runner_id
+        return active
     order = models.Order(
         order_no=make_order_no("RN"),
         buyer_id=task.requester_id,
@@ -1240,6 +1254,59 @@ def get_or_create_service_order(db: Session, task: models.ServiceTask) -> models
     db.add(order)
     db.flush()
     return order
+
+
+def reopen_service_task_for_pool(task: models.ServiceTask):
+    """Put errand back to open pool after trade cancel (still visible in 跑腿 feed)."""
+    if not task or getattr(task, "status", None) == "deleted":
+        return
+    task.status = "open"
+    task.runner_id = None
+    task.delivery_phase = "pending"
+    task.accepted_at = None
+    task.picked_up_at = None
+    task.completed_at = None
+    task.runner_latitude = None
+    task.runner_longitude = None
+    task.runner_location_updated_at = None
+    task.eta_seconds = None
+    # keep distance_meters / travel_mode as last estimate optional — clear for clean re-accept
+    task.distance_meters = None
+
+
+def heal_cancelled_errands_without_active_order(db: Session, limit: int = 40) -> int:
+    """
+    Legacy data: order cancel used to set task.status=cancelled, hiding posts from feed.
+    Re-open tasks that have no active order and are not soft-deleted.
+    """
+    tasks = (
+        db.query(models.ServiceTask)
+        .filter(models.ServiceTask.status == "cancelled")
+        .order_by(models.ServiceTask.id.desc())
+        .limit(limit)
+        .all()
+    )
+    fixed = 0
+    for task in tasks:
+        active = (
+            db.query(models.Order.id)
+            .filter(
+                models.Order.service_task_id == task.id,
+                models.Order.status.notin_(["cancelled", "completed", "refunded"]),
+            )
+            .first()
+        )
+        if active:
+            continue
+        reopen_service_task_for_pool(task)
+        fixed += 1
+    if fixed:
+        try:
+            db.commit()
+        except Exception:
+            db.rollback()
+            return 0
+    return fixed
 
 
 def sync_service_order_status(db: Session, task: models.ServiceTask):
@@ -1437,6 +1504,9 @@ def get_feed(
     db: Session = Depends(get_db),
     user: models.User = Depends(get_current_user),
 ):
+    # Restore errands hidden by old cancel logic (task cancelled while post still wanted)
+    if kind in {"all", "service"}:
+        heal_cancelled_errands_without_active_order(db)
     items = []
     profile = ensure_user_profile(db, user)
     my_school = (profile.school or "").strip()
@@ -1623,6 +1693,7 @@ def get_map_tasks(
     user: models.User = Depends(get_current_user),
 ):
     """待接任务点：仅 open 状态，供校园雷达展示与点击跳转。"""
+    heal_cancelled_errands_without_active_order(db)
     profile = ensure_user_profile(db, user)
     tasks = db.query(models.ServiceTask).options(
         joinedload(models.ServiceTask.requester).joinedload(models.User.profile)
@@ -3856,9 +3927,11 @@ def cancel_order(
     order.cancelled_by_id = user.id
     if order.listing and order.listing.status in {"reserved", "pending", "sold_pending"}:
         order.listing.status = "available"
+    reopened = False
     if order.service_task and getattr(order.service_task, "status", None) != "deleted":
-        order.service_task.status = "cancelled"
-        order.service_task.delivery_phase = "pending"
+        # 取消交易 ≠ 下架发布：任务重新进入待接单，其他同学仍可在跑腿列表看到
+        reopen_service_task_for_pool(order.service_task)
+        reopened = True
     peer_id = order.seller_id if user.id == order.buyer_id else order.buyer_id
     if peer_id:
         create_notification(
@@ -3871,6 +3944,17 @@ def cancel_order(
             target_type="order",
             target_id=order.id,
         )
+    if reopened and order.service_task and order.service_task.requester_id:
+        create_notification(
+            db,
+            recipient_id=order.service_task.requester_id,
+            actor_id=user.id,
+            notification_type="order",
+            title="跑腿任务已重新开放",
+            content=f"「{order.service_task.title}」交易已取消，任务已重新挂到待接单列表。",
+            target_type="service",
+            target_id=order.service_task.id,
+        )
     db.commit()
     order = db.query(models.Order).options(
         joinedload(models.Order.listing).joinedload(models.Listing.images),
@@ -3878,7 +3962,10 @@ def cancel_order(
         joinedload(models.Order.buyer).joinedload(models.User.profile),
         joinedload(models.Order.seller).joinedload(models.User.profile),
     ).filter_by(id=order_id).first()
-    return {"message": "订单已取消，对方可选择投诉或跳过", "item": full_order_payload(db, order, user.id)}
+    msg = "订单已取消，对方可选择投诉或跳过"
+    if reopened:
+        msg = "订单已取消，跑腿任务已重新开放待接单"
+    return {"message": msg, "item": full_order_payload(db, order, user.id)}
 
 
 @router.post("/orders/{order_id}/review")
