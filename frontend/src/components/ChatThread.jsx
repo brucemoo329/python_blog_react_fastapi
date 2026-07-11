@@ -90,26 +90,41 @@ export default function ChatThread({
   const noticeRef = useRef(onNotice)
   const conversationUpdateRef = useRef(onConversationUpdate)
   const currentUserIdRef = useRef(currentUser?.id)
+  const conversationRef = useRef(conversation)
+  const refreshInFlightRef = useRef(false)
 
   useEffect(() => { noticeRef.current = onNotice }, [onNotice])
   useEffect(() => { conversationUpdateRef.current = onConversationUpdate }, [onConversationUpdate])
   useEffect(() => { currentUserIdRef.current = currentUser?.id }, [currentUser?.id])
+  useEffect(() => { conversationRef.current = conversation }, [conversation])
 
+  // Stable refresh: only conversation.id matters. Do NOT depend on conversation.user
+  // (parent poll recreates that object every few seconds and caused load-flash loops).
   const refresh = useCallback(async (silent = false) => {
-    if (!conversation?.id) return
+    const conv = conversationRef.current
+    if (!conv?.id) return
+    if (refreshInFlightRef.current && silent) return
+    refreshInFlightRef.current = true
     if (!silent) setLoading(true)
     try {
-      const response = await getConversationMessages(conversation.id)
+      const response = await getConversationMessages(conv.id)
       const items = response.items || []
       setMessages((previous) => {
         const last = items[items.length - 1]
-        const changed = previous.length !== items.length
-          || previous[previous.length - 1]?.id !== last?.id
-        if (!silent || changed) {
+        const prevLast = previous[previous.length - 1]
+        const changed = previous.length !== items.length || prevLast?.id !== last?.id
+        // Only nudge parent list when something actually changed (or first non-silent load)
+        if (changed || !silent) {
           queueMicrotask(() => conversationUpdateRef.current?.())
         }
-        // Incoming from peer while this thread is open (and not first load)
-        if (silent && changed && last && lastMessageIdRef.current != null && last.id !== lastMessageIdRef.current) {
+        // Incoming from peer while this thread is open (poll only, not first paint)
+        if (
+          silent
+          && changed
+          && last
+          && lastMessageIdRef.current != null
+          && last.id !== lastMessageIdRef.current
+        ) {
           const fromOther = last.is_mine === false
             || (last.is_mine == null && (
               last.sender_id != null
@@ -117,34 +132,37 @@ export default function ChatThread({
                 : last.sender?.id !== currentUserIdRef.current
             ))
           if (fromOther) {
-            const peer = conversation.user || {}
+            const peer = conversationRef.current?.user || {}
             alertIncoming({
               title: peer.nickname || peer.username || '新私信',
               body: last.content || '发来一条新消息',
-              tag: `chat-${conversation.id}-${last.id}`,
+              tag: `chat-${conv.id}-${last.id}`,
             }, {
-              // User is looking at chat: chime only, no OS banner if focused
               skipDesktopWhenFocused: true,
               skipSoundWhenFocused: false,
             })
           }
         }
         if (last?.id != null) lastMessageIdRef.current = last.id
+        // Avoid re-render flash when poll returns identical list
+        if (!changed) return previous
         return items
       })
     } catch (error) {
       if (!silent) noticeRef.current?.(error.response?.data?.detail || '聊天记录加载失败')
     } finally {
+      refreshInFlightRef.current = false
       if (!silent) setLoading(false)
     }
-  }, [conversation?.id, conversation?.user])
+  }, [])
 
   useEffect(() => {
     setMessages([])
     previousCountRef.current = 0
     lastMessageIdRef.current = null
     setShopOpen(false)
-    refresh()
+    setLoading(true)
+    refresh(false)
     const timer = window.setInterval(() => refresh(true), 5000)
     return () => window.clearInterval(timer)
   }, [conversation?.id, refresh])
