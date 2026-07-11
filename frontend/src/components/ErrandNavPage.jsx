@@ -56,21 +56,45 @@ function fmtEta(seconds) {
 
 function toLngLat(point) {
   if (!point) return null
-  if (Array.isArray(point) && point.length >= 2) return [Number(point[0]), Number(point[1])]
-  if (point.lng != null && point.lat != null) return [Number(point.lng), Number(point.lat)]
+  if (Array.isArray(point) && point.length >= 2) {
+    const lng = Number(point[0])
+    const lat = Number(point[1])
+    if (Number.isFinite(lng) && Number.isFinite(lat)) return [lng, lat]
+    return null
+  }
+  // Accept {lng,lat} / {longitude,latitude} / string numbers; reject null/NaN
+  const lngRaw = point.lng ?? point.longitude
+  const latRaw = point.lat ?? point.latitude
+  if (lngRaw == null || latRaw == null || lngRaw === '' || latRaw === '') return null
+  const lng = Number(lngRaw)
+  const lat = Number(latRaw)
+  if (!Number.isFinite(lng) || !Number.isFinite(lat)) return null
+  return [lng, lat]
+}
+
+function markerPosition(marker) {
+  if (!marker?.getPosition) return null
+  try {
+    const p = marker.getPosition()
+    if (!p) return null
+    const lng = typeof p.getLng === 'function' ? p.getLng() : p.lng
+    const lat = typeof p.getLat === 'function' ? p.getLat() : p.lat
+    if (Number.isFinite(Number(lng)) && Number.isFinite(Number(lat))) return [Number(lng), Number(lat)]
+  } catch { /* ignore */ }
   return null
 }
 
 async function ensurePoint(label, existing) {
   const cur = toLngLat(existing)
-  if (cur && Number.isFinite(cur[0]) && Number.isFinite(cur[1])) return cur
+  if (cur) return cur
   if (!label) return null
   try {
-    const geo = await geocodeAddress(label)
-    return [geo.lng, geo.lat]
+    const geo = await geocodeAddress(String(label))
+    if (geo?.lng != null && geo?.lat != null) return [Number(geo.lng), Number(geo.lat)]
   } catch {
-    return null
+    /* fall through */
   }
+  return null
 }
 
 function normalizeMode(value, fallback = 'ride') {
@@ -456,24 +480,64 @@ export default function ErrandNavPage({
     }
   }
 
-  const openExternalNav = () => {
+  const openExternalNav = async () => {
+    const goPickup = phase === 'to_pickup' || phase === 'pending'
+    const destName = goPickup
+      ? (tracking?.pickup_location || tracking?.pickup?.label || '取货点')
+      : (tracking?.delivery_location || tracking?.delivery?.label || '送达点')
+    const destLabel = destName
+
     try {
-      // Fast path: use cached coords only — never block on GPS/geocode
-      const origin = myPosRef.current
-        || (tracking?.runner?.lat != null
-          ? [Number(tracking.runner.lng), Number(tracking.runner.lat)]
-          : null)
-      const pickup = toLngLat(tracking?.pickup)
-      const delivery = toLngLat(tracking?.delivery)
-      const dest = phase === 'to_pickup' || phase === 'pending' ? pickup : delivery
-      const destName = phase === 'to_pickup' || phase === 'pending'
-        ? (tracking?.pickup_location || '取货点')
-        : (tracking?.delivery_location || '送达点')
+      // 1) Prefer map markers already drawn (fastest, already geocoded on map)
+      let pickup = markerPosition(markerPool.current.pickup) || toLngLat(tracking?.pickup)
+      let delivery = markerPosition(markerPool.current.delivery) || toLngLat(tracking?.delivery)
+
+      // 2) Resolve address text → coords (campus landmarks are instant)
+      if (!pickup) {
+        pickup = await ensurePoint(
+          tracking?.pickup_location || tracking?.pickup?.label,
+          tracking?.pickup,
+        )
+      }
+      if (!delivery) {
+        delivery = await ensurePoint(
+          tracking?.delivery_location || tracking?.delivery?.label,
+          tracking?.delivery,
+        )
+      }
+
+      let dest = goPickup ? pickup : delivery
+      // 3) Last resort: geocode the display name again
+      if (!dest && destLabel) {
+        dest = await ensurePoint(destLabel, null)
+      }
 
       if (!dest) {
-        onNotice?.('暂无目的地坐标，请稍等地图定位完成后再试')
+        onNotice?.(`无法解析「${destLabel}」的坐标。请确认地址含校区/门/栋等信息，或在地图上已显示取货/送达标记后再试。`)
         return
       }
+
+      // Cache resolved coords so next open / redraw is instant
+      if (pickup || delivery) {
+        setTracking((prev) => {
+          if (!prev) return prev
+          return {
+            ...prev,
+            pickup: pickup
+              ? { ...(prev.pickup || {}), lng: pickup[0], lat: pickup[1], label: prev.pickup_location || prev.pickup?.label }
+              : prev.pickup,
+            delivery: delivery
+              ? { ...(prev.delivery || {}), lng: delivery[0], lat: delivery[1], label: prev.delivery_location || prev.delivery?.label }
+              : prev.delivery,
+          }
+        })
+        if (pickup) upsertMarker('pickup', pickup, MARKER_HTML.pickup, tracking?.pickup_location || '取货点', 140)
+        if (delivery) upsertMarker('delivery', delivery, MARKER_HTML.delivery, tracking?.delivery_location || '送达点', 140)
+      }
+
+      const origin = myPosRef.current
+        || markerPosition(markerPool.current.runner)
+        || toLngLat(tracking?.runner)
 
       openAmapAppNavigation({
         fromLng: origin?.[0],

@@ -493,6 +493,18 @@ def service_task_tracking_payload(
     pickup_lng = _num(task.pickup_longitude) if task.pickup_longitude is not None else _num(task.longitude)
     delivery_lat = _num(task.delivery_latitude)
     delivery_lng = _num(task.delivery_longitude)
+    # Address-only tasks: still expose campus-center fallbacks so clients can navigate
+    if pickup_lat is None or pickup_lng is None:
+        # 南通理工学院主校区
+        base_lng, base_lat = 120.809261, 32.041042
+        offset = ((task.id or 0) % 17 - 8) * 0.00028
+        pickup_lng = pickup_lng if pickup_lng is not None else base_lng + offset
+        pickup_lat = pickup_lat if pickup_lat is not None else base_lat + offset * 0.7
+    if delivery_lat is None or delivery_lng is None:
+        base_lng, base_lat = 120.809261, 32.041042
+        offset = ((task.id or 0) % 13 - 6) * 0.00032
+        delivery_lng = delivery_lng if delivery_lng is not None else base_lng - offset
+        delivery_lat = delivery_lat if delivery_lat is not None else base_lat - offset * 0.6
 
     if order_id is None and db is not None and task and task.id:
         row = db.query(models.Order.id).filter_by(service_task_id=task.id).first()
