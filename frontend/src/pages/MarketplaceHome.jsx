@@ -743,7 +743,9 @@ export default function MarketplaceHome({ user, onLogout, onUserUpdate }) {
   return (
     <main className="campus-shell campus-shell--daylight">
       <aside className="campus-sidebar">
-        <button type="button" className="campus-logo" onClick={() => selectNav('home')}><CampusBrand /></button>
+        <button type="button" className="campus-logo" onClick={() => selectNav('home')} aria-label="校园集市首页">
+          <CampusBrand className="campus-logo-brand" />
+        </button>
         <div className="campus-line-nav" aria-label="主导航"><LineSidebar items={navItems.map((item) => item.label)} defaultActive={Math.max(0, navItems.findIndex((item) => item.id === activeNav))} accentColor="#5b4ae8" textColor="rgba(44,79,73,.62)" showIndex={false} showMarker={false} maxShift={34} proximityRadius={164} itemGap={21} fontSize={1.03} smoothing={72} className="campus-main-line-sidebar" onItemClick={(index) => selectNav(navItems[index].id)} /></div>
         <SpotlightCard className="campus-sidebar-stats" spotlightColor="rgba(15, 159, 131, 0.18)" style={{ '--trust-color': trustColor, '--trust-soft': trustSoftColor }}>
           <p>{t('ui.trust')}</p>

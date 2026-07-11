@@ -36,9 +36,15 @@
   pointer-events: none;
 }
 
+/* Default icon size for shell UI — brand mark uses its own fixed px sizes */
 .campus-shell svg {
   width: 1em;
   height: 1em;
+}
+
+.campus-shell .campus-brand__mark svg {
+  width: 21px;
+  height: 21px;
 }
 
 .campus-sidebar {
@@ -57,32 +63,76 @@
   backdrop-filter: blur(18px);
 }
 
+/* Logo: CampusBrand is a single child (.campus-brand), do NOT use span:first/last-child
+   (those matched the whole brand and squashed it to 36×36). */
 .campus-logo {
-  display: flex;
+  display: inline-flex;
   align-items: center;
-  gap: 11px;
+  justify-content: flex-start;
+  gap: 0;
+  min-height: 44px;
   padding: 0 8px;
+  border: 0;
   background: transparent;
   color: var(--foreground);
   text-align: left;
+  cursor: pointer;
 }
 
-.campus-logo > span:first-child {
+.campus-logo .campus-brand {
+  display: inline-flex !important;
+  align-items: center;
+  gap: 11px;
+  width: auto !important;
+  height: auto !important;
+  min-width: 0;
+  padding: 0;
+  border: 0;
+  border-radius: 0;
+  background: transparent !important;
+  box-shadow: none !important;
+  color: inherit;
+  line-height: 1.05;
+  place-items: unset;
+  font-size: inherit;
+  font-weight: inherit;
+}
+
+.campus-logo .campus-brand__mark {
   display: grid;
-  width: 36px;
-  height: 36px;
+  width: 38px;
+  height: 38px;
+  flex: 0 0 38px;
   place-items: center;
+  border: 1px solid rgba(255, 255, 255, 0.45);
   border-radius: 8px;
-  background: linear-gradient(135deg, #aa82ff, #5f38df);
-  box-shadow: 0 10px 30px rgba(106, 69, 237, 0.28);
+  background: linear-gradient(135deg, #0f9f83, #0b7d68);
+  color: #fff;
+  box-shadow: 0 8px 22px rgba(15, 159, 131, 0.22);
 }
 
-.campus-logo > span:last-child {
+.campus-logo .campus-brand__mark svg {
+  width: 21px !important;
+  height: 21px !important;
+  min-width: 21px;
+  min-height: 21px;
+  flex-shrink: 0;
+}
+
+.campus-logo .campus-brand__copy {
+  display: grid;
+  min-width: 0;
+  line-height: 1.05;
+  text-align: left;
+}
+
+.campus-logo .campus-brand__copy strong {
   font-size: 17px;
   font-weight: 850;
-  line-height: 1.05;
+  white-space: nowrap;
 }
 
+.campus-logo .campus-brand__copy small,
 .campus-logo small {
   display: block;
   margin-top: 5px;
@@ -91,6 +141,7 @@
   font-weight: 650;
   letter-spacing: 0.08em;
   text-transform: uppercase;
+  white-space: nowrap;
 }
 
 .campus-sidebar nav {
@@ -1339,14 +1390,28 @@
 
   .campus-logo {
     padding: 0;
+    min-height: 44px;
+    justify-content: center;
   }
 
-  .campus-logo > span:last-child,
+  /* Collapse text only — keep mark at full size (old span:last-child hid entire brand) */
+  .campus-logo .campus-brand__copy,
   .campus-line-nav,
   .campus-sidebar nav button span,
   .campus-sidebar-stats,
   .campus-publish-button {
     display: none;
+  }
+
+  .campus-logo .campus-brand__mark {
+    width: 40px;
+    height: 40px;
+    flex: 0 0 40px;
+  }
+
+  .campus-logo .campus-brand__mark svg {
+    width: 22px !important;
+    height: 22px !important;
   }
 
   .campus-sidebar nav button {
@@ -4445,18 +4510,18 @@
   color: #183936;
 }
 
-.campus-shell--daylight .campus-logo > .campus-brand {
-  display: inline-flex;
-  width: auto;
-  height: auto;
-  place-items: initial;
-  border-radius: 0;
-  background: transparent;
+.campus-shell--daylight .campus-logo .campus-brand {
   color: #183936;
-  font-size: initial;
-  font-weight: initial;
-  line-height: initial;
-  box-shadow: none;
+}
+
+.campus-shell--daylight .campus-logo .campus-brand__mark {
+  border-color: rgba(15, 159, 131, 0.28);
+  background: linear-gradient(135deg, #12b089, #0d8a72);
+  box-shadow: 0 8px 22px rgba(15, 159, 131, 0.2);
+}
+
+.campus-shell--daylight .campus-logo .campus-brand__copy small {
+  color: #718681;
 }
 
 .campus-shell--daylight .campus-main-line-sidebar .line-sidebar__label {
