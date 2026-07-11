@@ -27,6 +27,8 @@ class User(Base):
     hashed_password = Column(String(255), nullable=False)
     is_active = Column(Boolean, default=True)
     is_deleted = Column(Boolean, default=False, index=True)
+    # Soft-deleted row scrubbed + hidden from admin lists (comments keep FK)
+    is_purged = Column(Boolean, default=False, index=True)
     is_admin = Column(Boolean, default=False, index=True)
     can_comment = Column(Boolean, default=True)
     can_post = Column(Boolean, default=True)

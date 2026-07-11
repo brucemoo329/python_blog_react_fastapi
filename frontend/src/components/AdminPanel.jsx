@@ -36,6 +36,7 @@ import {
   sendOfficialNotice,
   updateAdminUserPenalties,
   deleteAdminUser,
+  purgeAdminUserRecord,
 } from '@/api/marketplace'
 import { cn } from '@/lib/utils'
 
@@ -246,7 +247,7 @@ export default function AdminPanel({ onBack, onNotice }) {
   }
 
   const removeUser = async (user) => {
-    if (!window.confirm(`确认删除账号「${user.nickname || user.username}」？账户会被停用，订单与审计记录会保留。`)) return
+    if (!window.confirm(`确认删除账号「${user.nickname || user.username}」？\n\n账户将停用：评论等痕迹会显示灰色默认头像，他人访问主页显示「此账号已被禁用」。订单与审计记录会保留。`)) return
     try {
       const response = await deleteAdminUser(user.id)
       onNotice?.(response.message || '账户已删除')
@@ -254,6 +255,22 @@ export default function AdminPanel({ onBack, onNotice }) {
       await loadOverview()
     } catch (error) {
       onNotice?.(error.response?.data?.detail || '删除账户失败')
+    }
+  }
+
+  const purgeUserRecord = async (user) => {
+    if (!user.is_deleted) {
+      onNotice?.('请先删除账户，再清除用户记录')
+      return
+    }
+    if (!window.confirm(`确认清除用户记录「${user.nickname || user.username}」(ID ${user.id})？\n\n记录将从管理后台移除，评论等痕迹仍保留并以灰色默认头像显示。此操作不可恢复。`)) return
+    try {
+      const response = await purgeAdminUserRecord(user.id)
+      onNotice?.(response.message || '用户记录已清除')
+      await loadUsers()
+      await loadOverview()
+    } catch (error) {
+      onNotice?.(error.response?.data?.detail || '清除用户记录失败')
     }
   }
 
@@ -603,39 +620,62 @@ export default function AdminPanel({ onBack, onNotice }) {
             </div>
             <div className="admin-table">
               {users.map((user) => (
-                <article key={user.id}>
+                <article key={user.id} className={cn((user.is_deleted || !user.is_active) && 'is-user-disabled')}>
                   <div>
                     <strong>{user.nickname || user.username}</strong>
                     <small>ID {user.id} · @{user.username} · {user.email} · 信任 {user.trust?.score ?? 800}</small>
                     <p>
-                      {user.can_comment ? '可评论' : '禁评'} · {user.can_post ? '可发帖' : '禁发'} · {user.is_active ? '正常' : '停用'}
+                      {user.can_comment ? '可评论' : '禁评'} · {user.can_post ? '可发帖' : '禁发'} ·{' '}
+                      {user.is_deleted ? '已删除' : user.is_active ? '正常' : '已停用'}
                       {user.ban_reason ? ` · ${user.ban_reason}` : ''}
                     </p>
+                    {user.is_deleted || !user.is_active ? (
+                      <Badge variant="secondary">{user.is_deleted ? '删除后痕迹为灰头像 · 主页显示已禁用' : '停用后主页显示已禁用'}</Badge>
+                    ) : null}
                   </div>
                   <div className="admin-row-actions">
-                    <Button size="sm" variant="outline" onClick={() => updateUser(user, { can_comment: !user.can_comment, ban_reason: user.can_comment ? '管理员限制评论' : null })}>
-                      {user.can_comment ? '禁评' : '恢复评论'}
-                    </Button>
-                    <Button size="sm" variant="outline" onClick={() => updateUser(user, { can_post: !user.can_post, ban_reason: user.can_post ? '管理员限制发帖' : null })}>
-                      {user.can_post ? '禁发' : '恢复发帖'}
-                    </Button>
-                    <Button size="sm" onClick={() => updateUser(user, { trust_delta: -20, trust_note: '管理员下调信任分' })}>信誉-20</Button>
-                    <Button size="sm" onClick={() => updateUser(user, { trust_delta: 20, trust_note: '管理员上调信任分' })}>信誉+20</Button>
-                    <Button size="sm" variant="destructive" onClick={() => updateUser(user, { is_active: !user.is_active, ban_reason: user.is_active ? '账号被管理员停用' : null })}>
-                      {user.is_active ? '停用' : '启用'}
-                    </Button>
-                    {!user.is_admin && !user.is_deleted ? <Button size="sm" variant="destructive" onClick={() => removeUser(user)}><UserX /> 删除账户</Button> : null}
-                    <Button
-                      size="sm"
-                      variant="secondary"
-                      onClick={() => {
-                        setSelectedRecipient(user)
-                        setNoticeForm((current) => ({ ...current, broadcast: false }))
-                        setTab('notices')
-                      }}
-                    >
-                      <Megaphone /> 发通知
-                    </Button>
+                    {!user.is_deleted ? (
+                      <>
+                        <Button size="sm" variant="outline" onClick={() => updateUser(user, { can_comment: !user.can_comment, ban_reason: user.can_comment ? '管理员限制评论' : null })}>
+                          {user.can_comment ? '禁评' : '恢复评论'}
+                        </Button>
+                        <Button size="sm" variant="outline" onClick={() => updateUser(user, { can_post: !user.can_post, ban_reason: user.can_post ? '管理员限制发帖' : null })}>
+                          {user.can_post ? '禁发' : '恢复发帖'}
+                        </Button>
+                        <Button size="sm" onClick={() => updateUser(user, { trust_delta: -20, trust_note: '管理员下调信任分' })}>信誉-20</Button>
+                        <Button size="sm" onClick={() => updateUser(user, { trust_delta: 20, trust_note: '管理员上调信任分' })}>信誉+20</Button>
+                        <Button size="sm" variant="destructive" onClick={() => updateUser(user, { is_active: !user.is_active, ban_reason: user.is_active ? '账号被管理员停用' : null })}>
+                          {user.is_active ? '停用' : '启用'}
+                        </Button>
+                        {!user.is_admin ? (
+                          <Button size="sm" variant="destructive" onClick={() => removeUser(user)}><UserX /> 删除账户</Button>
+                        ) : null}
+                      </>
+                    ) : (
+                      <>
+                        <Button size="sm" variant="outline" onClick={() => updateUser(user, { is_active: true, can_comment: true, can_post: true, ban_reason: null })}>
+                          恢复账户
+                        </Button>
+                        {!user.is_admin ? (
+                          <Button size="sm" variant="destructive" onClick={() => purgeUserRecord(user)}>
+                            <Trash2 /> 删除记录
+                          </Button>
+                        ) : null}
+                      </>
+                    )}
+                    {!user.is_deleted ? (
+                      <Button
+                        size="sm"
+                        variant="secondary"
+                        onClick={() => {
+                          setSelectedRecipient(user)
+                          setNoticeForm((current) => ({ ...current, broadcast: false }))
+                          setTab('notices')
+                        }}
+                      >
+                        <Megaphone /> 发通知
+                      </Button>
+                    ) : null}
                   </div>
                 </article>
               ))}

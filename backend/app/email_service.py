@@ -120,7 +120,7 @@ def create_and_send_code(
         user = db.query(models.User).filter(models.User.email == email).first()
         if not user:
             raise HTTPException(status_code=404, detail="该邮箱尚未注册，请先注册")
-        if not user.is_active:
+        if not user.is_active or getattr(user, "is_deleted", False) or getattr(user, "is_purged", False):
             raise HTTPException(status_code=403, detail="账号已停用，请联系管理员")
     elif purpose == "register":
         existing = db.query(models.User).filter(models.User.email == email).first()

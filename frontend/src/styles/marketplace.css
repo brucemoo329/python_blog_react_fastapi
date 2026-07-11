@@ -3090,6 +3090,37 @@
 .public-profile-hero::before { position: absolute; inset: 0; z-index: 0; background-image: var(--public-bg); background-position: center; background-size: cover; opacity: 0.42; content: ''; }
 .public-profile-hero > * { position: relative; z-index: 1; }
 .public-profile-avatar { width: 108px; height: 108px; border: 4px solid rgba(16, 18, 27, 0.9); }
+
+/* Disabled / deleted account: gray default avatar */
+[data-slot="avatar"].is-account-disabled,
+.avatar.is-account-disabled,
+.is-account-disabled[data-slot="avatar"] {
+  background: #9ca3af !important;
+  color: #fff !important;
+}
+.is-account-disabled [data-slot="avatar-fallback"],
+[data-slot="avatar"].is-account-disabled [data-slot="avatar-fallback"] {
+  background: #9ca3af !important;
+  color: #f3f4f6 !important;
+  font-weight: 700;
+}
+.public-profile-hero--disabled {
+  grid-template-columns: 110px minmax(0, 1fr);
+  background: linear-gradient(135deg, #3f4550, #23262d);
+}
+.public-profile-disabled-hint {
+  margin-top: 18px;
+  padding: 22px;
+  border-radius: 12px;
+  background: rgba(148, 163, 184, 0.12);
+  color: #64748b;
+  line-height: 1.6;
+}
+.admin-table article.is-user-disabled {
+  opacity: 0.92;
+  border-color: rgba(148, 163, 184, 0.35);
+  background: rgba(148, 163, 184, 0.06);
+}
 .public-profile-copy h1 { margin: 8px 0 4px; color: #f5f5f9; font-size: 27px; }
 .public-profile-copy p { margin: 0 0 7px; color: #c6c8d1; }
 .public-profile-copy > span { display: flex; align-items: center; gap: 5px; color: #858b9a; font-size: 11px; }

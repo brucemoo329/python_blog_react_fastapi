@@ -23,6 +23,7 @@ def ensure_runtime_schema():
         "ALTER TABLE user_profiles ADD COLUMN last_active_at DATETIME NULL",
         "ALTER TABLE users ADD COLUMN is_admin TINYINT(1) DEFAULT 0",
         "ALTER TABLE users ADD COLUMN is_deleted TINYINT(1) DEFAULT 0",
+        "ALTER TABLE users ADD COLUMN is_purged TINYINT(1) DEFAULT 0",
         "ALTER TABLE users ADD COLUMN can_comment TINYINT(1) DEFAULT 1",
         "ALTER TABLE users ADD COLUMN can_post TINYINT(1) DEFAULT 1",
         "ALTER TABLE users ADD COLUMN ban_reason VARCHAR(240) NULL",
@@ -246,7 +247,7 @@ def login(user_data: LoginRequest, db: Session = Depends(get_db)):
     if not db_user:
         raise HTTPException(status_code=401, detail="账号不存在")
 
-    if not db_user.is_active:
+    if not db_user.is_active or getattr(db_user, "is_deleted", False) or getattr(db_user, "is_purged", False):
         raise HTTPException(status_code=403, detail="账号已停用，请联系管理员")
 
     # 当前数据库字段名叫 hashed_password，但原项目实际按明文写入。
@@ -284,7 +285,7 @@ def login_with_email_code(data: EmailLoginRequest, db: Session = Depends(get_db)
     db_user = db.query(models.User).filter(models.User.email == email).first()
     if not db_user:
         raise HTTPException(status_code=404, detail="该邮箱尚未注册，请先注册")
-    if not db_user.is_active:
+    if not db_user.is_active or getattr(db_user, "is_deleted", False) or getattr(db_user, "is_purged", False):
         raise HTTPException(status_code=403, detail="账号已停用，请联系管理员")
     db_user.email_verified = True
     db.commit()

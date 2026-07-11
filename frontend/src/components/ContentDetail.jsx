@@ -84,14 +84,15 @@ function CommentNode({ comment, onReply, onReact, onDelete, onOpenUser, depth = 
   // X/TikTok style: nest collapsed by default, expand on demand
   const [expanded, setExpanded] = useState(false)
   const author = comment.author || {}
+  const authorDisabled = Boolean(author.account_disabled || author.is_deleted || author.is_active === false)
   const replyCount = comment.replies?.length || 0
 
   return (
     <article className={cn('x-comment', depth > 0 && 'is-reply')}>
       <button type="button" className="x-comment-avatar" onClick={() => onOpenUser?.(author.id)}>
-        <Avatar className={depth > 0 ? 'size-8' : 'size-10'}>
-          <AvatarImage src={author.avatar_url || undefined} alt={author.nickname || author.username} />
-          <AvatarFallback>{(author.nickname || author.username || '同').slice(0, 1)}</AvatarFallback>
+        <Avatar className={cn(depth > 0 ? 'size-8' : 'size-10', authorDisabled && 'is-account-disabled')}>
+          <AvatarImage src={!authorDisabled ? (author.avatar_url || undefined) : undefined} alt={author.nickname || author.username} />
+          <AvatarFallback>{authorDisabled ? '禁' : (author.nickname || author.username || '同').slice(0, 1)}</AvatarFallback>
         </Avatar>
       </button>
       <div className="x-comment-body">
@@ -230,6 +231,7 @@ export default function ContentDetail({
 
   const item = detail?.item
   const author = item?.author || {}
+  const authorDisabled = Boolean(author.account_disabled || author.is_deleted || author.is_active === false)
 
   const pushItemChange = (patch) => {
     if (!item?.id || !item?.type) return
@@ -396,8 +398,11 @@ export default function ContentDetail({
       <article className="x-post">
         <div className="x-post-author-row">
           <button type="button" className="x-post-author" onClick={() => onOpenUser?.(author.id)}>
-            <Avatar className="size-12"><AvatarImage src={author.avatar_url || undefined} alt={author.nickname || author.username} /><AvatarFallback>{(author.nickname || author.username || '同').slice(0, 1)}</AvatarFallback></Avatar>
-            <span><strong>{author.nickname || author.username || t('ui.profile')}<i className={author.is_online ? 'presence-dot is-online' : 'presence-dot'} /></strong><small>@{author.username || 'campus'} · {timeLabel(item.created_at)}</small></span>
+            <Avatar className={cn('size-12', authorDisabled && 'is-account-disabled')}>
+              <AvatarImage src={!authorDisabled ? (author.avatar_url || undefined) : undefined} alt={author.nickname || author.username} />
+              <AvatarFallback>{authorDisabled ? '禁' : (author.nickname || author.username || '同').slice(0, 1)}</AvatarFallback>
+            </Avatar>
+            <span><strong>{author.nickname || author.username || t('ui.profile')}<i className={author.is_online && !authorDisabled ? 'presence-dot is-online' : 'presence-dot'} /></strong><small>@{authorDisabled ? 'disabled' : (author.username || 'campus')} · {timeLabel(item.created_at)}</small></span>
           </button>
           <div className="x-post-author-actions">
             {item.can_message ? <Button variant="outline" size="sm" onClick={() => onMessage?.(item)}><MessageCircle /> {t('ui.message')}</Button> : null}

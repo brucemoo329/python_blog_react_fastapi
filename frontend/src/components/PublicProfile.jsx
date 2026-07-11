@@ -1,5 +1,5 @@
 import { useEffect, useState } from 'react'
-import { ArrowLeft, Flag, MapPin, MessageCircle, ShieldCheck, UserCheck, UserPlus } from 'lucide-react'
+import { ArrowLeft, Flag, MapPin, MessageCircle, ShieldCheck, UserCheck, UserPlus, UserX } from 'lucide-react'
 import { Avatar, AvatarFallback, AvatarImage } from '@/components/ui/avatar'
 import { Badge } from '@/components/ui/badge'
 import { Button } from '@/components/ui/button'
@@ -18,18 +18,25 @@ export default function PublicProfile({ userId, onBack, onOpenItem, onMessage, o
   const [data, setData] = useState(null)
   const [group, setGroup] = useState('listing')
   const [reporting, setReporting] = useState(false)
+  const [loadError, setLoadError] = useState('')
 
   useEffect(() => {
     let cancelled = false
+    setData(null)
+    setLoadError('')
     getPublicUserProfile(userId).then((response) => {
-      if (!cancelled) {
-        setData(response)
+      if (cancelled) return
+      setData(response)
+      if (!response.account_disabled) {
         const groups = response.published_groups || {}
         const first = GROUPS.find((item) => (groups[item.id] || []).length)?.id || 'listing'
         setGroup(first)
       }
     }).catch((error) => {
-      if (!cancelled) onNotice?.(error.response?.data?.detail || '用户主页加载失败')
+      if (!cancelled) {
+        setLoadError(error.response?.data?.detail || '用户主页加载失败')
+        onNotice?.(error.response?.data?.detail || '用户主页加载失败')
+      }
     })
     return () => { cancelled = true }
   }, [userId, onNotice])
@@ -68,17 +75,56 @@ export default function PublicProfile({ userId, onBack, onOpenItem, onMessage, o
     }
   }
 
-  if (!data || data.user?.id !== userId) return <div className="public-profile-page"><div className="chat-empty">用户主页加载中...</div></div>
+  if (loadError) {
+    return (
+      <section className="public-profile-page">
+        <Button variant="ghost" className="detail-back" onClick={onBack}><ArrowLeft /> 返回</Button>
+        <div className="chat-empty public-profile-disabled">{loadError}</div>
+      </section>
+    )
+  }
+
+  if (!data || data.user?.id !== userId) {
+    return <div className="public-profile-page"><div className="chat-empty">用户主页加载中...</div></div>
+  }
+
+  // Deactivated / deleted account
+  if (data.account_disabled) {
+    return (
+      <section className="public-profile-page">
+        <Button variant="ghost" className="detail-back" onClick={onBack}><ArrowLeft /> 返回</Button>
+        <header className="public-profile-hero public-profile-hero--disabled" data-theme="teal">
+          <Avatar className="public-profile-avatar is-account-disabled">
+            <AvatarFallback>禁</AvatarFallback>
+          </Avatar>
+          <div className="public-profile-copy">
+            <Badge variant="secondary"><UserX /> 账号状态</Badge>
+            <h1>此账号已被禁用</h1>
+            <p>{data.disabled_message || '此账号已被禁用'}</p>
+            <span>该用户暂时无法使用校园集市服务</span>
+          </div>
+        </header>
+        <div className="chat-empty public-profile-disabled-hint">
+          因账号停用或删除，主页内容已不可查看。该用户历史评论等痕迹会以灰色默认头像展示。
+        </div>
+      </section>
+    )
+  }
+
   const profile = data.profile || {}
   const targetUser = { ...data.user, ...profile }
   const groups = data.published_groups || {}
   const currentItems = groups[group] || []
+  const authorDisabled = Boolean(data.user?.account_disabled)
 
   return (
     <section className="public-profile-page">
       <Button variant="ghost" className="detail-back" onClick={onBack}><ArrowLeft /> 返回</Button>
       <header className="public-profile-hero" data-theme={profile.background_theme || 'teal'} style={profile.background_url ? { '--public-bg': `url("${profile.background_url}")` } : undefined}>
-        <Avatar className="public-profile-avatar"><AvatarImage src={profile.avatar_url || undefined} alt={profile.nickname} /><AvatarFallback>{(profile.nickname || data.user?.username || '同').slice(0, 1)}</AvatarFallback></Avatar>
+        <Avatar className={cn('public-profile-avatar', authorDisabled && 'is-account-disabled')}>
+          <AvatarImage src={!authorDisabled ? (profile.avatar_url || undefined) : undefined} alt={profile.nickname} />
+          <AvatarFallback>{authorDisabled ? '禁' : (profile.nickname || data.user?.username || '同').slice(0, 1)}</AvatarFallback>
+        </Avatar>
         <div className="public-profile-copy">
           <Badge><ShieldCheck /> {data.trust?.grade} · 信用 {data.trust?.score ?? 800}</Badge>
           <h1>{profile.nickname || data.user?.username}</h1>

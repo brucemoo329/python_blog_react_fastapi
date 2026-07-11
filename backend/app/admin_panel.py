@@ -421,6 +421,11 @@ def admin_handle_report(
             target.can_post = False
         if action == "disable_user":
             target.is_active = False
+            target.can_comment = False
+            target.can_post = False
+            profile = db.query(models.UserProfile).filter_by(user_id=target.id).first()
+            if profile:
+                profile.avatar_url = None
         if action in {"ban_comment", "ban_post", "ban_both", "disable_user"}:
             target.ban_reason = data.admin_note or report.reason
             create_notification(
@@ -481,7 +486,10 @@ def admin_list_users(
     db: Session = Depends(get_db),
     admin: models.User = Depends(require_admin),
 ):
-    query = db.query(models.User).outerjoin(models.UserProfile).options(joinedload(models.User.profile))
+    # Hide fully purged records from admin lists; soft-deleted still visible for "删除记录"
+    query = db.query(models.User).outerjoin(models.UserProfile).options(joinedload(models.User.profile)).filter(
+        models.User.is_purged.isnot(True),
+    )
     if keyword.strip():
         key = keyword.strip()
         query = query.filter(or_(
@@ -490,19 +498,27 @@ def admin_list_users(
             models.UserProfile.nickname.contains(key),
         ))
     rows = query.order_by(models.User.id.desc()).limit(limit).all()
-    return {
-        "items": [{
-            **user_payload(user),
+    items = []
+    for user in rows:
+        # Admin list needs real identity fields even when public payload is masked
+        profile = getattr(user, "profile", None)
+        items.append({
+            "id": user.id,
+            "username": user.username,
+            "email": user.email,
+            "nickname": (profile.nickname if profile and profile.nickname else user.username),
+            "avatar_url": None if (not user.is_active or getattr(user, "is_deleted", False)) else (profile.avatar_url if profile else None),
             "is_admin": bool(getattr(user, "is_admin", False)),
             "is_deleted": bool(getattr(user, "is_deleted", False)),
+            "is_purged": bool(getattr(user, "is_purged", False)),
             "is_active": bool(user.is_active),
             "can_comment": bool(getattr(user, "can_comment", True)),
             "can_post": bool(getattr(user, "can_post", True)),
             "ban_reason": getattr(user, "ban_reason", None),
             "trust": compute_trust(db, user.id),
-            "email": user.email,
-        } for user in rows]
-    }
+            "account_disabled": (not user.is_active) or bool(getattr(user, "is_deleted", False)),
+        })
+    return {"items": items}
 
 
 @router.put("/users/{user_id}/penalties")
@@ -523,6 +539,14 @@ def admin_update_user_penalties(
         target.can_post = data.can_post
     if data.is_active is not None:
         target.is_active = data.is_active
+        if data.is_active is False:
+            target.can_comment = False
+            target.can_post = False
+        # Re-enable clears soft-delete only if not purged
+        if data.is_active is True and not getattr(target, "is_purged", False):
+            target.is_deleted = False
+            if not data.ban_reason:
+                target.ban_reason = None
     if data.ban_reason is not None:
         target.ban_reason = data.ban_reason
     if data.trust_delta:
@@ -858,15 +882,63 @@ def admin_soft_delete_user(
     db: Session = Depends(get_db),
     admin: models.User = Depends(require_admin),
 ):
+    """Soft-delete: account disabled, traces keep gray avatar, profile shows 此账号已被禁用."""
     target = db.get(models.User, user_id)
     if not target:
         raise HTTPException(status_code=404, detail="用户不存在")
     if target.id == admin.id or getattr(target, "is_admin", False):
         raise HTTPException(status_code=400, detail="不能删除管理员账户")
+    if getattr(target, "is_purged", False):
+        raise HTTPException(status_code=400, detail="该用户记录已清除")
     target.is_active = False
     target.is_deleted = True
     target.can_comment = False
     target.can_post = False
     target.ban_reason = "账号已由管理员删除"
+    profile = db.query(models.UserProfile).filter_by(user_id=target.id).first()
+    if profile:
+        profile.avatar_url = None
+        profile.background_url = None
     db.commit()
-    return {"message": "账户已删除并保留订单审计记录", "id": target.id}
+    return {"message": "账户已删除：评论等痕迹保留并显示灰色默认头像，主页显示已禁用", "id": target.id}
+
+
+@router.delete("/users/{user_id}/record")
+def admin_purge_user_record(
+    user_id: int,
+    db: Session = Depends(get_db),
+    admin: models.User = Depends(require_admin),
+):
+    """
+    Permanently scrub admin-visible user record after soft-delete.
+    Keeps the users row so comments/orders FKs remain; hides from admin list.
+    """
+    target = db.get(models.User, user_id)
+    if not target:
+        raise HTTPException(status_code=404, detail="用户不存在")
+    if target.id == admin.id or getattr(target, "is_admin", False):
+        raise HTTPException(status_code=400, detail="不能清除管理员账户记录")
+    if not getattr(target, "is_deleted", False):
+        raise HTTPException(status_code=400, detail="请先删除账户，再清除用户记录")
+    if getattr(target, "is_purged", False):
+        return {"message": "用户记录已清除", "id": target.id}
+
+    target.is_active = False
+    target.is_deleted = True
+    target.is_purged = True
+    target.can_comment = False
+    target.can_post = False
+    target.ban_reason = "账号记录已清除"
+    # Scrub PII; keep unique constraints with id suffix
+    target.username = f"deleted_{target.id}"
+    target.email = f"deleted_{target.id}@purged.local"
+    target.hashed_password = "!"
+    profile = db.query(models.UserProfile).filter_by(user_id=target.id).first()
+    if profile:
+        profile.nickname = "已注销用户"
+        profile.avatar_url = None
+        profile.background_url = None
+        profile.signature = ""
+        profile.school = None
+    db.commit()
+    return {"message": "用户记录已从管理后台清除（评论等痕迹仍显示灰色默认头像）", "id": target.id}

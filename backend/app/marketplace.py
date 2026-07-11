@@ -78,7 +78,7 @@ def get_current_user(
     except (TypeError, ValueError):
         raise HTTPException(status_code=401, detail="无效的登录凭证")
     user = db.get(models.User, user_id)
-    if not user or not user.is_active:
+    if not user or not user.is_active or getattr(user, "is_deleted", False) or getattr(user, "is_purged", False):
         raise HTTPException(status_code=401, detail="用户不存在或已停用")
     profile = db.query(models.UserProfile).filter_by(user_id=user.id).first()
     if not profile:
@@ -322,8 +322,65 @@ def profile_is_online(profile):
     return datetime.utcnow() - last_active <= timedelta(minutes=5)
 
 
+def user_is_disabled(user) -> bool:
+    if not user:
+        return True
+    if not bool(getattr(user, "is_active", True)):
+        return True
+    if bool(getattr(user, "is_deleted", False)):
+        return True
+    if bool(getattr(user, "is_purged", False)):
+        return True
+    return False
+
+
 def user_payload(user):
+    """Public-facing user card. Disabled/deleted accounts get a gray default avatar."""
+    if not user:
+        return {
+            "id": None,
+            "username": "disabled",
+            "email": None,
+            "avatar_url": None,
+            "nickname": "已停用用户",
+            "school": None,
+            "signature": None,
+            "is_online": False,
+            "last_active_at": None,
+            "is_admin": False,
+            "can_comment": False,
+            "can_post": False,
+            "is_active": False,
+            "is_deleted": True,
+            "account_disabled": True,
+        }
+
     profile = getattr(user, "profile", None)
+    is_deleted = bool(getattr(user, "is_deleted", False) or getattr(user, "is_purged", False))
+    is_active = bool(getattr(user, "is_active", True))
+    disabled = user_is_disabled(user)
+
+    if disabled:
+        # Keep id so comments still open the disabled profile page
+        display_name = "已注销用户" if is_deleted else "已停用用户"
+        return {
+            "id": user.id,
+            "username": "disabled",
+            "email": None,
+            "avatar_url": None,  # frontend shows gray default
+            "nickname": display_name,
+            "school": None,
+            "signature": None,
+            "is_online": False,
+            "last_active_at": None,
+            "is_admin": False,
+            "can_comment": False,
+            "can_post": False,
+            "is_active": False,
+            "is_deleted": is_deleted,
+            "account_disabled": True,
+        }
+
     return {
         "id": user.id,
         "username": user.username,
@@ -337,6 +394,9 @@ def user_payload(user):
         "is_admin": bool(getattr(user, "is_admin", False)),
         "can_comment": bool(getattr(user, "can_comment", True)),
         "can_post": bool(getattr(user, "can_post", True)),
+        "is_active": is_active,
+        "is_deleted": False,
+        "account_disabled": False,
     }
 
 
@@ -2958,8 +3018,38 @@ def get_public_user_profile(
     user: models.User = Depends(get_current_user),
 ):
     target = db.query(models.User).options(joinedload(models.User.profile)).filter_by(id=target_user_id).first()
-    if not target or not target.is_active:
+    if not target:
         raise HTTPException(status_code=404, detail="用户不存在")
+
+    # Deactivated / soft-deleted / purged accounts: show disabled page, keep traces elsewhere gray
+    if user_is_disabled(target):
+        return {
+            "user": user_payload(target),
+            "profile": {
+                "nickname": "已注销用户" if (getattr(target, "is_deleted", False) or getattr(target, "is_purged", False)) else "已停用用户",
+                "avatar_url": None,
+                "background_url": None,
+                "background_theme": "teal",
+                "school": None,
+                "signature": "",
+                "followers": 0,
+                "following": 0,
+            },
+            "trust": {"score": 0, "grade": "—", "positive_rate": 0, "positive_reviews": 0, "total_reviews": 0},
+            "is_following": False,
+            "is_me": user.id == target.id,
+            "account_disabled": True,
+            "disabled_message": "此账号已被禁用",
+            "published": [],
+            "published_groups": {
+                "listing": [],
+                "game": [],
+                "service": [],
+                "wanted": [],
+                "community": [],
+            },
+        }
+
     profile = ensure_user_profile(db, target)
     published = [
         compact_listing_payload(item)

@@ -287,6 +287,11 @@ export function deleteAdminUser(userId) {
   return request.delete(`/marketplace/admin/users/${userId}`)
 }
 
+/** Permanently scrub soft-deleted user from admin list (keeps comment FKs). */
+export function purgeAdminUserRecord(userId) {
+  return request.delete(`/marketplace/admin/users/${userId}/record`)
+}
+
 export function getAdminAfterSales(params) {
   return request.get('/marketplace/admin/after-sales', { params })
 }

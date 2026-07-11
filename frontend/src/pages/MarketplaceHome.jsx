@@ -183,6 +183,7 @@ function FeedCard({ item, saved, onOpen, onOpenUser, onSave, onReact, onShare, o
   const meta = TYPE_META[item.type] || TYPE_META.listing
   const Icon = meta.icon
   const author = item.seller || item.author || item.requester || {}
+  const authorDisabled = Boolean(author.account_disabled || author.is_deleted || author.is_active === false)
   const price = item.type === 'service' ? item.reward : item.type === 'wanted' ? item.budget_max : item.price
   const liked = isLikedReaction(item.reaction)
   const likeKey = `${item.type}-${item.id}-like`
@@ -196,12 +197,15 @@ function FeedCard({ item, saved, onOpen, onOpenUser, onSave, onReact, onShare, o
       onKeyDown={(event) => { if (event.key === 'Enter') onOpen(item) }}
     >
       <button type="button" className="x-feed-avatar" onClick={stop(() => onOpenUser(author.id))}>
-        <Avatar className="size-11"><AvatarImage src={author.avatar_url || undefined} alt={author.nickname || author.username} /><AvatarFallback>{(author.nickname || author.username || '同').slice(0, 1)}</AvatarFallback></Avatar>
-        <span className={author.is_online ? 'presence-dot is-online' : 'presence-dot'} />
+        <Avatar className={cn('size-11', authorDisabled && 'is-account-disabled')}>
+          <AvatarImage src={!authorDisabled ? (author.avatar_url || undefined) : undefined} alt={author.nickname || author.username} />
+          <AvatarFallback>{authorDisabled ? '禁' : (author.nickname || author.username || '同').slice(0, 1)}</AvatarFallback>
+        </Avatar>
+        <span className={author.is_online && !authorDisabled ? 'presence-dot is-online' : 'presence-dot'} />
       </button>
       <div className="x-feed-body">
         <div className="x-feed-author">
-          <button type="button" onClick={stop(() => onOpenUser(author.id))}><strong>{author.nickname || author.username || '校园同学'}</strong><span>@{author.username || 'campus'} · {relativeTime(item.created_at)}</span></button>
+          <button type="button" onClick={stop(() => onOpenUser(author.id))}><strong>{author.nickname || author.username || '校园同学'}</strong><span>@{authorDisabled ? 'disabled' : (author.username || 'campus')} · {relativeTime(item.created_at)}</span></button>
           <Badge variant="outline" data-tone={meta.tone}><Icon /> {t(`type.${item.type}`, item.type)}</Badge>
         </div>
         <h3>{item.title || '校园动态'}</h3>
