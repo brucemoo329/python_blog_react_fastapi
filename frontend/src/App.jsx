@@ -1,5 +1,6 @@
 import { lazy, Suspense, useEffect, useRef, useState } from 'react'
 import LoginCharacterTransition from './components/LoginCharacterTransition.jsx'
+import { readStoredLanguage } from './lib/i18n'
 
 const Landing = lazy(() => import('./pages/Landing.jsx'))
 const Login = lazy(() => import('./pages/Login.jsx'))
@@ -44,6 +45,7 @@ function AppFallback() {
 function App() {
   const [route, setRoute] = useState(getCurrentRoute)
   const [user, setUser] = useState(readSavedUser)
+  const [publicLanguage, setPublicLanguage] = useState(readStoredLanguage)
   const [showLoginTransition, setShowLoginTransition] = useState(false)
   const transitionTimersRef = useRef(new Set())
 
@@ -113,6 +115,8 @@ function App() {
     content = (
       <Landing
         isAuthenticated={Boolean(user)}
+        language={publicLanguage}
+        onLanguageChange={setPublicLanguage}
         onNavigateLogin={openLogin}
         onNavigateRegister={() => navigate(user ? 'app' : 'register')}
         onEnterMarket={() => navigate(user ? 'app' : 'login')}

@@ -125,7 +125,7 @@ export default function CampusRadar({ tasks, school = '南通理工学院', onAc
           center,
           zoom: 16,
           viewMode: '2D',
-          mapStyle: 'amap://styles/darkblue',
+          mapStyle: 'amap://styles/whitesmoke',
           resizeEnable: true,
         })
         map.addControl(new AMap.Scale())

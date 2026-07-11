@@ -64,6 +64,15 @@
   gap: 6px;
 }
 
+.landing-language-switcher {
+  color: rgba(255, 255, 255, 0.9);
+}
+
+.landing-language-switcher:hover {
+  background: rgba(255, 255, 255, 0.13);
+  color: #fff;
+}
+
 .landing-link-button,
 .landing-solid-button,
 .landing-primary-cta,

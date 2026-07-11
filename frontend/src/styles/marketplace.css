@@ -4777,6 +4777,103 @@
   color: #183936;
 }
 
+/* Orders use the same daylight surface and campus-teal actions as the main feed. */
+.campus-shell--daylight .orders-center {
+  --primary: #0f9f83;
+  --primary-foreground: #ffffff;
+  --ring: #0f9f83;
+  background: linear-gradient(155deg, #eff8f4 0%, #f8fbfa 62%, #edf6f2 100%);
+}
+
+.campus-shell--daylight .orders-filter-panel {
+  display: grid;
+  grid-template-columns: minmax(0, 0.72fr) minmax(0, 1.28fr);
+  gap: 22px;
+  margin: 0 0 18px;
+  padding: 14px 16px;
+  border: 1px solid rgba(24, 57, 54, 0.1);
+  border-radius: 8px;
+  background: rgba(255, 255, 255, 0.86);
+  box-shadow: 0 12px 30px rgba(24, 68, 61, 0.06);
+}
+
+.campus-shell--daylight .orders-filter-group {
+  min-width: 0;
+}
+
+.campus-shell--daylight .orders-filter-group > span {
+  display: block;
+  margin: 0 0 8px;
+  color: #71847f;
+  font-size: 11px;
+  font-weight: 800;
+  letter-spacing: 0.08em;
+}
+
+.campus-shell--daylight .orders-tabs,
+.campus-shell--daylight .orders-status-tabs {
+  gap: 6px;
+  margin: 0;
+}
+
+.campus-shell--daylight .orders-tabs button,
+.campus-shell--daylight .orders-status-tabs button {
+  border-color: transparent;
+  background: #edf5f1;
+  color: #52706a;
+  box-shadow: none;
+}
+
+.campus-shell--daylight .orders-tabs button:hover,
+.campus-shell--daylight .orders-status-tabs button:hover {
+  background: #dff2ea;
+  color: #087d68;
+}
+
+.campus-shell--daylight .orders-tabs button.is-active,
+.campus-shell--daylight .orders-status-tabs button.is-active {
+  border-color: transparent;
+  background: #0f9f83;
+  color: #ffffff;
+  box-shadow: 0 7px 16px rgba(15, 159, 131, 0.2);
+}
+
+.campus-shell--daylight .order-card {
+  border-color: rgba(24, 57, 54, 0.11);
+  border-radius: 8px;
+  background: rgba(255, 255, 255, 0.96);
+  color: #183936;
+  box-shadow: 0 12px 28px rgba(24, 68, 61, 0.06);
+}
+
+.campus-shell--daylight .order-card em,
+.campus-shell--daylight .order-peer-line,
+.campus-shell--daylight .order-card small,
+.campus-shell--daylight .order-card-body span {
+  color: #71847f;
+}
+
+.campus-shell--daylight .order-card .order-thumb {
+  background: #e7f4ef;
+  color: #0f9f83;
+}
+
+.campus-shell--daylight .order-card footer [data-slot="button"]:not([data-variant="outline"]):not([data-variant="ghost"]):not([data-variant="secondary"]) {
+  background: #0f9f83;
+}
+
+.campus-shell--daylight .order-card footer [data-slot="button"]:not([data-variant="outline"]):not([data-variant="ghost"]):not([data-variant="secondary"]):hover {
+  background: #0b876f;
+}
+
+@media (max-width: 760px) {
+  .campus-shell--daylight .orders-filter-panel {
+    grid-template-columns: 1fr;
+    gap: 14px;
+    padding: 13px;
+  }
+}
+
 @media (max-width: 760px) {
   .campus-shell--daylight .campus-topbar {
     background: rgba(248, 251, 249, 0.94);

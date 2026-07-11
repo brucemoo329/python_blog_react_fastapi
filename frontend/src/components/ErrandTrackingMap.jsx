@@ -142,7 +142,7 @@ export default function ErrandTrackingMap({
           mapInst.current = new AMap.Map(mapRef.current, {
             zoom: 15,
             viewMode: '2D',
-            mapStyle: 'amap://styles/darkblue',
+            mapStyle: 'amap://styles/whitesmoke',
             resizeEnable: true,
           })
           mapInst.current.addControl(new AMap.Scale())

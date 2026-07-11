@@ -203,17 +203,24 @@ export default function OrdersCenter({
         </div>
       </header>
 
-      <div className="orders-tabs">
-        {tabs.map((tab) => (
-          <button key={tab.id} type="button" className={cn(role === tab.id && 'is-active')} onClick={() => setRole(tab.id)}>{tab.label}</button>
-        ))}
-      </div>
-      <div className="orders-status-tabs">
-        {statusTabs.map((tab) => (
-          <button key={tab.id} type="button" className={cn(status === tab.id && 'is-active')} onClick={() => setStatus(tab.id)}>{tab.label}</button>
-        ))}
-      </div>
-
+      <section className="orders-filter-panel" aria-label="订单筛选">
+        <div className="orders-filter-group">
+          <span>订单身份</span>
+          <div className="orders-tabs">
+            {tabs.map((tab) => (
+              <button key={tab.id} type="button" className={cn(role === tab.id && 'is-active')} onClick={() => setRole(tab.id)}>{tab.label}</button>
+            ))}
+          </div>
+        </div>
+        <div className="orders-filter-group">
+          <span>订单状态</span>
+          <div className="orders-status-tabs">
+            {statusTabs.map((tab) => (
+              <button key={tab.id} type="button" className={cn(status === tab.id && 'is-active')} onClick={() => setStatus(tab.id)}>{tab.label}</button>
+            ))}
+          </div>
+        </div>
+      </section>
       <div className="orders-list">
         {loading ? <div className="chat-empty">{t('orders.loading')}</div> : null}
         {!loading && !orders.length ? (
