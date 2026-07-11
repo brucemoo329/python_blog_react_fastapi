@@ -239,7 +239,9 @@ def admin_list_contents(
     keyword = keyword.strip()
     if content_type in {"all", "listing", "game"}:
         # Do not joinedload images (LONGTEXT base64) — list only needs metadata
-        query = db.query(models.Listing)
+        # Admin deletion is a soft delete so related orders can retain their FK.
+        # Deleted rows must not reappear in the normal content-management list.
+        query = db.query(models.Listing).filter(models.Listing.status != "deleted")
         if content_type == "game":
             query = query.filter(models.Listing.trade_type == "digital")
         elif content_type == "listing":
@@ -249,13 +251,13 @@ def admin_list_contents(
         for row in query.order_by(models.Listing.created_at.desc()).limit(limit).all():
             items.append(content_row_payload("listing", row))
     if content_type in {"all", "service"}:
-        query = db.query(models.ServiceTask)
+        query = db.query(models.ServiceTask).filter(models.ServiceTask.status != "deleted")
         if keyword:
             query = query.filter(or_(models.ServiceTask.title.contains(keyword), models.ServiceTask.description.contains(keyword)))
         for row in query.order_by(models.ServiceTask.created_at.desc()).limit(limit).all():
             items.append(content_row_payload("service", row))
     if content_type in {"all", "wanted"}:
-        query = db.query(models.WantedPost)
+        query = db.query(models.WantedPost).filter(models.WantedPost.status != "deleted")
         if keyword:
             query = query.filter(or_(models.WantedPost.title.contains(keyword), models.WantedPost.description.contains(keyword)))
         for row in query.order_by(models.WantedPost.created_at.desc()).limit(limit).all():
