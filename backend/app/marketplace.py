@@ -128,12 +128,16 @@ class OrderAppealBody(BaseModel):
 
 
 class AfterSaleApplyBody(BaseModel):
-    reason: str = Field(min_length=4, max_length=500)
+    reason: str = Field(default="", max_length=500)
+
+    model_config = {"extra": "ignore"}
 
 
 class AfterSaleResponseBody(BaseModel):
-    agree: bool
+    agree: bool = False
     response: Optional[str] = Field(default=None, max_length=500)
+
+    model_config = {"extra": "ignore"}
 
 
 class SupportTicketBody(BaseModel):
@@ -3313,40 +3317,91 @@ def receive_order(
 
 
 @router.post("/orders/{order_id}/after-sales")
-def apply_after_sale(
+async def apply_after_sale(
     order_id: int,
-    data: AfterSaleApplyBody,
+    request: Request,
     db: Session = Depends(get_db),
     user: models.User = Depends(get_current_user),
 ):
+    # Flexible body parse — avoid opaque 422 when clients send slightly different shapes
+    raw: dict = {}
+    try:
+        raw = await request.json()
+        if not isinstance(raw, dict):
+            raw = {}
+    except Exception:
+        raw = {}
+    reason = str(
+        raw.get("reason")
+        or raw.get("content")
+        or raw.get("message")
+        or raw.get("description")
+        or ""
+    ).strip()
+    if len(reason) < 2:
+        raise HTTPException(status_code=400, detail="请填写至少 2 个字的售后原因")
+    if len(reason) > 500:
+        reason = reason[:500]
+
     order = db.query(models.Order).options(
         joinedload(models.Order.listing).joinedload(models.Listing.images),
         joinedload(models.Order.buyer).joinedload(models.User.profile),
         joinedload(models.Order.seller).joinedload(models.User.profile),
+        joinedload(models.Order.service_task),
     ).filter_by(id=order_id).first()
     if not order or order.buyer_id != user.id:
         raise HTTPException(status_code=404, detail="订单不存在")
-    if order.service_task_id or not order.listing_id:
+    # Only block true service/errand orders; allow goods orders even if listing_id is missing
+    if order.service_task_id or getattr(order, "service_task", None):
         raise HTTPException(status_code=400, detail="跑腿订单暂不支持退货售后")
     if order.status not in {"pending_ship", "shipped", "completed"}:
-        raise HTTPException(status_code=409, detail="当前订单状态不可申请售后")
+        raise HTTPException(
+            status_code=409,
+            detail=f"当前订单状态（{order_status_label(order.status, 'buyer')}）不可申请售后，需已付款后",
+        )
     active = db.query(models.AfterSaleRequest).filter(
         models.AfterSaleRequest.order_id == order.id,
         models.AfterSaleRequest.status.in_(["pending_seller", "admin_pending"]),
     ).first()
     if active:
         raise HTTPException(status_code=409, detail="已有售后申请正在处理中")
-    request = models.AfterSaleRequest(order_id=order.id, applicant_id=user.id, reason=data.reason.strip())
-    db.add(request)
-    title = order.listing.title if order.listing else order.order_no
+
+    after_req = models.AfterSaleRequest(
+        order_id=order.id, applicant_id=user.id, reason=reason, status="pending_seller",
+    )
+    db.add(after_req)
+    title = (
+        (order.listing.title if order.listing else None)
+        or order.order_no
+        or f"订单#{order.id}"
+    )
     create_notification(
         db, recipient_id=order.seller_id, actor_id=user.id, notification_type="order",
-        title="【售后申请】买家申请退货退款", content=f"订单「{title}」：{request.reason}",
+        title="【售后申请】买家申请退货退款", content=f"订单「{title}」：{reason}",
         target_type="order", target_id=order.id,
     )
+    # Also open a support ticket + notify admins so 客服 can see it immediately
+    ticket = models.SupportTicket(
+        user_id=user.id,
+        order_id=order.id,
+        category="after_sale",
+        title=f"售后申请 {order.order_no or order.id}",
+        content=f"买家提交退货退款申请（等待卖家协商）。原因：{reason}",
+        status="pending",
+    )
+    db.add(ticket)
+    for admin in db.query(models.User).filter(
+        models.User.is_admin.is_(True), models.User.is_active.is_(True)
+    ).all():
+        create_notification(
+            db, recipient_id=admin.id, actor_id=user.id, notification_type="order",
+            title="【售后待跟进】新的退货退款申请",
+            content=f"订单「{title}」买家申请售后：{reason}",
+            target_type="order", target_id=order.id,
+        )
     db.commit()
     db.refresh(order)
-    return {"message": "售后申请已提交，等待卖家协商", "item": full_order_payload(db, order, user.id)}
+    return {"message": "售后申请已提交，已通知卖家与平台客服", "item": full_order_payload(db, order, user.id)}
 
 
 @router.post("/orders/{order_id}/after-sales/respond")
@@ -3390,6 +3445,15 @@ def respond_after_sale(
         db.add(ticket)
         content = f"卖家未同意售后，已自动提交客服裁定。{request.seller_response or ''}".strip()
         message = "已拒绝售后，客服工单已创建"
+        for admin in db.query(models.User).filter(
+            models.User.is_admin.is_(True), models.User.is_active.is_(True)
+        ).all():
+            create_notification(
+                db, recipient_id=admin.id, actor_id=user.id, notification_type="order",
+                title="【售后裁定】卖家拒绝，请客服处理",
+                content=f"订单「{title}」进入客服裁定：{request.reason}",
+                target_type="order", target_id=order.id,
+            )
     create_notification(
         db, recipient_id=order.buyer_id, actor_id=user.id, notification_type="order",
         title="【售后进度】" + ("卖家已同意退款" if data.agree else "售后已转客服裁定"),

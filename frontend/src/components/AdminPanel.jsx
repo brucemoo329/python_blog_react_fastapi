@@ -75,7 +75,7 @@ export default function AdminPanel({ onBack, onNotice }) {
   const [appeals, setAppeals] = useState([])
   const [appealStatus, setAppealStatus] = useState('pending')
   const [afterSales, setAfterSales] = useState([])
-  const [afterSaleStatus, setAfterSaleStatus] = useState('admin_pending')
+  const [afterSaleStatus, setAfterSaleStatus] = useState('all')
   const [tickets, setTickets] = useState([])
   const [ticketStatus, setTicketStatus] = useState('pending')
   const [ticketReplies, setTicketReplies] = useState({})
@@ -513,20 +513,37 @@ export default function AdminPanel({ onBack, onNotice }) {
           <div className="admin-section admin-reports">
             <div className="admin-toolbar">
               <select value={afterSaleStatus} onChange={(event) => setAfterSaleStatus(event.target.value)}>
-                <option value="admin_pending">待客服裁定</option>
                 <option value="all">全部售后</option>
+                <option value="pending_seller">等待卖家协商</option>
+                <option value="admin_pending">待客服裁定</option>
                 <option value="refunded">已退款</option>
                 <option value="rejected">已驳回</option>
               </select>
               <Button onClick={loadAfterSales}>刷新</Button>
             </div>
             {afterSales.map((request) => (
-              <article key={request.id} className={cn(request.status === 'admin_pending' && 'is-pending')}>
-                <header><Badge>{request.status === 'admin_pending' ? '待裁定' : request.status}</Badge><strong>{request.order_title}</strong><small>{request.order_no}</small></header>
+              <article key={request.id} className={cn((request.status === 'admin_pending' || request.status === 'pending_seller') && 'is-pending')}>
+                <header>
+                  <Badge>
+                    {{
+                      pending_seller: '等待卖家协商',
+                      admin_pending: '待客服裁定',
+                      refunded: '已退款',
+                      rejected: '已驳回',
+                    }[request.status] || request.status}
+                  </Badge>
+                  <strong>{request.order_title}</strong>
+                  <small>{request.order_no}</small>
+                </header>
                 <p><strong>买家：</strong>{request.applicant?.nickname || request.applicant?.username} · {request.reason}</p>
                 <p><strong>卖家说明：</strong>{request.seller_response || '未填写'}</p>
                 {request.admin_note ? <small>客服说明：{request.admin_note}</small> : null}
-                {request.status === 'admin_pending' ? <div className="admin-row-actions"><Button size="sm" variant="outline" onClick={() => resolveAfterSale(request, 'reject')}>驳回售后</Button><Button size="sm" onClick={() => resolveAfterSale(request, 'refund')}>同意退款</Button></div> : null}
+                {request.status === 'admin_pending' || request.status === 'pending_seller' ? (
+                  <div className="admin-row-actions">
+                    <Button size="sm" variant="outline" onClick={() => resolveAfterSale(request, 'reject')}>驳回售后</Button>
+                    <Button size="sm" onClick={() => resolveAfterSale(request, 'refund')}>同意退款</Button>
+                  </div>
+                ) : null}
               </article>
             ))}
             {!afterSales.length ? <div className="chat-empty">暂无匹配售后记录</div> : null}

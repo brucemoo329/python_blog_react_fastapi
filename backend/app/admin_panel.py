@@ -820,8 +820,9 @@ def admin_handle_after_sale(
     ).filter_by(id=request_id).first()
     if not request or not request.order:
         raise HTTPException(status_code=404, detail="售后申请不存在")
-    if request.status != "admin_pending":
-        raise HTTPException(status_code=409, detail="该售后不在客服裁定阶段")
+    # Allow admin to intervene while waiting for seller negotiation as well
+    if request.status not in {"admin_pending", "pending_seller"}:
+        raise HTTPException(status_code=409, detail="该售后已处理完毕，不可再裁定")
     order = request.order
     request.handled_by = admin.id
     request.handled_at = datetime.utcnow()

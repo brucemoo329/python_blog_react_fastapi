@@ -1,15 +1,15 @@
 import { useEffect, useState } from 'react'
 import { ArrowRight } from 'lucide-react'
 import CampusBrand from './CampusBrand.jsx'
-import GlassSurface from './reactbits/GlassSurface.jsx'
 import GooeyNav from './reactbits/GooeyNav.jsx'
 import LanguageSwitcher from './LanguageSwitcher.jsx'
 import { cn } from '@/lib/utils'
 
 /**
- * ReactBits-style chrome (single DOM layer — no ghost hit targets):
- * - Page top: solid pills on left / right only (NOT liquid glass)
- * - Scrolled: one liquid-glass bar; same buttons, layout merges
+ * ReactBits-style header with continuous scroll morph:
+ * m=0  → solid split pills left/right (no liquid glass, no full-width hits)
+ * m=0→1 → smooth transition
+ * m=1  → single liquid-glass bar
  */
 export default function LandingHeader({
   navItems,
@@ -22,14 +22,17 @@ export default function LandingHeader({
   onPrimaryAction,
   onScrollToItem,
 }) {
-  const [merged, setMerged] = useState(false)
+  const [merge, setMerge] = useState(0)
 
   useEffect(() => {
     let frame = 0
     const update = () => {
       frame = 0
-      // Stay solid until user scrolls a bit, then merge to glass
-      setMerged(window.scrollY > 56)
+      // Smooth ramp over ~140px of scroll (ease-out curve for nicer feel)
+      const raw = Math.min(1, Math.max(0, window.scrollY / 140))
+      // ease-out cubic so early scroll starts the morph gently
+      const eased = 1 - (1 - raw) ** 2.2
+      setMerge((prev) => (Math.abs(prev - eased) < 0.008 ? prev : eased))
     }
     const onScroll = () => {
       if (frame) return
@@ -73,32 +76,20 @@ export default function LandingHeader({
     </div>
   )
 
-  const shell = (
-    <div className="landing-header__shell">
-      <div className="landing-header__cluster is-left">
-        {brand}
-        {nav}
-      </div>
-      <div className="landing-header__cluster is-right">{actions}</div>
-    </div>
-  )
-
   return (
-    <header className={cn('landing-header', merged ? 'is-merged' : 'is-split')}>
-      {merged ? (
-        <GlassSurface
-          className="landing-header__glass"
-          height={66}
-          backgroundOpacity={0.42}
-          blur={22}
-          borderRadius={20}
-        >
-          {shell}
-        </GlassSurface>
-      ) : (
-        // Solid split pills — no GlassSurface / no full-width hit area
-        shell
-      )}
+    <header
+      className={cn('landing-header', merge > 0.55 ? 'is-merged' : 'is-split')}
+      style={{ '--m': merge }}
+      data-merge={merge.toFixed(2)}
+    >
+      {/* Single shell — CSS morphs solid pills → liquid glass via --m */}
+      <div className="landing-header__bar" aria-label="站点导航">
+        <div className="landing-header__cluster is-left">
+          {brand}
+          {nav}
+        </div>
+        <div className="landing-header__cluster is-right">{actions}</div>
+      </div>
     </header>
   )
 }

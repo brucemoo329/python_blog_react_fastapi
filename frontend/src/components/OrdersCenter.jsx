@@ -204,8 +204,8 @@ export default function OrdersCenter({
     if (!afterSaleFor) return
     const isSellerResponse = afterSaleFor.mode === 'respond'
     const text = (isSellerResponse ? afterSaleResponse : afterSaleReason).trim()
-    if (!text) {
-      onNotice?.(isSellerResponse ? '请填写协商说明' : '请填写售后原因')
+    if (!text || text.length < 2) {
+      onNotice?.(isSellerResponse ? '请填写至少 2 个字的协商说明' : '请填写至少 2 个字的售后原因')
       return
     }
     const orderId = afterSaleFor.order.id
@@ -232,7 +232,12 @@ export default function OrdersCenter({
       }
     } catch (error) {
       const detail = error.response?.data?.detail
-      onNotice?.(typeof detail === 'string' ? detail : (detail ? JSON.stringify(detail) : '售后操作失败'))
+      let message = '售后操作失败'
+      if (typeof detail === 'string') message = detail
+      else if (Array.isArray(detail)) {
+        message = detail.map((item) => item?.msg || item?.message || JSON.stringify(item)).join('；')
+      } else if (detail) message = JSON.stringify(detail)
+      onNotice?.(message)
     } finally {
       setBusyId(null)
     }
@@ -288,13 +293,15 @@ export default function OrdersCenter({
                     <Badge variant="secondary">{order.role === 'buyer' ? (isService ? '我是发布者' : t('orders.buyerRole')) : (isService ? '我是跑手' : t('orders.sellerRole'))}</Badge>
                     {isService ? <Badge>跑腿</Badge> : <Badge variant="outline">商品</Badge>}
                   </div>
-                  <strong>{order.title}</strong>
+                  <button type="button" className="order-title-link" onClick={() => onOpenOrder?.(order)}>
+                    <strong>{order.title}</strong>
+                  </button>
                   <small>{t('orders.orderNo', '订单号')} {order.order_no}</small>
                   {peerRole ? <small className="order-peer-line">对方：{peerRole}{peerName ? ` · ${peerName}` : ''}</small> : null}
                 </div>
                 <em>{order.status_label || order.status}</em>
               </header>
-              <div className="order-card-body">
+              <button type="button" className="order-card-body is-clickable" onClick={() => onOpenOrder?.(order)}>
                 {order.image_url ? <img src={order.image_url} alt="" /> : <span className="order-thumb">{isService ? <Bike /> : <Package />}</span>}
                 <div>
                   <p>{order.description || (isService ? '校园跑腿订单' : t('orders.campusOrder', '校园交易订单'))}</p>
@@ -325,8 +332,9 @@ export default function OrdersCenter({
                     <span className="order-after-sale-status">订单状态：退款完成</span>
                   ) : null}
                   <strong className="order-price">¥{Number(order.amount || 0).toFixed(2)}</strong>
+                  <small className="order-open-hint">点击查看订单与交易进度</small>
                 </div>
-              </div>
+              </button>
               <footer>
                 <Button variant="outline" size="sm" onClick={() => onOpenOrder?.(order)}>{t('orders.detail')}</Button>
                 {isService && order.service_task_id && !['completed', 'cancelled'].includes(order.status) ? (

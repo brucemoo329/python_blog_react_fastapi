@@ -791,22 +791,101 @@ export default function MarketplaceHome({ user, onLogout, onUserUpdate }) {
               <Button variant="ghost" onClick={() => setSelectedOrder(null)}>{t('detail.back')} · {t('orders.title')}</Button>
               <article className="order-detail-card">
                 <header className="order-detail-hero">
-                  <div><Badge>{selectedOrder.role === 'buyer' ? t('orders.buyerRole') : t('orders.sellerRole')}</Badge><h1>{selectedOrder.title}</h1><small>{t('orders.orderNo', '订单号')} {selectedOrder.order_no}</small></div>
-                  <div className="order-detail-status"><strong>{selectedOrder.status_label}</strong><span>{selectedOrder.kind === 'service' ? '校园跑腿订单' : '校园商品订单'}</span></div>
+                  <div>
+                    <Badge>{selectedOrder.role === 'buyer' ? t('orders.buyerRole') : t('orders.sellerRole')}</Badge>
+                    <h1>{selectedOrder.title}</h1>
+                    <small>{t('orders.orderNo', '订单号')} {selectedOrder.order_no}</small>
+                  </div>
+                  <div className="order-detail-status">
+                    <strong>{selectedOrder.status_label || selectedOrder.status}</strong>
+                    <span>{selectedOrder.kind === 'service' ? '校园跑腿订单' : '校园商品订单'}</span>
+                  </div>
                 </header>
-                <div className="order-detail-summary">
+
+                {/* Trade status timeline */}
+                {selectedOrder.kind !== 'service' && !selectedOrder.service_task_id ? (
+                  <ol className="order-status-track" aria-label="交易进度">
+                    {[
+                      { key: 'pending_payment', label: '待付款' },
+                      { key: 'pending_ship', label: '已付款·待发货' },
+                      { key: 'shipped', label: '已发货·待收货' },
+                      { key: 'completed', label: '已完成' },
+                    ].map((step, index, arr) => {
+                      const orderKeys = arr.map((s) => s.key)
+                      const cur = selectedOrder.status === 'refunded' ? 'completed' : selectedOrder.status
+                      const curIdx = orderKeys.indexOf(cur)
+                      const stepIdx = index
+                      const done = curIdx > stepIdx || (cur === 'completed' && step.key === 'completed') || selectedOrder.status === 'refunded'
+                      const active = cur === step.key || (selectedOrder.status === 'refunded' && step.key === 'completed')
+                      return (
+                        <li key={step.key} className={done || active ? (active ? 'is-active' : 'is-done') : ''}>
+                          <span className="order-status-dot" />
+                          <em>{step.label}</em>
+                          {index < arr.length - 1 ? <i className="order-status-line" /> : null}
+                        </li>
+                      )
+                    })}
+                    {selectedOrder.status === 'cancelled' ? (
+                      <li className="is-active is-cancel"><span className="order-status-dot" /><em>已取消</em></li>
+                    ) : null}
+                    {selectedOrder.status === 'refunded' ? (
+                      <li className="is-active is-refund"><span className="order-status-dot" /><em>退款完成</em></li>
+                    ) : null}
+                  </ol>
+                ) : null}
+
+                <button
+                  type="button"
+                  className="order-detail-summary is-clickable"
+                  onClick={() => {
+                    if (selectedOrder.listing_id) {
+                      handleAction({
+                        type: selectedOrder.kind === 'game' ? 'game' : 'listing',
+                        id: selectedOrder.listing_id,
+                        title: selectedOrder.title,
+                      })
+                    } else if (selectedOrder.service_task_id) {
+                      handleAction({
+                        type: 'service',
+                        id: selectedOrder.service_task_id,
+                        title: selectedOrder.title,
+                      })
+                    } else {
+                      setNotice('该订单没有关联发布内容')
+                    }
+                  }}
+                >
                   {selectedOrder.image_url ? <img src={selectedOrder.image_url} alt="" /> : <div className="order-detail-image-fallback"><Package /></div>}
-                  <div><p>{selectedOrder.description || '这笔订单的交易信息会保存在这里。'}</p><strong className="order-price">¥{Number(selectedOrder.amount || 0).toFixed(2)}</strong></div>
-                </div>
+                  <div>
+                    <p>{selectedOrder.description || '点击查看对方发布的内容详情'}</p>
+                    <strong className="order-price">¥{Number(selectedOrder.amount || 0).toFixed(2)}</strong>
+                    <small className="order-open-content-hint">
+                      {selectedOrder.listing_id || selectedOrder.service_task_id ? '点击打开发布内容详情 →' : '无关联发布内容'}
+                    </small>
+                  </div>
+                </button>
+
                 <div className="order-detail-info-grid">
                   <div><span>{t('orders.delivery', '交付')}</span><strong>{selectedOrder.meeting_location || t('orders.campusMeet', '校内当面交易')}</strong></div>
                   <div><span>{selectedOrder.role === 'buyer' ? t('orders.sellerRole') : t('orders.buyerRole')}</span><strong>{selectedOrder.role === 'buyer' ? (selectedOrder.seller?.nickname || selectedOrder.seller?.username) : (selectedOrder.buyer?.nickname || selectedOrder.buyer?.username)}</strong></div>
-                  <div><span>售后保障</span><strong>{selectedOrder.after_sale ? (selectedOrder.after_sale.status === 'admin_pending' ? '客服裁定中' : selectedOrder.after_sale.status === 'refunded' ? '退款完成' : '协商处理中') : '可在订单列表申请售后'}</strong></div>
+                  <div><span>售后保障</span><strong>{selectedOrder.after_sale ? (selectedOrder.after_sale.status === 'admin_pending' ? '客服裁定中' : selectedOrder.after_sale.status === 'pending_seller' ? '等待卖家协商' : selectedOrder.after_sale.status === 'refunded' ? '退款完成' : '协商处理中') : '可在订单列表申请售后'}</strong></div>
                 </div>
                 {selectedOrder.buyer_note ? <p className="order-detail-note"><span>买家备注</span>{selectedOrder.buyer_note}</p> : null}
                 {selectedOrder.seller_note ? <p className="order-detail-note"><span>卖家备注</span>{selectedOrder.seller_note}</p> : null}
                 <div className="order-detail-actions">
                   <Button variant="outline" onClick={() => setSelectedOrder(null)}>{t('detail.back')}</Button>
+                  {(selectedOrder.listing_id || selectedOrder.service_task_id) ? (
+                    <Button
+                      variant="secondary"
+                      onClick={() => handleAction({
+                        type: selectedOrder.service_task_id ? 'service' : (selectedOrder.kind === 'game' ? 'game' : 'listing'),
+                        id: selectedOrder.service_task_id || selectedOrder.listing_id,
+                        title: selectedOrder.title,
+                      })}
+                    >
+                      查看发布内容
+                    </Button>
+                  ) : null}
                   {selectedOrder.role === 'buyer' && selectedOrder.seller ? (
                     <Button onClick={() => openChat({ user: selectedOrder.seller, context: { type: 'listing', id: selectedOrder.listing_id, title: selectedOrder.title } })}>{t('ui.message')}</Button>
                   ) : null}
