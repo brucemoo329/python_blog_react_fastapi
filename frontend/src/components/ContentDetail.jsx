@@ -306,7 +306,13 @@ export default function ContentDetail({
     }
   }
 
+  const canPost = currentUser?.can_post !== false
+
   const share = async () => {
+    if (!canPost) {
+      onNotice?.(currentUser?.ban_reason || '你的发帖权限已被限制，无法转发')
+      return
+    }
     try {
       const response = await shareContent({ source_type: item.type, source_id: item.id, comment: shareText })
       setShareText('')
@@ -510,7 +516,20 @@ export default function ContentDetail({
 
         <div className="x-post-actions">
           <button type="button" onClick={() => document.querySelector('.x-reply-composer textarea')?.focus()}><MessageCircle /> <span>{item.comment_count || 0}</span></button>
-          <button type="button" onClick={() => setShareOpen((value) => !value)}><Repeat2 /> <span>{item.repost_count || 0}</span></button>
+          <button
+            type="button"
+            disabled={!canPost}
+            title={canPost ? undefined : '发帖权限已限制，无法转发'}
+            onClick={() => {
+              if (!canPost) {
+                onNotice?.(currentUser?.ban_reason || '你的发帖权限已被限制，无法转发')
+                return
+              }
+              setShareOpen((value) => !value)
+            }}
+          >
+            <Repeat2 /> <span>{item.repost_count || 0}</span>
+          </button>
           <button
             type="button"
             className={cn(item.reaction?.my_reaction === 'like' && 'is-like', reactBurst.startsWith(`${item.type}-${item.id}-like`) && 'is-burst')}

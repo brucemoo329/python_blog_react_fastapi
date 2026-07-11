@@ -2461,6 +2461,8 @@ def share_content(
     db: Session = Depends(get_db),
     user: models.User = Depends(get_current_user),
 ):
+    # 禁发帖用户不得通过转发绕过限制（转发会生成社区帖）
+    assert_can_post(user)
     source = detail_payload(db, data.source_type, data.source_id, user)
     title = f"我转发的{source['title']}"
     content = data.comment.strip() if data.comment else f"转发一个校园内容：{source['title']}"

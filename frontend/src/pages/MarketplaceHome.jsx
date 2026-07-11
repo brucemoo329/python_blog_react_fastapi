@@ -549,6 +549,10 @@ export default function MarketplaceHome({ user, onLogout, onUserUpdate }) {
   }
 
   const handleFeedShare = async (item) => {
+    if (currentUser?.can_post === false) {
+      setNotice(currentUser?.ban_reason || '你的发帖权限已被限制，无法转发')
+      return
+    }
     try {
       const response = await shareContent({ source_type: item.type, source_id: item.id, comment: '' })
       setFeed((current) => current.map((entry) => itemKey(entry) === itemKey(item) ? { ...entry, repost_count: (entry.repost_count || 0) + 1 } : entry))

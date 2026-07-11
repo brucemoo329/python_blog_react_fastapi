@@ -205,6 +205,7 @@ def public_user(user: models.User, db: Optional[Session] = None):
         "is_admin": bool(getattr(user, "is_admin", False)),
         "can_comment": bool(getattr(user, "can_comment", True)),
         "can_post": bool(getattr(user, "can_post", True)),
+        "ban_reason": getattr(user, "ban_reason", None),
         "created_at": user.created_at,
     }
     if db:
