@@ -1260,19 +1260,41 @@
   opacity: 1;
 }
 .publish-image-preview-btn {
+  position: absolute;
+  inset: 0;
   width: 100%;
   height: 100%;
+  z-index: 0;
+  border: 0;
+  padding: 0;
+  margin: 0;
+  border-radius: inherit;
+  overflow: hidden;
+  background: transparent;
+  cursor: zoom-in;
 }
 .publish-image-preview-btn img {
+  display: block;
   width: 100%;
   height: 100%;
   object-fit: cover;
+  background: transparent;
 }
+/* Only the remove control is the small corner chip — not all grid buttons */
 .publish-image-remove {
   position: absolute;
   top: 8px;
   right: 8px;
   z-index: 2;
+  display: grid;
+  width: 30px;
+  height: 30px;
+  place-items: center;
+  border: 0;
+  border-radius: 999px;
+  color: #fff;
+  background: rgba(15, 23, 42, 0.72);
+  cursor: pointer;
 }
 .chat-image-btn img {
   display: block;
@@ -2169,6 +2191,7 @@
   aspect-ratio: 1;
   max-height: 160px;
   border: 1px solid rgba(148, 163, 184, 0.2);
+  background: #e8eeec;
 }
 
 .publish-image-grid img,
@@ -2177,20 +2200,6 @@
   height: 100%;
   object-fit: cover;
   display: block;
-}
-
-
-.publish-image-grid button {
-  position: absolute;
-  top: 8px;
-  right: 8px;
-  display: grid;
-  width: 30px;
-  height: 30px;
-  place-items: center;
-  border-radius: 999px;
-  color: #fff;
-  background: rgba(15, 23, 42, 0.72);
 }
 
 .profile-settings-dialog,

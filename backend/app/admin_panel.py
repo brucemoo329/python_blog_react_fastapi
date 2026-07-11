@@ -136,7 +136,7 @@ def delete_content_row(db: Session, item_type: str, item_id: int):
         item = db.get(models.Listing, item_id)
         if not item:
             raise HTTPException(status_code=404, detail="内容不存在")
-        db.delete(item)
+        item.status = "deleted"
         return
     if item_type == "service":
         item = db.get(models.ServiceTask, item_id)
@@ -148,7 +148,10 @@ def delete_content_row(db: Session, item_type: str, item_id: int):
         raise HTTPException(status_code=400, detail="不支持的内容类型")
     if not item:
         raise HTTPException(status_code=404, detail="内容不存在")
-    db.delete(item)
+    if hasattr(item, "status"):
+        item.status = "deleted"
+    else:
+        db.delete(item)
 
 
 @router.get("/overview")

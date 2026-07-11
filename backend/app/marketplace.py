@@ -1204,7 +1204,7 @@ def detail_payload(db: Session, item_type: str, item_id: int, user: models.User)
             joinedload(models.Listing.seller).joinedload(models.User.profile),
             joinedload(models.Listing.images),
         ).filter_by(id=item_id).first()
-        if not listing:
+        if not listing or listing.status == "deleted":
             raise HTTPException(status_code=404, detail="内容不存在")
         result_type = "game" if listing.trade_type == "digital" else "listing"
         return {
@@ -1228,14 +1228,14 @@ def detail_payload(db: Session, item_type: str, item_id: int, user: models.User)
             joinedload(models.ServiceTask.requester).joinedload(models.User.profile),
             joinedload(models.ServiceTask.runner).joinedload(models.User.profile),
         ).filter_by(id=item_id).first()
-        if not task:
+        if not task or task.status == "deleted":
             raise HTTPException(status_code=404, detail="内容不存在")
         return serialize_service_detail(db, task, user)
     if normalized == "wanted":
         wanted = db.query(models.WantedPost).options(
             joinedload(models.WantedPost.user).joinedload(models.User.profile)
         ).filter_by(id=item_id).first()
-        if not wanted:
+        if not wanted or wanted.status == "deleted":
             raise HTTPException(status_code=404, detail="内容不存在")
         price = float(wanted.budget_max) if wanted.budget_max is not None else None
         return {
@@ -2156,8 +2156,19 @@ def delete_content(
         db.query(models.ContentComment).filter_by(target_type=target_type, target_id=item_id).delete()
         db.query(models.BrowseHistory).filter_by(item_type=target_type, item_id=item_id).delete()
 
-    db.delete(item)
-    db.commit()
+    # Soft-delete when the model has status (keeps order FKs; profile counts stay in sync).
+    # Community posts have no status field — hard delete.
+    if hasattr(item, "status"):
+        item.status = "deleted"
+        db.commit()
+        return {"message": "已删除发布内容"}
+
+    try:
+        db.delete(item)
+        db.commit()
+    except Exception:
+        db.rollback()
+        raise HTTPException(status_code=400, detail="删除失败，请稍后重试")
     return {"message": "已删除发布内容"}
 
 
@@ -2511,17 +2522,24 @@ def get_profile(
     published = {
         "listings": [
             compact_listing_payload(item)
-            for item in db.query(models.Listing).options(joinedload(models.Listing.images)).filter_by(
-                seller_id=user.id
+            for item in db.query(models.Listing).options(joinedload(models.Listing.images)).filter(
+                models.Listing.seller_id == user.id,
+                models.Listing.status != "deleted",
             ).order_by(models.Listing.created_at.desc()).limit(12)
         ],
         "services": [
             {"id": item.id, "type": "service", "title": item.title, "status": item.status, "price_label": f"¥{float(item.reward):.0f}", "created_at": item.created_at}
-            for item in db.query(models.ServiceTask).filter_by(requester_id=user.id).order_by(models.ServiceTask.created_at.desc()).limit(12)
+            for item in db.query(models.ServiceTask).filter(
+                models.ServiceTask.requester_id == user.id,
+                models.ServiceTask.status != "deleted",
+            ).order_by(models.ServiceTask.created_at.desc()).limit(12)
         ],
         "wanted": [
             {"id": item.id, "type": "wanted", "title": item.title, "status": item.status, "price_label": f"预算 ¥{float(item.budget_max):.0f}" if item.budget_max else "预算面议", "created_at": item.created_at}
-            for item in db.query(models.WantedPost).filter_by(user_id=user.id).order_by(models.WantedPost.created_at.desc()).limit(12)
+            for item in db.query(models.WantedPost).filter(
+                models.WantedPost.user_id == user.id,
+                models.WantedPost.status != "deleted",
+            ).order_by(models.WantedPost.created_at.desc()).limit(12)
         ],
         "posts": [
             {"id": item.id, "type": "community", "title": item.title or item.content[:24], "status": item.topic, "price_label": None, "image_url": item.image_url, "created_at": item.created_at}
@@ -2945,8 +2963,9 @@ def get_public_user_profile(
     profile = ensure_user_profile(db, target)
     published = [
         compact_listing_payload(item)
-        for item in db.query(models.Listing).options(joinedload(models.Listing.images)).filter_by(
-            seller_id=target.id
+        for item in db.query(models.Listing).options(joinedload(models.Listing.images)).filter(
+            models.Listing.seller_id == target.id,
+            models.Listing.status != "deleted",
         ).order_by(models.Listing.created_at.desc()).limit(12).all()
     ]
     published.extend({
@@ -2957,7 +2976,10 @@ def get_public_user_profile(
         "price_label": f"赏金 ¥{float(item.reward):.0f}",
         "image_url": item.image_url,
         "created_at": item.created_at,
-    } for item in db.query(models.ServiceTask).filter_by(requester_id=target.id).order_by(models.ServiceTask.created_at.desc()).limit(8).all())
+    } for item in db.query(models.ServiceTask).filter(
+        models.ServiceTask.requester_id == target.id,
+        models.ServiceTask.status != "deleted",
+    ).order_by(models.ServiceTask.created_at.desc()).limit(8).all())
     published.extend({
         "id": item.id,
         "type": "wanted",
@@ -2966,7 +2988,10 @@ def get_public_user_profile(
         "price_label": f"预算 ¥{float(item.budget_max):.0f}" if item.budget_max else "预算面议",
         "image_url": item.image_url,
         "created_at": item.created_at,
-    } for item in db.query(models.WantedPost).filter_by(user_id=target.id).order_by(models.WantedPost.created_at.desc()).limit(8).all())
+    } for item in db.query(models.WantedPost).filter(
+        models.WantedPost.user_id == target.id,
+        models.WantedPost.status != "deleted",
+    ).order_by(models.WantedPost.created_at.desc()).limit(8).all())
     published.extend({
         "id": item.id,
         "type": "community",

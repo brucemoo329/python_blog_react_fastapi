@@ -127,7 +127,35 @@ const EMPTY_SUMMARY = {
 }
 
 const PAGE_LOADED_AT = Date.now()
+const APP_UI_KEY = 'campus_app_ui'
 const itemKey = (item) => `${item.type || item.item_type}-${item.id || item.item_id}`
+
+function readAppUi() {
+  try {
+    const raw = sessionStorage.getItem(APP_UI_KEY)
+    if (!raw) return {}
+    const data = JSON.parse(raw)
+    return data && typeof data === 'object' ? data : {}
+  } catch {
+    return {}
+  }
+}
+
+function writeAppUi(patch) {
+  try {
+    sessionStorage.setItem(APP_UI_KEY, JSON.stringify({ ...readAppUi(), ...patch }))
+  } catch {
+    // ignore quota / private mode
+  }
+}
+
+function clearAppUi() {
+  try {
+    sessionStorage.removeItem(APP_UI_KEY)
+  } catch {
+    // ignore
+  }
+}
 
 function relativeTime(value) {
   if (!value) return '刚刚'
@@ -218,11 +246,20 @@ function FeedCard({ item, saved, onOpen, onOpenUser, onSave, onReact, onShare, o
 }
 
 export default function MarketplaceHome({ user, onLogout, onUserUpdate }) {
+  const savedUi = useMemo(() => readAppUi(), [])
   const [currentUser, setCurrentUser] = useState(user)
-  const [activeNav, setActiveNav] = useState('home')
-  const [view, setView] = useState('pulse')
-  const [filter, setFilter] = useState('all')
-  const [topicFilter, setTopicFilter] = useState('')
+  const [activeNav, setActiveNav] = useState(() => {
+    const nav = savedUi.activeNav
+    const allowed = new Set([...NAV_DEFS.map((item) => item.id), 'messages', 'admin'])
+    if (nav === 'admin' && !user?.is_admin) return 'home'
+    return allowed.has(nav) ? nav : 'home'
+  })
+  const [view, setView] = useState(() => (savedUi.view === 'radar' ? 'radar' : 'pulse'))
+  const [filter, setFilter] = useState(() => {
+    const f = savedUi.filter
+    return ['all', 'listing', 'service', 'game', 'wanted', 'community'].includes(f) ? f : 'all'
+  })
+  const [topicFilter, setTopicFilter] = useState(() => savedUi.topicFilter || '')
   const [search, setSearch] = useState('')
   const [feed, setFeed] = useState([])
   const [tasks, setTasks] = useState([])
@@ -234,15 +271,40 @@ export default function MarketplaceHome({ user, onLogout, onUserUpdate }) {
   const [campus, setCampus] = useState(user?.profile?.school || '南通理工学院')
   const [savedKeys, setSavedKeys] = useState(new Set())
   const [notice, setNotice] = useState('')
-  const [selectedDetail, setSelectedDetail] = useState(null)
+  const [selectedDetail, setSelectedDetail] = useState(() => {
+    const d = savedUi.selectedDetail
+    if (d?.type && d?.id) return { type: d.type, id: Number(d.id) }
+    return null
+  })
   const [checkoutItem, setCheckoutItem] = useState(null)
-  const [publicUserId, setPublicUserId] = useState(null)
+  const [publicUserId, setPublicUserId] = useState(() => {
+    const id = Number(savedUi.publicUserId)
+    return Number.isFinite(id) && id > 0 ? id : null
+  })
   const [quickChatRequest, setQuickChatRequest] = useState(null)
   const [initialConversationId, setInitialConversationId] = useState(null)
   const [selectedOrder, setSelectedOrder] = useState(null)
-  const [activeErrand, setActiveErrand] = useState(null)
+  const [activeErrand, setActiveErrand] = useState(() => {
+    const taskId = Number(savedUi.activeErrandTaskId)
+    return Number.isFinite(taskId) && taskId > 0 ? { taskId, tracking: null } : null
+  })
   const [feedLightbox, setFeedLightbox] = useState({ open: false, images: [], index: 0 })
   const [feedReactBurst, setFeedReactBurst] = useState('')
+
+  // Persist current screen so refresh stays on the same view
+  useEffect(() => {
+    writeAppUi({
+      activeNav,
+      view,
+      filter,
+      topicFilter: topicFilter || '',
+      selectedDetail: selectedDetail?.type && selectedDetail?.id
+        ? { type: selectedDetail.type, id: selectedDetail.id }
+        : null,
+      publicUserId: publicUserId || null,
+      activeErrandTaskId: activeErrand?.taskId || null,
+    })
+  }, [activeNav, view, filter, topicFilter, selectedDetail, publicUserId, activeErrand])
 
   const language = normalizeLang(currentUser?.profile?.language || localStorage.getItem('campus_language') || 'zh-CN')
   const isAdmin = Boolean(currentUser?.is_admin)
@@ -555,6 +617,11 @@ export default function MarketplaceHome({ user, onLogout, onUserUpdate }) {
 
   const openPublish = (type = 'listing') => { setPublishType(type); setPublishOpen(true) }
 
+  const handleLogout = () => {
+    clearAppUi()
+    onLogout?.()
+  }
+
   const handleProfileChange = (nextUser) => {
     const merged = { ...currentUser, ...nextUser, profile: { ...(currentUser?.profile || {}), ...(nextUser?.profile || {}) }, trust: nextUser?.trust || currentUser?.trust }
     setCurrentUser(merged)
@@ -741,7 +808,7 @@ export default function MarketplaceHome({ user, onLogout, onUserUpdate }) {
                   <DropdownMenuItem onClick={() => selectNav('profile')}><UserRound /> {t('ui.profile')}</DropdownMenuItem>
                   <DropdownMenuItem onClick={() => selectNav('orders')}><Package /> {t('nav.orders')}</DropdownMenuItem>
                   {isAdmin ? <DropdownMenuItem onClick={() => selectNav('admin')}><Shield /> {t('ui.admin')}</DropdownMenuItem> : null}
-                  <DropdownMenuItem onClick={onLogout}><LogOut /> {t('ui.logout')}</DropdownMenuItem>
+                  <DropdownMenuItem onClick={handleLogout}><LogOut /> {t('ui.logout')}</DropdownMenuItem>
                 </DropdownMenuGroup>
               </DropdownMenuContent>
             </DropdownMenu>
@@ -911,7 +978,7 @@ export default function MarketplaceHome({ user, onLogout, onUserUpdate }) {
             />
           )
         ) : activeNav === 'profile' ? (
-          <ProfileCenter user={currentUser} language={language} onLogout={onLogout} onNotice={setNotice} onProfileChange={handleProfileChange} onOpenItem={handleAction} onOpenUser={openUser} />
+          <ProfileCenter user={currentUser} language={language} onLogout={handleLogout} onNotice={setNotice} onProfileChange={handleProfileChange} onOpenItem={handleAction} onOpenUser={openUser} />
         ) : activeNav === 'messages' ? (
           <MessagesCenter
             currentUser={currentUser}
