@@ -3569,6 +3569,47 @@
   display: block;
   font-size: 1.5rem;
 }
+
+/* Admin overview MagicBento: high-contrast text on dark cards */
+.admin-magic-bento .magic-bento-card {
+  border-color: rgba(167, 139, 250, 0.35) !important;
+  background: #12241e !important;
+  color: #f4f7f6 !important;
+  box-shadow: 0 12px 32px rgba(4, 16, 14, 0.35);
+}
+.admin-magic-bento .magic-bento-card__header,
+.admin-magic-bento .magic-bento-card__content,
+.admin-magic-bento .magic-bento-card__label,
+.admin-magic-bento .magic-bento-card__title,
+.admin-magic-bento .magic-bento-card__description {
+  color: #f8faf9 !important;
+}
+.admin-magic-bento .magic-bento-card__label {
+  opacity: 0.92;
+  font-weight: 700;
+}
+.admin-magic-bento .magic-bento-card__title {
+  font-size: 1.55em;
+  font-weight: 800;
+  letter-spacing: -0.02em;
+  color: #ffffff !important;
+}
+.admin-magic-bento .magic-bento-card__description {
+  opacity: 0.9;
+  color: #d7ebe4 !important;
+}
+.campus-shell--daylight .admin-magic-bento .magic-bento-card {
+  background: #12352f !important;
+  border-color: rgba(15, 159, 131, 0.4) !important;
+}
+.campus-shell--daylight .admin-magic-bento .magic-bento-card__header,
+.campus-shell--daylight .admin-magic-bento .magic-bento-card__content,
+.campus-shell--daylight .admin-magic-bento .magic-bento-card__label,
+.campus-shell--daylight .admin-magic-bento .magic-bento-card__title,
+.campus-shell--daylight .admin-magic-bento .magic-bento-card__description {
+  color: #f4fffb !important;
+}
+
 .admin-stat-card small {
   display: block;
   margin-top: 8px;

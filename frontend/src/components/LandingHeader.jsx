@@ -4,12 +4,12 @@ import CampusBrand from './CampusBrand.jsx'
 import GlassSurface from './reactbits/GlassSurface.jsx'
 import GooeyNav from './reactbits/GooeyNav.jsx'
 import LanguageSwitcher from './LanguageSwitcher.jsx'
+import { cn } from '@/lib/utils'
 
 /**
- * ReactBits-style top chrome:
- * - At page top: two glass pills on left / right
- * - On scroll: pills expand and merge into one glass bar
- * Behavior (links, login, language) stays identical.
+ * ReactBits-style chrome (single DOM layer — no ghost hit targets):
+ * - Page top: solid pills on left / right only (NOT liquid glass)
+ * - Scrolled: one liquid-glass bar; same buttons, layout merges
  */
 export default function LandingHeader({
   navItems,
@@ -22,15 +22,14 @@ export default function LandingHeader({
   onPrimaryAction,
   onScrollToItem,
 }) {
-  const [merge, setMerge] = useState(0)
+  const [merged, setMerged] = useState(false)
 
   useEffect(() => {
     let frame = 0
     const update = () => {
       frame = 0
-      // Merge over first ~90px of scroll
-      const next = Math.min(1, Math.max(0, window.scrollY / 90))
-      setMerge((prev) => (Math.abs(prev - next) < 0.01 ? prev : next))
+      // Stay solid until user scrolls a bit, then merge to glass
+      setMerged(window.scrollY > 56)
     }
     const onScroll = () => {
       if (frame) return
@@ -46,19 +45,26 @@ export default function LandingHeader({
     }
   }, [])
 
-  const merged = merge > 0.72
   const brand = (
     <button type="button" className="landing-brand-button" onClick={() => onScrollToItem(navItems[0])}>
       <CampusBrand inverted />
     </button>
   )
 
-  const nav = <GooeyNav items={navItems} onItemChange={onScrollToItem} />
+  const nav = (
+    <div className="landing-header__nav-slot">
+      <GooeyNav items={navItems} onItemChange={onScrollToItem} />
+    </div>
+  )
 
   const actions = (
     <div className="landing-header__actions">
       <LanguageSwitcher language={language} onChange={onLanguageChange} className="landing-language-switcher" />
-      <button type="button" className="landing-link-button" onClick={isAuthenticated ? onEnterMarket : onNavigateLogin}>
+      <button
+        type="button"
+        className="landing-link-button"
+        onClick={isAuthenticated ? onEnterMarket : onNavigateLogin}
+      >
         {isAuthenticated ? copy.market : copy.login}
       </button>
       <button type="button" className="landing-solid-button" onClick={onPrimaryAction}>
@@ -67,48 +73,32 @@ export default function LandingHeader({
     </div>
   )
 
+  const shell = (
+    <div className="landing-header__shell">
+      <div className="landing-header__cluster is-left">
+        {brand}
+        {nav}
+      </div>
+      <div className="landing-header__cluster is-right">{actions}</div>
+    </div>
+  )
+
   return (
-    <header
-      className={`landing-header ${merged ? 'is-merged' : 'is-split'}`}
-      style={{ '--header-merge': merge }}
-      data-merge={merge.toFixed(2)}
-    >
-      {/* Split mode: left + right glass pills (ReactBits top-of-page) */}
-      <div className="landing-header__split" aria-hidden={merged}>
+    <header className={cn('landing-header', merged ? 'is-merged' : 'is-split')}>
+      {merged ? (
         <GlassSurface
-          className="landing-header__pill landing-header__pill--left"
+          className="landing-header__glass"
           height={66}
-          borderRadius={999}
-          backgroundOpacity={0.38}
-          blur={20}
+          backgroundOpacity={0.42}
+          blur={22}
+          borderRadius={20}
         >
-          <div className="landing-header__pill-inner is-left">
-            {brand}
-            <div className="landing-header__pill-nav">{nav}</div>
-          </div>
+          {shell}
         </GlassSurface>
-
-        <GlassSurface
-          className="landing-header__pill landing-header__pill--right"
-          height={66}
-          borderRadius={999}
-          backgroundOpacity={0.38}
-          blur={20}
-        >
-          <div className="landing-header__pill-inner is-right">{actions}</div>
-        </GlassSurface>
-      </div>
-
-      {/* Merged mode: single glass bar */}
-      <div className="landing-header__merged" aria-hidden={!merged}>
-        <GlassSurface className="landing-header__glass" height={66} backgroundOpacity={0.4} blur={22} borderRadius={20}>
-          <nav className="landing-header__inner" aria-label="站点导航">
-            {brand}
-            {nav}
-            {actions}
-          </nav>
-        </GlassSurface>
-      </div>
+      ) : (
+        // Solid split pills — no GlassSurface / no full-width hit area
+        shell
+      )}
     </header>
   )
 }

@@ -928,10 +928,16 @@ def full_order_payload(db: Session, order: models.Order, user_id: int):
         (role == "buyer" and getattr(order, "buyer_deleted", False))
         or (role == "seller" and getattr(order, "seller_deleted", False))
     )
-    can_delete_record = order.status in {"completed", "cancelled"} and not deleted_for_me
-    after_sale = db.query(models.AfterSaleRequest).filter_by(order_id=order.id).order_by(
-        models.AfterSaleRequest.created_at.desc()
-    ).first()
+    # 已完成 / 已取消 / 退款完成 后均可软删除自己的记录
+    can_delete_record = order.status in {"completed", "cancelled", "refunded"} and not deleted_for_me
+    after_sale = None
+    try:
+        after_sale = db.query(models.AfterSaleRequest).filter_by(order_id=order.id).order_by(
+            models.AfterSaleRequest.created_at.desc()
+        ).first()
+    except Exception:
+        db.rollback()
+        after_sale = None
     after_sale_active = after_sale and after_sale.status in {"pending_seller", "admin_pending"}
     can_apply_after_sale = (
         role == "buyer"
@@ -942,6 +948,14 @@ def full_order_payload(db: Session, order: models.Order, user_id: int):
     can_respond_after_sale = bool(
         role == "seller" and after_sale and after_sale.status == "pending_seller"
     )
+
+    def _dt(value):
+        if value is None:
+            return None
+        try:
+            return value.isoformat() if hasattr(value, "isoformat") else str(value)
+        except Exception:
+            return None
 
     payload.update({
         "buyer": user_payload(order.buyer) if order.buyer else None,
@@ -976,13 +990,13 @@ def full_order_payload(db: Session, order: models.Order, user_id: int):
         "can_respond_after_sale": can_respond_after_sale,
         "after_sale": {
             "id": after_sale.id,
-            "reason": after_sale.reason,
-            "status": after_sale.status,
+            "reason": after_sale.reason or "",
+            "status": after_sale.status or "pending_seller",
             "seller_response": after_sale.seller_response,
             "admin_note": after_sale.admin_note,
-            "created_at": after_sale.created_at,
-            "responded_at": after_sale.responded_at,
-            "handled_at": after_sale.handled_at,
+            "created_at": _dt(after_sale.created_at),
+            "responded_at": _dt(after_sale.responded_at),
+            "handled_at": _dt(after_sale.handled_at),
         } if after_sale else None,
         "service_task": service_task_tracking_payload(order.service_task, user_id, db=db, order_id=order.id) if order.service_task else None,
     })
@@ -3086,7 +3100,18 @@ def list_my_orders(
     if status != "all":
         query = query.filter(models.Order.status == status)
     rows = query.order_by(models.Order.created_at.desc()).limit(100).all()
-    return {"items": [full_order_payload(db, row, user.id) for row in rows]}
+    items = []
+    for row in rows:
+        try:
+            items.append(full_order_payload(db, row, user.id))
+        except Exception:
+            # Never blank the whole list because one order failed to serialize
+            try:
+                db.rollback()
+            except Exception:
+                pass
+            items.append(compact_order_payload(row, "buyer" if row.buyer_id == user.id else "seller"))
+    return {"items": items}
 
 
 @router.get("/orders/{order_id}")
@@ -3561,8 +3586,8 @@ def delete_order_record(
     order = db.get(models.Order, order_id)
     if not order or user.id not in {order.buyer_id, order.seller_id}:
         raise HTTPException(status_code=404, detail="订单不存在")
-    if order.status not in {"completed", "cancelled"}:
-        raise HTTPException(status_code=409, detail="仅已完成或已取消订单可删除记录")
+    if order.status not in {"completed", "cancelled", "refunded"}:
+        raise HTTPException(status_code=409, detail="仅已完成、已取消或退款完成的订单可删除记录")
     if user.id == order.buyer_id:
         order.buyer_deleted = True
     if user.id == order.seller_id:

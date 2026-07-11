@@ -78,6 +78,7 @@ export default function OrdersCenter({
     { id: 'pending_ship', label: t('orders.pendingShip') },
     { id: 'shipped', label: t('orders.shipped') },
     { id: 'completed', label: t('orders.done') },
+    { id: 'refunded', label: '退款完成' },
     { id: 'cancelled', label: t('orders.cancelled') },
   ], [language])
 
@@ -85,8 +86,9 @@ export default function OrdersCenter({
     setLoading(true)
     try {
       const response = await getMyOrders({ role, status })
-      setOrders(response.items || [])
+      setOrders(Array.isArray(response?.items) ? response.items : [])
     } catch (error) {
+      // Keep previous list on failure so the page does not go blank after actions
       onNotice?.(error.response?.data?.detail || t('orders.loadFail', '订单加载失败'))
     } finally {
       setLoading(false)
@@ -206,18 +208,31 @@ export default function OrdersCenter({
       onNotice?.(isSellerResponse ? '请填写协商说明' : '请填写售后原因')
       return
     }
-    setBusyId(afterSaleFor.order.id)
+    const orderId = afterSaleFor.order.id
+    setBusyId(orderId)
     try {
       const response = isSellerResponse
-        ? await respondAfterSale(afterSaleFor.order.id, { agree: afterSaleFor.agree, response: text })
-        : await applyAfterSale(afterSaleFor.order.id, { reason: text })
+        ? await respondAfterSale(orderId, { agree: afterSaleFor.agree, response: text })
+        : await applyAfterSale(orderId, { reason: text })
       onNotice?.(response?.message || '售后状态已更新')
       setAfterSaleFor(null)
       setAfterSaleReason('')
       setAfterSaleResponse('')
-      await load()
+      // Optimistically patch list so UI never goes blank if refresh fails
+      if (response?.item) {
+        setOrders((prev) => {
+          const next = prev.map((item) => (item.id === orderId ? { ...item, ...response.item } : item))
+          return next.some((item) => item.id === orderId) ? next : [response.item, ...prev]
+        })
+      }
+      try {
+        await load()
+      } catch {
+        // load already surfaces notice
+      }
     } catch (error) {
-      onNotice?.(error.response?.data?.detail || '售后操作失败')
+      const detail = error.response?.data?.detail
+      onNotice?.(typeof detail === 'string' ? detail : (detail ? JSON.stringify(detail) : '售后操作失败'))
     } finally {
       setBusyId(null)
     }
@@ -296,9 +311,18 @@ export default function OrdersCenter({
                   ) : null}
                   {order.after_sale ? (
                     <span className="order-after-sale-status">
-                      售后：{order.after_sale.status === 'pending_seller' ? '等待卖家协商' : order.after_sale.status === 'admin_pending' ? '客服裁定中' : order.after_sale.status === 'refunded' ? '退款完成' : '售后已驳回'}
+                      售后：{{
+                        pending_seller: '等待卖家协商',
+                        admin_pending: '客服裁定中',
+                        refunded: '退款完成',
+                        rejected: '售后已驳回',
+                      }[order.after_sale.status] || order.after_sale.status || '处理中'}
+                      {order.after_sale.reason ? ` · ${order.after_sale.reason}` : ''}
                       {order.after_sale.admin_note ? ` · ${order.after_sale.admin_note}` : ''}
                     </span>
+                  ) : null}
+                  {order.status === 'refunded' ? (
+                    <span className="order-after-sale-status">订单状态：退款完成</span>
                   ) : null}
                   <strong className="order-price">¥{Number(order.amount || 0).toFixed(2)}</strong>
                 </div>

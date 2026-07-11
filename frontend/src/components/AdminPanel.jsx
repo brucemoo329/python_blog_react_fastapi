@@ -378,7 +378,8 @@ export default function AdminPanel({ onBack, onNotice }) {
               }
               return {
                 ...card,
-                color: '#edf8f4',
+                // Dark cards so white MagicBento text stays readable
+                color: '#12241e',
                 label: card.label,
                 title,
                 description,

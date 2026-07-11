@@ -1,5 +1,4 @@
-import { lazy, Suspense, useEffect, useRef, useState } from 'react'
-import LoginCharacterTransition from './components/LoginCharacterTransition.jsx'
+import { lazy, Suspense, useEffect, useState } from 'react'
 import { readStoredLanguage } from './lib/i18n'
 
 const Landing = lazy(() => import('./pages/Landing.jsx'))
@@ -46,18 +45,11 @@ function App() {
   const [route, setRoute] = useState(getCurrentRoute)
   const [user, setUser] = useState(readSavedUser)
   const [publicLanguage, setPublicLanguage] = useState(readStoredLanguage)
-  const [showLoginTransition, setShowLoginTransition] = useState(false)
-  const transitionTimersRef = useRef(new Set())
 
   useEffect(() => {
     const handlePopState = () => setRoute(getCurrentRoute())
     window.addEventListener('popstate', handlePopState)
     return () => window.removeEventListener('popstate', handlePopState)
-  }, [])
-
-  useEffect(() => () => {
-    transitionTimersRef.current.forEach((timer) => window.clearTimeout(timer))
-    transitionTimersRef.current.clear()
   }, [])
 
   const navigate = (nextRoute, { replace = false } = {}) => {
@@ -87,27 +79,13 @@ function App() {
     setUser(nextUser || {})
   }
 
+  // Direct navigation — no character transition animation
   const openLogin = () => {
     if (user) {
       navigate('app')
       return
     }
-    if (showLoginTransition) return
-    if (window.matchMedia('(prefers-reduced-motion: reduce)').matches) {
-      navigate('login')
-      return
-    }
-
-    setShowLoginTransition(true)
-    const schedule = (callback, delay) => {
-      const timer = window.setTimeout(() => {
-        transitionTimersRef.current.delete(timer)
-        callback()
-      }, delay)
-      transitionTimersRef.current.add(timer)
-    }
-    schedule(() => navigate('login'), 630)
-    schedule(() => setShowLoginTransition(false), 1480)
+    navigate('login')
   }
 
   let content
@@ -134,12 +112,7 @@ function App() {
     content = <MarketplaceHome user={user} onLogout={handleLogout} onUserUpdate={handleUserUpdate} />
   }
 
-  return (
-    <>
-      <Suspense fallback={<AppFallback />}>{content}</Suspense>
-      {showLoginTransition ? <LoginCharacterTransition /> : null}
-    </>
-  )
+  return <Suspense fallback={<AppFallback />}>{content}</Suspense>
 }
 
 export default App
