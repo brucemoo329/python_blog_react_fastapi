@@ -59,9 +59,11 @@ export default function ErrandTrackingMap({
   const mapRef = useRef(null)
   const mapInst = useRef(null)
   const amapRef = useRef(null)
-  const overlays = useRef([])
+  const markerPool = useRef({ pickup: null, delivery: null, runner: null })
   const routeLine = useRef(null)
   const pollRef = useRef(null)
+  const fittedOnce = useRef(false)
+  const lastRouteKey = useRef('')
 
   const role = tracking?.role
   const phase = tracking?.delivery_phase || 'pending'
@@ -130,12 +132,12 @@ export default function ErrandTrackingMap({
     }
   }, [role, phase, taskId])
 
+  // Init map once
   useEffect(() => {
     let disposed = false
     if (!mapRef.current) return undefined
-
     loadAMap()
-      .then(async (AMap) => {
+      .then((AMap) => {
         if (disposed || !mapRef.current) return
         amapRef.current = AMap
         if (!mapInst.current) {
@@ -147,67 +149,98 @@ export default function ErrandTrackingMap({
           })
           mapInst.current.addControl(new AMap.Scale())
         }
-        const map = mapInst.current
-        overlays.current.forEach((item) => map.remove(item))
-        overlays.current = []
-        if (routeLine.current) {
-          map.remove(routeLine.current)
-          routeLine.current = null
+      })
+      .catch(() => {})
+    return () => {
+      disposed = true
+    }
+  }, [])
+
+  // Upsert markers/path without destroy-all (prevents flash)
+  useEffect(() => {
+    let cancelled = false
+    const map = mapInst.current
+    const AMap = amapRef.current
+    if (!map || !AMap || !tracking) return undefined
+
+    const upsert = (key, position, html, title) => {
+      if (!position) {
+        if (markerPool.current[key]) {
+          try { map.remove(markerPool.current[key]) } catch { /* ignore */ }
+          markerPool.current[key] = null
         }
-
-        const pickup = toLngLat(tracking?.pickup)
-        const delivery = toLngLat(tracking?.delivery)
-        const runner = tracking?.runner?.lat != null
-          ? [Number(tracking.runner.lng), Number(tracking.runner.lat)]
-          : null
-
-        const addMarker = (position, html, title) => {
-          if (!position) return null
-          const marker = new AMap.Marker({
-            position,
-            content: html,
-            offset: new AMap.Pixel(-18, -18),
-            title,
-            zIndex: 120,
-          })
-          map.add(marker)
-          overlays.current.push(marker)
-          return marker
+        return
+      }
+      if (markerPool.current[key]) {
+        try {
+          markerPool.current[key].setPosition(position)
+          return
+        } catch {
+          try { map.remove(markerPool.current[key]) } catch { /* ignore */ }
+          markerPool.current[key] = null
         }
+      }
+      const marker = new AMap.Marker({
+        position,
+        content: html,
+        offset: new AMap.Pixel(-18, -18),
+        title,
+        zIndex: 120,
+      })
+      map.add(marker)
+      markerPool.current[key] = marker
+    }
 
-        addMarker(pickup, MARKER_HTML.pickup, tracking?.pickup?.label || '取货点')
-        addMarker(delivery, MARKER_HTML.delivery, tracking?.delivery?.label || '送达点')
-        addMarker(runner, MARKER_HTML.runner, '跑手位置')
+    const pickup = toLngLat(tracking?.pickup)
+    const delivery = toLngLat(tracking?.delivery)
+    const runner = tracking?.runner?.lat != null
+      ? [Number(tracking.runner.lng), Number(tracking.runner.lat)]
+      : null
 
-        const origin = runner || pickup
-        const dest = phase === 'delivering' || phase === 'picked_up' ? delivery : pickup
-        if (origin && dest && ['to_pickup', 'delivering', 'picked_up'].includes(phase)) {
+    upsert('pickup', pickup, MARKER_HTML.pickup, tracking?.pickup?.label || '取货点')
+    upsert('delivery', delivery, MARKER_HTML.delivery, tracking?.delivery?.label || '送达点')
+    upsert('runner', runner, MARKER_HTML.runner, '跑手位置')
+
+    const origin = runner || pickup
+    const dest = phase === 'delivering' || phase === 'picked_up' ? delivery : pickup
+    const run = async () => {
+      if (origin && dest && ['to_pickup', 'delivering', 'picked_up'].includes(phase)) {
+        const routeKey = `${phase}|${origin[0].toFixed(4)},${origin[1].toFixed(4)}|${dest[0].toFixed(4)},${dest[1].toFixed(4)}`
+        if (routeKey !== lastRouteKey.current || !routeLine.current) {
           try {
             const route = await planRoute(origin, dest, tracking?.travel_mode || 'auto')
-            if (!disposed && route.path?.length) {
-              routeLine.current = new AMap.Polyline({
-                path: route.path,
-                strokeColor: phase === 'delivering' ? '#34d399' : '#a78bfa',
-                strokeWeight: 6,
-                strokeOpacity: 0.9,
-                lineJoin: 'round',
-              })
-              map.add(routeLine.current)
-              overlays.current.push(routeLine.current)
+            if (cancelled) return
+            lastRouteKey.current = routeKey
+            if (route.path?.length) {
+              if (routeLine.current) {
+                try { routeLine.current.setPath(route.path) } catch {
+                  try { map.remove(routeLine.current) } catch { /* ignore */ }
+                  routeLine.current = null
+                }
+              }
+              if (!routeLine.current) {
+                routeLine.current = new AMap.Polyline({
+                  path: route.path,
+                  strokeColor: phase === 'delivering' ? '#0f9f83' : '#7c3aed',
+                  strokeWeight: 6,
+                  strokeOpacity: 0.9,
+                  lineJoin: 'round',
+                })
+                map.add(routeLine.current)
+              }
             }
           } catch {
             /* ignore */
           }
         }
-
-        const points = [pickup, delivery, runner].filter(Boolean)
-        if (points.length) map.setFitView(null, false, [48, 48, 48, 48])
-      })
-      .catch(() => {})
-
-    return () => {
-      disposed = true
+      }
+      if (!fittedOnce.current) {
+        fittedOnce.current = true
+        try { map.setFitView(null, false, [48, 48, 48, 48]) } catch { /* ignore */ }
+      }
     }
+    run()
+    return () => { cancelled = true }
   }, [tracking, phase])
 
   useEffect(() => () => {
@@ -215,6 +248,8 @@ export default function ErrandTrackingMap({
       mapInst.current.destroy()
       mapInst.current = null
     }
+    markerPool.current = { pickup: null, delivery: null, runner: null }
+    routeLine.current = null
   }, [])
 
   if (!tracking) {

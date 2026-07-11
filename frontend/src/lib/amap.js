@@ -414,7 +414,7 @@ export function planRoute(origin, destination, preferredMode = 'auto', options =
 }
 
 /**
- * Open 高德地图 App (or H5) for turn-by-turn navigation.
+ * Open 高德地图 App for turn-by-turn navigation (fast native scheme first).
  * mode: walk | ride | drive
  */
 export function openAmapAppNavigation({
@@ -429,22 +429,61 @@ export function openAmapAppNavigation({
   if (toLng == null || toLat == null) {
     throw new Error('缺少目的地坐标，无法打开高德导航')
   }
-  const modeMap = { walk: 'walk', ride: 'ride', drive: 'car', car: 'car', auto: 'ride' }
-  const m = modeMap[mode] || 'ride'
-  const hasFrom = fromLng != null && fromLat != null && Number.isFinite(Number(fromLng))
-  const fromPart = hasFrom
-    ? `${Number(fromLng)},${Number(fromLat)},${encodeURIComponent(fromName)}`
-    : ''
-  const toPart = `${Number(toLng)},${Number(toLat)},${encodeURIComponent(toName)}`
-  // callnative=1 tries to open the installed Amap app
-  const url = hasFrom
-    ? `https://uri.amap.com/navigation?from=${fromPart}&to=${toPart}&mode=${m}&coordinate=gaode&callnative=1`
-    : `https://uri.amap.com/navigation?to=${toPart}&mode=${m}&coordinate=gaode&callnative=1`
-  const opened = window.open(url, '_blank')
-  if (!opened) {
-    window.location.href = url
+  const dlat = Number(toLat)
+  const dlon = Number(toLng)
+  const dname = encodeURIComponent(toName || '目的地')
+  const sname = encodeURIComponent(fromName || '我的位置')
+  const hasFrom = fromLng != null && fromLat != null && Number.isFinite(Number(fromLng)) && Number.isFinite(Number(fromLat))
+  const slat = hasFrom ? Number(fromLat) : ''
+  const slon = hasFrom ? Number(fromLng) : ''
+  // Amap path t: 0=驾车 1=公交 2=步行 3=骑行
+  const tMap = { walk: 2, ride: 3, drive: 0, car: 0, auto: 3 }
+  const t = tMap[mode] ?? 3
+  const webMode = { walk: 'walk', ride: 'ride', drive: 'car', car: 'car', auto: 'ride' }[mode] || 'ride'
+
+  const ua = typeof navigator !== 'undefined' ? navigator.userAgent : ''
+  const isIOS = /iPhone|iPad|iPod/i.test(ua)
+  const isAndroid = /Android/i.test(ua)
+
+  // Native app schemes open immediately (no waiting for H5)
+  let nativeUrl = ''
+  if (isAndroid) {
+    nativeUrl = hasFrom
+      ? `androidamap://route?sourceApplication=CampusPulse&slat=${slat}&slon=${slon}&sname=${sname}&dlat=${dlat}&dlon=${dlon}&dname=${dname}&dev=0&t=${t}`
+      : `androidamap://navi?sourceApplication=CampusPulse&poiname=${dname}&lat=${dlat}&lon=${dlon}&dev=0&style=2`
+  } else if (isIOS) {
+    nativeUrl = hasFrom
+      ? `iosamap://path?sourceApplication=CampusPulse&slat=${slat}&slon=${slon}&sname=${sname}&dlat=${dlat}&dlon=${dlon}&dname=${dname}&dev=0&t=${t}`
+      : `iosamap://navi?sourceApplication=CampusPulse&poiname=${dname}&lat=${dlat}&lon=${dlon}&dev=0&style=2`
   }
-  return url
+
+  const fromPart = hasFrom ? `${slon},${slat},${sname}` : ''
+  const toPart = `${dlon},${dlat},${dname}`
+  const webUrl = hasFrom
+    ? `https://uri.amap.com/navigation?from=${fromPart}&to=${toPart}&mode=${webMode}&coordinate=gaode&callnative=1`
+    : `https://uri.amap.com/navigation?to=${toPart}&mode=${webMode}&coordinate=gaode&callnative=1`
+
+  if (nativeUrl) {
+    // Prefer native: location.href is snappier than window.open for app schemes
+    const start = Date.now()
+    window.location.href = nativeUrl
+    // Fallback to web/H5 only if app didn't take over
+    window.setTimeout(() => {
+      if (Date.now() - start < 2200 && !document.hidden) {
+        window.location.href = webUrl
+      }
+    }, 1200)
+    return nativeUrl
+  }
+
+  // Desktop / unknown: open H5 (try same-tab first for reliability)
+  try {
+    const win = window.open(webUrl, '_blank', 'noopener,noreferrer')
+    if (!win) window.location.href = webUrl
+  } catch {
+    window.location.href = webUrl
+  }
+  return webUrl
 }
 
 export function getCurrentLngLat() {

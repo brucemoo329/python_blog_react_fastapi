@@ -106,9 +106,14 @@ export default function ErrandNavPage({
   const mapBoxRef = useRef(null)
   const mapRef = useRef(null)
   const AMapRef = useRef(null)
-  const markersRef = useRef([])
+  /** Stable marker instances — update position instead of destroy/recreate (avoids flash) */
+  const markerPool = useRef({ pickup: null, delivery: null, runner: null })
   const polyRef = useRef(null)
   const drawSeq = useRef(0)
+  const fittedOnce = useRef(false)
+  const lastRouteKey = useRef('')
+  const lastPhaseRef = useRef('')
+  const routeInfoRef = useRef(null)
 
   const role = tracking?.role
   const phase = tracking?.delivery_phase || 'pending'
@@ -144,13 +149,52 @@ export default function ErrandNavPage({
   const clearOverlays = () => {
     const map = mapRef.current
     if (!map) return
-    markersRef.current.forEach((m) => {
-      try { map.remove(m) } catch { /* ignore */ }
+    Object.keys(markerPool.current).forEach((key) => {
+      const m = markerPool.current[key]
+      if (m) {
+        try { map.remove(m) } catch { /* ignore */ }
+        markerPool.current[key] = null
+      }
     })
-    markersRef.current = []
     if (polyRef.current) {
       try { map.remove(polyRef.current) } catch { /* ignore */ }
       polyRef.current = null
+    }
+    lastRouteKey.current = ''
+    fittedOnce.current = false
+  }
+
+  const upsertMarker = (key, position, html, title, zIndex = 150) => {
+    const map = mapRef.current
+    const AMap = AMapRef.current
+    if (!map || !AMap) return
+    if (!position) {
+      if (markerPool.current[key]) {
+        try { map.remove(markerPool.current[key]) } catch { /* ignore */ }
+        markerPool.current[key] = null
+      }
+      return
+    }
+    const existing = markerPool.current[key]
+    if (existing) {
+      try {
+        existing.setPosition(position)
+        if (title) existing.setTitle(title)
+      } catch {
+        try { map.remove(existing) } catch { /* ignore */ }
+        markerPool.current[key] = null
+      }
+    }
+    if (!markerPool.current[key]) {
+      const marker = new AMap.Marker({
+        position,
+        content: html,
+        offset: new AMap.Pixel(-18, -18),
+        title,
+        zIndex,
+      })
+      map.add(marker)
+      markerPool.current[key] = marker
     }
   }
 
@@ -160,91 +204,103 @@ export default function ErrandNavPage({
     if (!map || !AMap || !track) return
     const seq = ++drawSeq.current
 
-    clearOverlays()
-
     let pickup = toLngLat(track.pickup)
     let delivery = toLngLat(track.delivery)
-    if (!pickup) pickup = await ensurePoint(track.pickup_location || track.pickup?.label, track.pickup)
-    if (!delivery) delivery = await ensurePoint(track.delivery_location || track.delivery?.label, track.delivery)
+    // Prefer existing coords — avoid geocode on every poll (causes blank flash)
+    if (!pickup && track.pickup_location) pickup = await ensurePoint(track.pickup_location, track.pickup)
+    if (!delivery && track.delivery_location) delivery = await ensurePoint(track.delivery_location, track.delivery)
     if (seq !== drawSeq.current) return
 
     const runner = livePos
       || (track.runner?.lat != null ? [Number(track.runner.lng), Number(track.runner.lat)] : null)
 
-    const addMarker = (position, html, title, zIndex = 150) => {
-      if (!position) return
-      const marker = new AMap.Marker({
-        position,
-        content: html,
-        offset: new AMap.Pixel(-18, -18),
-        title,
-        zIndex,
-      })
-      map.add(marker)
-      markersRef.current.push(marker)
-    }
-
-    addMarker(pickup, MARKER_HTML.pickup, track.pickup_location || '取货点', 140)
-    addMarker(delivery, MARKER_HTML.delivery, track.delivery_location || '送达点', 140)
-
-    if (isRunner && runner) addMarker(runner, MARKER_HTML.me, '我（跑手）', 160)
-    else if (runner) addMarker(runner, MARKER_HTML.runner, '跑手位置', 160)
-
-    if (isRequester && delivery) {
-      // 发布者自己的送达点强调
-      addMarker(delivery, MARKER_HTML.me, '我的收货地址', 155)
-    }
+    // In-place marker updates — no remove-all flash
+    upsertMarker('pickup', pickup, MARKER_HTML.pickup, track.pickup_location || '取货点', 140)
+    upsertMarker('delivery', delivery, MARKER_HTML.delivery, track.delivery_location || '送达点', 140)
+    const runnerHtml = isRunner ? MARKER_HTML.me : MARKER_HTML.runner
+    const runnerTitle = isRunner ? '我（跑手）' : '跑手位置'
+    upsertMarker('runner', runner, runnerHtml, runnerTitle, 160)
 
     const currentPhase = track.delivery_phase || phase
-    // 取货阶段：当前位置 → 取货点；配送阶段：当前位置 → 送达点
+    if (currentPhase !== lastPhaseRef.current) {
+      lastPhaseRef.current = currentPhase
+      lastRouteKey.current = ''
+      fittedOnce.current = false
+    }
+
     const origin = runner || (currentPhase === 'to_pickup' ? null : pickup)
     const dest = currentPhase === 'to_pickup' || currentPhase === 'pending'
       ? pickup
       : delivery
 
+    const fitIfNeeded = () => {
+      if (fittedOnce.current) return
+      fittedOnce.current = true
+      try { map.setFitView(null, false, [70, 70, 70, 70]) } catch { /* ignore */ }
+    }
+
     if (origin && dest && ['to_pickup', 'delivering', 'picked_up'].includes(currentPhase)) {
       const useMode = normalizeMode(travelMode || modeRef.current, 'ride')
-      setStatusText(currentPhase === 'to_pickup' ? '规划：当前位置 → 取货点' : '规划：当前位置 → 送达点')
-      try {
-        const route = await planRoute(origin, dest, useMode, { map: null })
-        if (seq !== drawSeq.current) return
-        if (route.path?.length >= 2) {
-          polyRef.current = new AMap.Polyline({
-            path: route.path,
-            strokeColor: currentPhase === 'to_pickup' ? '#7c3aed' : '#0f9f83',
-            strokeWeight: 7,
-            strokeOpacity: 0.92,
-            lineJoin: 'round',
-            lineCap: 'round',
-            showDir: true,
-            zIndex: 50,
-          })
-          map.add(polyRef.current)
-          markersRef.current.push(polyRef.current)
-        }
-        setRouteInfo(route)
-        const modeText = MODE_LABEL[useMode] || useMode
-        const approx = route.approximate ? '（近似）' : ''
-        setStatusText(
-          currentPhase === 'to_pickup'
-            ? `去取货 · ${modeText} · ${fmtEta(route.duration)} · ${route.distance}米${approx}`
-            : `配送中 · ${modeText} · ${fmtEta(route.duration)} · ${route.distance}米${approx}`,
-        )
+      // Quantize to ~11m so tiny GPS jitter does not rebuild route
+      const routeKey = `${useMode}|${origin[0].toFixed(4)},${origin[1].toFixed(4)}|${dest[0].toFixed(4)},${dest[1].toFixed(4)}|${currentPhase}`
+      if (routeKey !== lastRouteKey.current || !polyRef.current) {
+        setStatusText(currentPhase === 'to_pickup' ? '规划：当前位置 → 取货点' : '规划：当前位置 → 送达点')
         try {
-          map.setFitView(null, false, [70, 70, 70, 70])
-        } catch { /* ignore */ }
-      } catch (error) {
-        setStatusText(error.message || '路线规划失败')
+          const route = await planRoute(origin, dest, useMode, { map: null })
+          if (seq !== drawSeq.current) return
+          lastRouteKey.current = routeKey
+          if (route.path?.length >= 2) {
+            if (polyRef.current) {
+              try {
+                polyRef.current.setPath(route.path)
+              } catch {
+                try { map.remove(polyRef.current) } catch { /* ignore */ }
+                polyRef.current = null
+              }
+            }
+            if (!polyRef.current) {
+              polyRef.current = new AMap.Polyline({
+                path: route.path,
+                strokeColor: currentPhase === 'to_pickup' ? '#7c3aed' : '#0f9f83',
+                strokeWeight: 7,
+                strokeOpacity: 0.92,
+                lineJoin: 'round',
+                lineCap: 'round',
+                showDir: true,
+                zIndex: 50,
+              })
+              map.add(polyRef.current)
+            } else {
+              try {
+                polyRef.current.setOptions({
+                  strokeColor: currentPhase === 'to_pickup' ? '#7c3aed' : '#0f9f83',
+                })
+              } catch { /* ignore */ }
+            }
+          }
+          routeInfoRef.current = route
+          setRouteInfo(route)
+          const modeText = MODE_LABEL[useMode] || useMode
+          const approx = route.approximate ? '（近似）' : ''
+          setStatusText(
+            currentPhase === 'to_pickup'
+              ? `去取货 · ${modeText} · ${fmtEta(route.duration)} · ${route.distance}米${approx}`
+              : `配送中 · ${modeText} · ${fmtEta(route.duration)} · ${route.distance}米${approx}`,
+          )
+        } catch (error) {
+          setStatusText(error.message || '路线规划失败')
+        }
       }
+      fitIfNeeded()
     } else if (currentPhase === 'delivered') {
       setStatusText('订单已完成')
-      try { map.setFitView(null, false, [70, 70, 70, 70]) } catch { /* ignore */ }
+      fitIfNeeded()
     } else if (currentPhase === 'pending') {
       setStatusText('等待跑手接单…')
-      try { map.setFitView(null, false, [70, 70, 70, 70]) } catch { /* ignore */ }
+      fitIfNeeded()
     } else {
       setStatusText(isRunner ? '正在获取你的位置…' : '等待跑手位置，已显示取货/送达点')
-      try { map.setFitView(null, false, [70, 70, 70, 70]) } catch { /* ignore */ }
+      fitIfNeeded()
     }
   }, [isRunner, isRequester, phase])
 
@@ -400,29 +456,22 @@ export default function ErrandNavPage({
     }
   }
 
-  const openExternalNav = async () => {
+  const openExternalNav = () => {
     try {
-      let origin = myPosRef.current
-      if (!origin) {
-        try {
-          const pos = await getCurrentLngLat()
-          origin = [pos.lng, pos.lat]
-          myPosRef.current = origin
-          setMyPos(origin)
-        } catch { /* optional */ }
-      }
-      let pickup = toLngLat(tracking?.pickup)
-      let delivery = toLngLat(tracking?.delivery)
-      if (!pickup) pickup = await ensurePoint(tracking?.pickup_location, tracking?.pickup)
-      if (!delivery) delivery = await ensurePoint(tracking?.delivery_location, tracking?.delivery)
-
+      // Fast path: use cached coords only — never block on GPS/geocode
+      const origin = myPosRef.current
+        || (tracking?.runner?.lat != null
+          ? [Number(tracking.runner.lng), Number(tracking.runner.lat)]
+          : null)
+      const pickup = toLngLat(tracking?.pickup)
+      const delivery = toLngLat(tracking?.delivery)
       const dest = phase === 'to_pickup' || phase === 'pending' ? pickup : delivery
       const destName = phase === 'to_pickup' || phase === 'pending'
         ? (tracking?.pickup_location || '取货点')
         : (tracking?.delivery_location || '送达点')
 
       if (!dest) {
-        onNotice?.('暂无目的地坐标，请稍后重试')
+        onNotice?.('暂无目的地坐标，请稍等地图定位完成后再试')
         return
       }
 
