@@ -7,7 +7,7 @@ import GlassSurface from '../components/reactbits/GlassSurface.jsx'
 import Stepper, { Step } from '../components/reactbits/Stepper.jsx'
 import '../styles/onboarding.css'
 
-const SCHOOLS = ['南通理工学院', '南通理工学院南通校区', '南通理工学院海安校区']
+const SCHOOLS = ['北京大学', '清华大学', '复旦大学', '上海交通大学', '浙江大学', '南京大学', '武汉大学', '中山大学', '南通理工学院']
 const THEMES = [
   { id: 'teal', label: '薄荷校园' },
   { id: 'violet', label: '晚霞紫' },
@@ -42,7 +42,7 @@ export default function ProfileOnboarding({ user, onComplete, onSkip }) {
   const [form, setForm] = useState({
     nickname: initialProfile.nickname || user?.username || '',
     avatar_url: initialProfile.avatar_url || '',
-    school: initialProfile.school || '南通理工学院',
+    school: initialProfile.school || '',
     signature: initialProfile.signature || '',
     background_url: initialProfile.background_url || '',
     background_theme: initialProfile.background_theme || 'teal',
@@ -167,9 +167,8 @@ export default function ProfileOnboarding({ user, onComplete, onSkip }) {
             <div className="onboarding-fields">
               <label className="onboarding-field">
                 <span>学校</span>
-                <select value={form.school} onChange={(event) => update('school', event.target.value)}>
-                  {SCHOOLS.map((school) => <option key={school} value={school}>{school}</option>)}
-                </select>
+                <input list="onboarding-school-options" value={form.school} onChange={(event) => update('school', event.target.value)} placeholder="输入你的学校全称" />
+                <datalist id="onboarding-school-options">{SCHOOLS.map((school) => <option key={school} value={school} />)}</datalist>
               </label>
               <label className="onboarding-field">
                 <span>个性签名</span>

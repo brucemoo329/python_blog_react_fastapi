@@ -56,6 +56,7 @@ export default function AnimatedLoginCharacters({
   const hidingPassword = passwordFocused && !passwordVisible;
   const passwordExposed = passwordFocused && passwordVisible;
   const idle = !accountFocused && !passwordFocused;
+  const engaged = accountFocused || passwordFocused;
   const idleLean = clamp(-pointer.x * 0.65, -4.5, 4.5);
 
   useEffect(() => {
@@ -114,7 +115,7 @@ export default function AnimatedLoginCharacters({
   return (
     <div
       ref={sceneRef}
-      className={`login-characters ${idle ? 'idle' : ''} ${accountFocused ? 'account-active' : ''} ${hidingPassword ? 'password-hidden' : ''} ${passwordExposed ? 'password-visible' : ''}`}
+      className={`login-characters ${idle ? 'idle' : ''} ${engaged ? 'is-engaged' : ''} ${accountFocused ? 'account-active' : ''} ${hidingPassword ? 'password-hidden' : ''} ${passwordExposed ? 'password-visible' : ''}`}
       style={{ '--idle-lean': `${idleLean}deg` }}
       aria-hidden="true"
     >

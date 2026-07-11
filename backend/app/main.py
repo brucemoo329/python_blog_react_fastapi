@@ -22,6 +22,7 @@ def ensure_runtime_schema():
         "ALTER TABLE user_profiles ADD COLUMN background_theme VARCHAR(40) DEFAULT 'teal'",
         "ALTER TABLE user_profiles ADD COLUMN last_active_at DATETIME NULL",
         "ALTER TABLE users ADD COLUMN is_admin TINYINT(1) DEFAULT 0",
+        "ALTER TABLE users ADD COLUMN is_deleted TINYINT(1) DEFAULT 0",
         "ALTER TABLE users ADD COLUMN can_comment TINYINT(1) DEFAULT 1",
         "ALTER TABLE users ADD COLUMN can_post TINYINT(1) DEFAULT 1",
         "ALTER TABLE users ADD COLUMN ban_reason VARCHAR(240) NULL",
@@ -51,6 +52,7 @@ def ensure_runtime_schema():
         "ALTER TABLE marketplace_orders ADD COLUMN cancelled_by_id INT NULL",
         "ALTER TABLE marketplace_orders ADD COLUMN buyer_deleted TINYINT(1) DEFAULT 0",
         "ALTER TABLE marketplace_orders ADD COLUMN seller_deleted TINYINT(1) DEFAULT 0",
+        "ALTER TABLE marketplace_orders ADD COLUMN refunded_at DATETIME NULL",
         "ALTER TABLE marketplace_reviews ADD COLUMN is_complaint TINYINT(1) DEFAULT 0",
         "ALTER TABLE marketplace_reports ADD COLUMN admin_note VARCHAR(500) NULL",
         "ALTER TABLE marketplace_reports ADD COLUMN action_taken VARCHAR(40) NULL",
@@ -108,7 +110,7 @@ def ensure_admin_account():
             db.add(models.UserProfile(
                 user_id=admin.id,
                 nickname="校园官方",
-                school="南通理工学院",
+                school="全国校园",
                 signature="校园交易平台官方管理账号",
                 background_theme="navy",
             ))
@@ -125,7 +127,7 @@ def ensure_admin_account():
                 db.add(models.UserProfile(
                     user_id=admin.id,
                     nickname="校园官方",
-                    school="南通理工学院",
+                    school="全国校园",
                     signature="校园交易平台官方管理账号",
                     background_theme="navy",
                 ))
@@ -329,7 +331,7 @@ def register_with_email_code(data: EmailRegisterRequest, db: Session = Depends(g
         db.add(models.UserProfile(
             user_id=db_user.id,
             nickname=db_user.username,
-            school=data.school or "南通理工学院",
+            school=data.school or "未选择学校",
             signature="在校园里认真交易，也认真生活。",
         ))
         db.commit()
@@ -412,7 +414,7 @@ def create_user(user_data: UserCreate, db: Session = Depends(get_db)):
         db.add(models.UserProfile(
             user_id=db_user.id,
             nickname=db_user.username,
-            school=user_data.school or "南通理工学院",
+            school=user_data.school or "未选择学校",
             signature="在校园里认真交易，也认真生活。",
         ))
         db.commit()

@@ -7,9 +7,11 @@ import {
   Megaphone,
   Package,
   Scale,
+  RotateCcw,
   Search,
   Shield,
   Trash2,
+  UserX,
   Users,
   X,
 } from 'lucide-react'
@@ -21,16 +23,19 @@ import MagicBento from '@/components/MagicBento'
 import {
   deleteAdminContent,
   getAdminAppeals,
+  getAdminAfterSales,
   getAdminContents,
   getAdminOverview,
   getAdminReports,
   getAdminSupportTickets,
   getAdminUsers,
   handleAdminAppeal,
+  handleAdminAfterSale,
   handleAdminReport,
   handleAdminSupportTicket,
   sendOfficialNotice,
   updateAdminUserPenalties,
+  deleteAdminUser,
 } from '@/api/marketplace'
 import { cn } from '@/lib/utils'
 
@@ -39,6 +44,7 @@ const TABS = [
   { id: 'contents', label: '内容管理', icon: Package },
   { id: 'reports', label: '举报中心', icon: Flag },
   { id: 'appeals', label: '订单申诉', icon: Scale },
+  { id: 'afterSales', label: '售后裁定', icon: RotateCcw },
   { id: 'tickets', label: '客服工单', icon: Headset },
   { id: 'users', label: '用户与信誉', icon: Users },
   { id: 'notices', label: '官方通知', icon: Megaphone },
@@ -53,6 +59,7 @@ const OVERVIEW_CARDS = [
   { key: 'game_listings', label: '游戏交易', tab: 'contents', contentType: 'game', hint: '点击查看游戏内容' },
   { key: 'pending_reports', label: '待处理举报', tab: 'reports', reportStatus: 'pending', hint: '点击处理举报' },
   { key: 'pending_appeals', label: '待处理申诉', tab: 'appeals', appealStatus: 'pending', hint: '订单投诉申诉' },
+  { key: 'pending_after_sales', label: '待裁定售后', tab: 'afterSales', hint: '退货退款争议' },
   { key: 'pending_tickets', label: '待回复工单', tab: 'tickets', ticketStatus: 'pending', hint: '用户联系客服' },
   { key: 'orders', label: '订单总数', tab: 'contents', contentType: 'all', hint: '平台订单总量' },
 ]
@@ -67,6 +74,8 @@ export default function AdminPanel({ onBack, onNotice }) {
   const [reportStatus, setReportStatus] = useState('all')
   const [appeals, setAppeals] = useState([])
   const [appealStatus, setAppealStatus] = useState('pending')
+  const [afterSales, setAfterSales] = useState([])
+  const [afterSaleStatus, setAfterSaleStatus] = useState('admin_pending')
   const [tickets, setTickets] = useState([])
   const [ticketStatus, setTicketStatus] = useState('pending')
   const [ticketReplies, setTicketReplies] = useState({})
@@ -99,6 +108,11 @@ export default function AdminPanel({ onBack, onNotice }) {
     setAppeals(data.items || [])
   }, [appealStatus])
 
+  const loadAfterSales = useCallback(async () => {
+    const data = await getAdminAfterSales({ status: afterSaleStatus })
+    setAfterSales(data.items || [])
+  }, [afterSaleStatus])
+
   const loadTickets = useCallback(async () => {
     const data = await getAdminSupportTickets({ status: ticketStatus })
     setTickets(data.items || [])
@@ -118,6 +132,7 @@ export default function AdminPanel({ onBack, onNotice }) {
         if (tab === 'contents') await loadContents()
         if (tab === 'reports') await loadReports()
         if (tab === 'appeals') await loadAppeals()
+        if (tab === 'afterSales') await loadAfterSales()
         if (tab === 'tickets') await loadTickets()
         if (tab === 'users') await loadUsers()
       } catch (error) {
@@ -127,7 +142,7 @@ export default function AdminPanel({ onBack, onNotice }) {
       }
     })()
     return () => { cancelled = true }
-  }, [tab, loadOverview, loadContents, loadReports, loadAppeals, loadTickets, loadUsers, onNotice])
+  }, [tab, loadOverview, loadContents, loadReports, loadAppeals, loadAfterSales, loadTickets, loadUsers, onNotice])
 
   const openOverviewCard = (card) => {
     if (card.contentType) setContentType(card.contentType)
@@ -227,6 +242,34 @@ export default function AdminPanel({ onBack, onNotice }) {
       await loadUsers()
     } catch (error) {
       onNotice?.(error.response?.data?.detail || '更新失败')
+    }
+  }
+
+  const removeUser = async (user) => {
+    if (!window.confirm(`确认删除账号「${user.nickname || user.username}」？账户会被停用，订单与审计记录会保留。`)) return
+    try {
+      const response = await deleteAdminUser(user.id)
+      onNotice?.(response.message || '账户已删除')
+      await loadUsers()
+      await loadOverview()
+    } catch (error) {
+      onNotice?.(error.response?.data?.detail || '删除账户失败')
+    }
+  }
+
+  const resolveAfterSale = async (request, decision) => {
+    const note = window.prompt(
+      decision === 'refund' ? '退款裁定说明（可选）' : '驳回售后的说明（可选）',
+      decision === 'refund' ? '经客服核实，同意退货退款。' : '经客服核实，维持原交易状态。',
+    )
+    if (note === null) return
+    try {
+      const response = await handleAdminAfterSale(request.id, { decision, admin_note: note || undefined })
+      onNotice?.(response.message || '售后已处理')
+      await loadAfterSales()
+      await loadOverview()
+    } catch (error) {
+      onNotice?.(error.response?.data?.detail || '售后处理失败')
     }
   }
 
@@ -335,7 +378,7 @@ export default function AdminPanel({ onBack, onNotice }) {
               }
               return {
                 ...card,
-                color: '#120F17',
+                color: '#edf8f4',
                 label: card.label,
                 title,
                 description,
@@ -465,6 +508,30 @@ export default function AdminPanel({ onBack, onNotice }) {
           </div>
         ) : null}
 
+        {!loading && tab === 'afterSales' ? (
+          <div className="admin-section admin-reports">
+            <div className="admin-toolbar">
+              <select value={afterSaleStatus} onChange={(event) => setAfterSaleStatus(event.target.value)}>
+                <option value="admin_pending">待客服裁定</option>
+                <option value="all">全部售后</option>
+                <option value="refunded">已退款</option>
+                <option value="rejected">已驳回</option>
+              </select>
+              <Button onClick={loadAfterSales}>刷新</Button>
+            </div>
+            {afterSales.map((request) => (
+              <article key={request.id} className={cn(request.status === 'admin_pending' && 'is-pending')}>
+                <header><Badge>{request.status === 'admin_pending' ? '待裁定' : request.status}</Badge><strong>{request.order_title}</strong><small>{request.order_no}</small></header>
+                <p><strong>买家：</strong>{request.applicant?.nickname || request.applicant?.username} · {request.reason}</p>
+                <p><strong>卖家说明：</strong>{request.seller_response || '未填写'}</p>
+                {request.admin_note ? <small>客服说明：{request.admin_note}</small> : null}
+                {request.status === 'admin_pending' ? <div className="admin-row-actions"><Button size="sm" variant="outline" onClick={() => resolveAfterSale(request, 'reject')}>驳回售后</Button><Button size="sm" onClick={() => resolveAfterSale(request, 'refund')}>同意退款</Button></div> : null}
+              </article>
+            ))}
+            {!afterSales.length ? <div className="chat-empty">暂无匹配售后记录</div> : null}
+          </div>
+        ) : null}
+
         {!loading && tab === 'tickets' ? (
           <div className="admin-section admin-reports">
             <div className="admin-toolbar">
@@ -539,6 +606,7 @@ export default function AdminPanel({ onBack, onNotice }) {
                     <Button size="sm" variant="destructive" onClick={() => updateUser(user, { is_active: !user.is_active, ban_reason: user.is_active ? '账号被管理员停用' : null })}>
                       {user.is_active ? '停用' : '启用'}
                     </Button>
+                    {!user.is_admin && !user.is_deleted ? <Button size="sm" variant="destructive" onClick={() => removeUser(user)}><UserX /> 删除账户</Button> : null}
                     <Button
                       size="sm"
                       variant="secondary"

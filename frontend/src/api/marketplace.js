@@ -215,6 +215,14 @@ export function appealOrder(orderId, data) {
   return request.post(`/marketplace/orders/${orderId}/appeal`, data)
 }
 
+export function applyAfterSale(orderId, data) {
+  return request.post(`/marketplace/orders/${orderId}/after-sales`, data)
+}
+
+export function respondAfterSale(orderId, data) {
+  return request.post(`/marketplace/orders/${orderId}/after-sales/respond`, data)
+}
+
 export function createSupportTicket(data) {
   return request.post('/marketplace/support/tickets', data)
 }
@@ -273,6 +281,18 @@ export function getAdminUsers(params) {
 
 export function updateAdminUserPenalties(userId, data) {
   return request.put(`/marketplace/admin/users/${userId}/penalties`, data)
+}
+
+export function deleteAdminUser(userId) {
+  return request.delete(`/marketplace/admin/users/${userId}`)
+}
+
+export function getAdminAfterSales(params) {
+  return request.get('/marketplace/admin/after-sales', { params })
+}
+
+export function handleAdminAfterSale(requestId, data) {
+  return request.post(`/marketplace/admin/after-sales/${requestId}/handle`, data)
 }
 
 export function sendOfficialNotice(data) {

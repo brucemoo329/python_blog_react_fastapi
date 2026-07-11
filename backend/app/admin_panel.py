@@ -50,6 +50,11 @@ class UserPenaltyUpdate(BaseModel):
     trust_note: Optional[str] = Field(default=None, max_length=200)
 
 
+class AfterSaleHandle(BaseModel):
+    decision: Literal["refund", "reject"] = "refund"
+    admin_note: Optional[str] = Field(default=None, max_length=500)
+
+
 class OfficialNoticeCreate(BaseModel):
     title: str = Field(min_length=2, max_length=120)
     content: str = Field(min_length=2, max_length=500)
@@ -174,6 +179,7 @@ def admin_overview(
         "pending_appeals": db.query(models.OrderAppeal).filter(models.OrderAppeal.status == "pending").count(),
         "appeals_total": db.query(models.OrderAppeal).count(),
         "pending_tickets": db.query(models.SupportTicket).filter(models.SupportTicket.status == "pending").count(),
+        "pending_after_sales": db.query(models.AfterSaleRequest).filter(models.AfterSaleRequest.status == "admin_pending").count(),
         "tickets_total": db.query(models.SupportTicket).count(),
         "orders": db.query(models.Order).count(),
         "community_posts": db.query(models.CommunityPost).count(),
@@ -485,6 +491,7 @@ def admin_list_users(
         "items": [{
             **user_payload(user),
             "is_admin": bool(getattr(user, "is_admin", False)),
+            "is_deleted": bool(getattr(user, "is_deleted", False)),
             "is_active": bool(user.is_active),
             "can_comment": bool(getattr(user, "can_comment", True)),
             "can_post": bool(getattr(user, "can_post", True)),
@@ -771,3 +778,91 @@ def admin_handle_support_ticket(
     )
     db.commit()
     return {"message": "工单已回复", "id": ticket.id, "status": ticket.status}
+
+
+@router.get("/after-sales")
+def admin_list_after_sales(
+    status: str = Query(default="admin_pending"),
+    limit: int = Query(default=80, ge=1, le=200),
+    db: Session = Depends(get_db),
+    admin: models.User = Depends(require_admin),
+):
+    query = db.query(models.AfterSaleRequest).options(
+        joinedload(models.AfterSaleRequest.order).joinedload(models.Order.listing),
+        joinedload(models.AfterSaleRequest.applicant).joinedload(models.User.profile),
+    ).order_by(models.AfterSaleRequest.created_at.desc())
+    if status != "all":
+        query = query.filter(models.AfterSaleRequest.status == status)
+    rows = query.limit(limit).all()
+    return {"items": [{
+        "id": row.id,
+        "order_id": row.order_id,
+        "order_no": row.order.order_no if row.order else None,
+        "order_title": row.order.listing.title if row.order and row.order.listing else "订单",
+        "reason": row.reason,
+        "seller_response": row.seller_response,
+        "status": row.status,
+        "admin_note": row.admin_note,
+        "created_at": row.created_at,
+        "applicant": user_payload(row.applicant) if row.applicant else None,
+    } for row in rows]}
+
+
+@router.post("/after-sales/{request_id}/handle")
+def admin_handle_after_sale(
+    request_id: int,
+    data: AfterSaleHandle,
+    db: Session = Depends(get_db),
+    admin: models.User = Depends(require_admin),
+):
+    request = db.query(models.AfterSaleRequest).options(
+        joinedload(models.AfterSaleRequest.order).joinedload(models.Order.listing),
+    ).filter_by(id=request_id).first()
+    if not request or not request.order:
+        raise HTTPException(status_code=404, detail="售后申请不存在")
+    if request.status != "admin_pending":
+        raise HTTPException(status_code=409, detail="该售后不在客服裁定阶段")
+    order = request.order
+    request.handled_by = admin.id
+    request.handled_at = datetime.utcnow()
+    request.admin_note = (data.admin_note or "").strip() or None
+    title = order.listing.title if order.listing else order.order_no
+    if data.decision == "refund":
+        request.status = "refunded"
+        order.status = "refunded"
+        order.refunded_at = datetime.utcnow()
+        if order.listing:
+            order.listing.status = "available"
+        result = "客服已同意退款，订单已标记退款完成"
+    else:
+        request.status = "rejected"
+        result = "客服已驳回退款申请，订单维持原状态"
+    note = request.admin_note or result
+    for recipient_id in {order.buyer_id, order.seller_id}:
+        create_notification(
+            db, recipient_id=recipient_id, actor_id=admin.id, notification_type="official",
+            title="【客服裁定】售后处理结果", content=f"订单「{title}」：{note}",
+            target_type="order", target_id=order.id,
+        )
+    db.commit()
+    return {"message": result, "id": request.id, "status": request.status}
+
+
+@router.delete("/users/{user_id}")
+def admin_soft_delete_user(
+    user_id: int,
+    db: Session = Depends(get_db),
+    admin: models.User = Depends(require_admin),
+):
+    target = db.get(models.User, user_id)
+    if not target:
+        raise HTTPException(status_code=404, detail="用户不存在")
+    if target.id == admin.id or getattr(target, "is_admin", False):
+        raise HTTPException(status_code=400, detail="不能删除管理员账户")
+    target.is_active = False
+    target.is_deleted = True
+    target.can_comment = False
+    target.can_post = False
+    target.ban_reason = "账号已由管理员删除"
+    db.commit()
+    return {"message": "账户已删除并保留订单审计记录", "id": target.id}

@@ -43,7 +43,7 @@ def get_current_user(
         profile = models.UserProfile(
             user_id=user.id,
             nickname=user.username,
-            school="南通理工学院",
+            school="未选择学校",
             signature="在校园里认真交易，也认真生活。",
             background_theme="teal",
         )
@@ -125,6 +125,15 @@ class OrderReviewBody(BaseModel):
 class OrderAppealBody(BaseModel):
     reason: str = Field(min_length=4, max_length=500)
     review_id: Optional[int] = None
+
+
+class AfterSaleApplyBody(BaseModel):
+    reason: str = Field(min_length=4, max_length=500)
+
+
+class AfterSaleResponseBody(BaseModel):
+    agree: bool
+    response: Optional[str] = Field(default=None, max_length=500)
 
 
 class SupportTicketBody(BaseModel):
@@ -302,6 +311,7 @@ ORDER_STATUS_LABELS = {
     "completed": {"buyer": "已收货完成", "seller": "交易完成"},
     "cancelled": {"buyer": "已取消", "seller": "已取消"},
     "pending_confirm": {"buyer": "待确认", "seller": "待确认"},
+    "refunded": {"buyer": "退款完成", "seller": "退款完成"},
 }
 
 
@@ -714,7 +724,7 @@ def ensure_user_profile(db: Session, user: models.User, request: Optional[Reques
         profile = models.UserProfile(
             user_id=user.id,
             nickname=user.username,
-            school="南通理工学院",
+            school="未选择学校",
             signature="在校园里认真交易，也认真生活。",
             background_theme="teal",
         )
@@ -919,6 +929,19 @@ def full_order_payload(db: Session, order: models.Order, user_id: int):
         or (role == "seller" and getattr(order, "seller_deleted", False))
     )
     can_delete_record = order.status in {"completed", "cancelled"} and not deleted_for_me
+    after_sale = db.query(models.AfterSaleRequest).filter_by(order_id=order.id).order_by(
+        models.AfterSaleRequest.created_at.desc()
+    ).first()
+    after_sale_active = after_sale and after_sale.status in {"pending_seller", "admin_pending"}
+    can_apply_after_sale = (
+        role == "buyer"
+        and not is_service
+        and order.status in {"pending_ship", "shipped", "completed"}
+        and not after_sale_active
+    )
+    can_respond_after_sale = bool(
+        role == "seller" and after_sale and after_sale.status == "pending_seller"
+    )
 
     payload.update({
         "buyer": user_payload(order.buyer) if order.buyer else None,
@@ -949,6 +972,18 @@ def full_order_payload(db: Session, order: models.Order, user_id: int):
         "can_appeal": can_appeal,
         "my_appeals": appeal_payload,
         "can_delete_record": can_delete_record,
+        "can_apply_after_sale": can_apply_after_sale,
+        "can_respond_after_sale": can_respond_after_sale,
+        "after_sale": {
+            "id": after_sale.id,
+            "reason": after_sale.reason,
+            "status": after_sale.status,
+            "seller_response": after_sale.seller_response,
+            "admin_note": after_sale.admin_note,
+            "created_at": after_sale.created_at,
+            "responded_at": after_sale.responded_at,
+            "handled_at": after_sale.handled_at,
+        } if after_sale else None,
         "service_task": service_task_tracking_payload(order.service_task, user_id, db=db, order_id=order.id) if order.service_task else None,
     })
     return payload
@@ -1192,6 +1227,12 @@ def get_feed(
     user: models.User = Depends(get_current_user),
 ):
     items = []
+    profile = ensure_user_profile(db, user)
+    campus_user_ids = None
+    if profile.school and profile.school != "未选择学校":
+        campus_user_ids = [row[0] for row in db.query(models.UserProfile.user_id).filter(
+            models.UserProfile.school == profile.school,
+        ).all()]
     hidden_user_ids = {
         row.target_user_id for row in db.query(models.UserModeration).filter(
             models.UserModeration.user_id == user.id,
@@ -1205,6 +1246,8 @@ def get_feed(
         )
         if hidden_user_ids:
             query = query.filter(~models.Listing.seller_id.in_(hidden_user_ids))
+        if campus_user_ids is not None:
+            query = query.filter(models.Listing.seller_id.in_(campus_user_ids or [-1]))
         if kind == "game":
             query = query.filter(models.Listing.trade_type == "digital")
         if search:
@@ -1221,6 +1264,8 @@ def get_feed(
         )
         if hidden_user_ids:
             query = query.filter(~models.ServiceTask.requester_id.in_(hidden_user_ids))
+        if campus_user_ids is not None:
+            query = query.filter(models.ServiceTask.requester_id.in_(campus_user_ids or [-1]))
         if search:
             query = query.filter(or_(models.ServiceTask.title.contains(search), models.ServiceTask.description.contains(search)))
         # 信息流只展示待接单；进行中的任务走导航/右侧进度，避免接单后仍像「可接」
@@ -1259,6 +1304,8 @@ def get_feed(
         )
         if hidden_user_ids:
             query = query.filter(~models.WantedPost.user_id.in_(hidden_user_ids))
+        if campus_user_ids is not None:
+            query = query.filter(models.WantedPost.user_id.in_(campus_user_ids or [-1]))
         if search:
             query = query.filter(or_(models.WantedPost.title.contains(search), models.WantedPost.description.contains(search)))
         for wanted in query.order_by(models.WantedPost.created_at.desc()).limit(20):
@@ -1283,6 +1330,8 @@ def get_feed(
         )
         if hidden_user_ids:
             query = query.filter(~models.CommunityPost.author_id.in_(hidden_user_ids))
+        if campus_user_ids is not None:
+            query = query.filter(models.CommunityPost.author_id.in_(campus_user_ids or [-1]))
         if search:
             query = query.filter(or_(models.CommunityPost.title.contains(search), models.CommunityPost.content.contains(search)))
         if topic:
@@ -1322,14 +1371,20 @@ def get_feed(
 @router.get("/map/tasks")
 def get_map_tasks(
     db: Session = Depends(get_db),
-    _: models.User = Depends(get_current_user),
+    user: models.User = Depends(get_current_user),
 ):
     """待接任务点：仅 open 状态，供校园雷达展示与点击跳转。"""
+    profile = ensure_user_profile(db, user)
     tasks = db.query(models.ServiceTask).options(
         joinedload(models.ServiceTask.requester).joinedload(models.User.profile)
     ).filter(
         models.ServiceTask.status == "open"
-    ).order_by(models.ServiceTask.created_at.desc()).limit(40).all()
+    )
+    if profile.school and profile.school != "未选择学校":
+        tasks = tasks.join(models.User, models.ServiceTask.requester_id == models.User.id).join(
+            models.UserProfile, models.UserProfile.user_id == models.User.id
+        ).filter(models.UserProfile.school == profile.school)
+    tasks = tasks.order_by(models.ServiceTask.created_at.desc()).limit(40).all()
     result = []
     for task in tasks:
         plat = _num(task.pickup_latitude) if task.pickup_latitude is not None else _num(task.latitude)
@@ -1382,7 +1437,7 @@ def create_listing(
         original_price=data.original_price,
         condition=data.condition,
         trade_type=data.trade_type,
-        campus=data.campus,
+        campus=data.campus or (ensure_user_profile(db, user).school or "未选择学校"),
         location_name=data.location_name,
         latitude=data.latitude,
         longitude=data.longitude,
@@ -2264,7 +2319,7 @@ def get_summary(
         "profile": {
             "nickname": profile.nickname or user.username,
             "avatar_url": profile.avatar_url,
-            "school": profile.school or "南通理工学院",
+            "school": profile.school or "未选择学校",
             "language": profile.language or "zh-CN",
             "background_url": profile.background_url,
             "background_theme": profile.background_theme or "teal",
@@ -2377,7 +2432,7 @@ def get_profile(
             "avatar_url": profile.avatar_url,
             "background_url": profile.background_url,
             "background_theme": profile.background_theme or "teal",
-            "school": profile.school or "南通理工学院",
+            "school": profile.school or "未选择学校",
             "signature": profile.signature or "",
             "current_ip": profile.current_ip,
             "language": profile.language or "zh-CN",
@@ -2806,7 +2861,7 @@ def get_public_user_profile(
             "avatar_url": profile.avatar_url,
             "background_url": profile.background_url,
             "background_theme": profile.background_theme or "teal",
-            "school": profile.school or "南通理工学院",
+            "school": profile.school or "未选择学校",
             "signature": profile.signature or "",
             "followers": db.query(models.UserFollow).filter_by(following_id=target.id).count(),
             "following": db.query(models.UserFollow).filter_by(follower_id=target.id).count(),
@@ -3230,6 +3285,94 @@ def receive_order(
     db.commit()
     db.refresh(order)
     return {"message": "已确认收货，交易完成", "item": full_order_payload(db, order, user.id)}
+
+
+@router.post("/orders/{order_id}/after-sales")
+def apply_after_sale(
+    order_id: int,
+    data: AfterSaleApplyBody,
+    db: Session = Depends(get_db),
+    user: models.User = Depends(get_current_user),
+):
+    order = db.query(models.Order).options(
+        joinedload(models.Order.listing).joinedload(models.Listing.images),
+        joinedload(models.Order.buyer).joinedload(models.User.profile),
+        joinedload(models.Order.seller).joinedload(models.User.profile),
+    ).filter_by(id=order_id).first()
+    if not order or order.buyer_id != user.id:
+        raise HTTPException(status_code=404, detail="订单不存在")
+    if order.service_task_id or not order.listing_id:
+        raise HTTPException(status_code=400, detail="跑腿订单暂不支持退货售后")
+    if order.status not in {"pending_ship", "shipped", "completed"}:
+        raise HTTPException(status_code=409, detail="当前订单状态不可申请售后")
+    active = db.query(models.AfterSaleRequest).filter(
+        models.AfterSaleRequest.order_id == order.id,
+        models.AfterSaleRequest.status.in_(["pending_seller", "admin_pending"]),
+    ).first()
+    if active:
+        raise HTTPException(status_code=409, detail="已有售后申请正在处理中")
+    request = models.AfterSaleRequest(order_id=order.id, applicant_id=user.id, reason=data.reason.strip())
+    db.add(request)
+    title = order.listing.title if order.listing else order.order_no
+    create_notification(
+        db, recipient_id=order.seller_id, actor_id=user.id, notification_type="order",
+        title="【售后申请】买家申请退货退款", content=f"订单「{title}」：{request.reason}",
+        target_type="order", target_id=order.id,
+    )
+    db.commit()
+    db.refresh(order)
+    return {"message": "售后申请已提交，等待卖家协商", "item": full_order_payload(db, order, user.id)}
+
+
+@router.post("/orders/{order_id}/after-sales/respond")
+def respond_after_sale(
+    order_id: int,
+    data: AfterSaleResponseBody,
+    db: Session = Depends(get_db),
+    user: models.User = Depends(get_current_user),
+):
+    order = db.query(models.Order).options(
+        joinedload(models.Order.listing).joinedload(models.Listing.images),
+        joinedload(models.Order.buyer).joinedload(models.User.profile),
+        joinedload(models.Order.seller).joinedload(models.User.profile),
+    ).filter_by(id=order_id).first()
+    if not order or order.seller_id != user.id:
+        raise HTTPException(status_code=404, detail="订单不存在")
+    request = db.query(models.AfterSaleRequest).filter_by(order_id=order.id, status="pending_seller").order_by(
+        models.AfterSaleRequest.created_at.desc()
+    ).first()
+    if not request:
+        raise HTTPException(status_code=409, detail="当前没有待处理的售后申请")
+    request.seller_response = (data.response or "").strip() or None
+    request.responded_at = datetime.utcnow()
+    title = order.listing.title if order.listing else order.order_no
+    if data.agree:
+        request.status = "refunded"
+        order.status = "refunded"
+        order.refunded_at = datetime.utcnow()
+        if order.listing:
+            order.listing.status = "available"
+        content = f"卖家已同意售后，订单「{title}」已标记退款完成。"
+        message = "售后已协商完成，退款状态已更新"
+    else:
+        request.status = "admin_pending"
+        ticket = models.SupportTicket(
+            user_id=order.buyer_id, order_id=order.id, category="after_sale",
+            title=f"售后争议 {order.order_no}",
+            content=f"卖家拒绝售后。买家申请：{request.reason}。卖家说明：{request.seller_response or '未填写'}",
+            status="pending",
+        )
+        db.add(ticket)
+        content = f"卖家未同意售后，已自动提交客服裁定。{request.seller_response or ''}".strip()
+        message = "已拒绝售后，客服工单已创建"
+    create_notification(
+        db, recipient_id=order.buyer_id, actor_id=user.id, notification_type="order",
+        title="【售后进度】" + ("卖家已同意退款" if data.agree else "售后已转客服裁定"),
+        content=content, target_type="order", target_id=order.id,
+    )
+    db.commit()
+    db.refresh(order)
+    return {"message": message, "item": full_order_payload(db, order, user.id)}
 
 
 @router.post("/orders/{order_id}/cancel")

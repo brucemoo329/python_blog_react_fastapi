@@ -790,17 +790,21 @@ export default function MarketplaceHome({ user, onLogout, onUserUpdate }) {
             <section className="order-detail-panel">
               <Button variant="ghost" onClick={() => setSelectedOrder(null)}>{t('detail.back')} · {t('orders.title')}</Button>
               <article className="order-detail-card">
-                <header>
-                  <Badge>{selectedOrder.role === 'buyer' ? t('orders.buyerRole') : t('orders.sellerRole')}</Badge>
-                  <h1>{selectedOrder.title}</h1>
-                  <strong>{selectedOrder.status_label}</strong>
+                <header className="order-detail-hero">
+                  <div><Badge>{selectedOrder.role === 'buyer' ? t('orders.buyerRole') : t('orders.sellerRole')}</Badge><h1>{selectedOrder.title}</h1><small>{t('orders.orderNo', '订单号')} {selectedOrder.order_no}</small></div>
+                  <div className="order-detail-status"><strong>{selectedOrder.status_label}</strong><span>{selectedOrder.kind === 'service' ? '校园跑腿订单' : '校园商品订单'}</span></div>
                 </header>
-                <p>{t('orders.orderNo', '订单号')} {selectedOrder.order_no}</p>
-                <p className="order-price">¥{Number(selectedOrder.amount || 0).toFixed(2)}</p>
-                <p>{t('orders.delivery', '交付')}：{selectedOrder.meeting_location || t('orders.campusMeet', '校内当面交易')}</p>
-                <p>{selectedOrder.role === 'buyer' ? `${t('orders.sellerRole')}: ${selectedOrder.seller?.nickname || selectedOrder.seller?.username}` : `${t('orders.buyerRole')}: ${selectedOrder.buyer?.nickname || selectedOrder.buyer?.username}`}</p>
-                {selectedOrder.buyer_note ? <p>{selectedOrder.buyer_note}</p> : null}
-                {selectedOrder.seller_note ? <p>{selectedOrder.seller_note}</p> : null}
+                <div className="order-detail-summary">
+                  {selectedOrder.image_url ? <img src={selectedOrder.image_url} alt="" /> : <div className="order-detail-image-fallback"><Package /></div>}
+                  <div><p>{selectedOrder.description || '这笔订单的交易信息会保存在这里。'}</p><strong className="order-price">¥{Number(selectedOrder.amount || 0).toFixed(2)}</strong></div>
+                </div>
+                <div className="order-detail-info-grid">
+                  <div><span>{t('orders.delivery', '交付')}</span><strong>{selectedOrder.meeting_location || t('orders.campusMeet', '校内当面交易')}</strong></div>
+                  <div><span>{selectedOrder.role === 'buyer' ? t('orders.sellerRole') : t('orders.buyerRole')}</span><strong>{selectedOrder.role === 'buyer' ? (selectedOrder.seller?.nickname || selectedOrder.seller?.username) : (selectedOrder.buyer?.nickname || selectedOrder.buyer?.username)}</strong></div>
+                  <div><span>售后保障</span><strong>{selectedOrder.after_sale ? (selectedOrder.after_sale.status === 'admin_pending' ? '客服裁定中' : selectedOrder.after_sale.status === 'refunded' ? '退款完成' : '协商处理中') : '可在订单列表申请售后'}</strong></div>
+                </div>
+                {selectedOrder.buyer_note ? <p className="order-detail-note"><span>买家备注</span>{selectedOrder.buyer_note}</p> : null}
+                {selectedOrder.seller_note ? <p className="order-detail-note"><span>卖家备注</span>{selectedOrder.seller_note}</p> : null}
                 <div className="order-detail-actions">
                   <Button variant="outline" onClick={() => setSelectedOrder(null)}>{t('detail.back')}</Button>
                   {selectedOrder.role === 'buyer' && selectedOrder.seller ? (

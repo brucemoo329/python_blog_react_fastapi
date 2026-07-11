@@ -16,6 +16,24 @@
   display: block;
 }
 
+.landing-login-transition__brand {
+  position: absolute;
+  top: 50%;
+  left: 50%;
+  z-index: 8;
+  display: flex;
+  align-items: center;
+  color: #fff;
+  opacity: 0;
+  transform: translate(-50%, -50%) scale(0.2) rotate(-18deg);
+  animation: landing-login-brand-arrive 1.32s cubic-bezier(0.2, 0.84, 0.2, 1) 130ms both;
+}
+
+.landing-login-transition__brand .campus-brand__mark {
+  border-color: rgba(255, 255, 255, 0.34);
+  background: rgba(255, 255, 255, 0.14);
+}
+
 .landing-login-transition__ring {
   width: 94px;
   height: 94px;
@@ -94,6 +112,13 @@
   }
 }
 
+@keyframes landing-login-brand-arrive {
+  0%, 24% { opacity: 0; transform: translate(-50%, -50%) scale(0.18) rotate(-26deg); }
+  46% { opacity: 1; transform: translate(-50%, -50%) scale(1.12) rotate(8deg); }
+  74% { opacity: 1; transform: translate(calc(-50% - 32vw), calc(-50% - 38vh)) scale(1.05) rotate(-2deg); }
+  100% { opacity: 1; transform: translate(calc(-50% - 38vw), calc(-50% - 42vh)) scale(0.88) rotate(0); }
+}
+
 @media (max-width: 900px) {
   .landing-login-transition__orb {
     --land-scale: 0.62;
@@ -102,6 +127,16 @@
   .landing-login-transition {
     background: radial-gradient(circle at 50% 50%, rgba(255, 255, 255, 0.94), rgba(235, 247, 242, 0.88) 46%, rgba(16, 48, 43, 0.42) 100%);
   }
+
+  .landing-login-transition__brand {
+    animation-name: landing-login-brand-mobile;
+  }
+}
+
+@keyframes landing-login-brand-mobile {
+  0%, 24% { opacity: 0; transform: translate(-50%, -50%) scale(0.18) rotate(-26deg); }
+  50% { opacity: 1; transform: translate(-50%, -50%) scale(1.04) rotate(7deg); }
+  100% { opacity: 1; transform: translate(-50%, calc(-50% - 42vh)) scale(0.82) rotate(0); }
 }
 
 @media (prefers-reduced-motion: reduce) {

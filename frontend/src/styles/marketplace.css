@@ -4866,6 +4866,140 @@
   background: #0b876f;
 }
 
+.campus-shell--daylight .order-after-sale-status {
+  display: block;
+  margin-top: 5px;
+  color: #0b876f;
+  font-size: 12px;
+  font-weight: 700;
+}
+
+.campus-shell--daylight .order-detail-card {
+  max-width: 760px;
+  margin-top: 14px;
+  padding: 0;
+  overflow: hidden;
+}
+
+.campus-shell--daylight .order-detail-hero {
+  align-items: flex-start;
+  justify-content: space-between;
+  margin: 0;
+  padding: 22px 24px 18px;
+  border-bottom: 1px solid rgba(24, 57, 54, 0.09);
+  background: linear-gradient(135deg, #eaf7f1, #f9fcfb 70%);
+}
+
+.campus-shell--daylight .order-detail-hero h1 {
+  margin: 9px 0 4px;
+}
+
+.campus-shell--daylight .order-detail-hero small,
+.campus-shell--daylight .order-detail-status span,
+.campus-shell--daylight .order-detail-info-grid span,
+.campus-shell--daylight .order-detail-note span {
+  color: #71847f;
+}
+
+.campus-shell--daylight .order-detail-status {
+  display: grid;
+  gap: 5px;
+  min-width: 112px;
+  text-align: right;
+}
+
+.campus-shell--daylight .order-detail-status strong { color: #0b876f; }
+
+.campus-shell--daylight .order-detail-summary {
+  display: grid;
+  grid-template-columns: 96px minmax(0, 1fr);
+  gap: 16px;
+  align-items: center;
+  padding: 22px 24px;
+}
+
+.campus-shell--daylight .order-detail-summary img,
+.campus-shell--daylight .order-detail-image-fallback {
+  width: 96px;
+  height: 96px;
+  border-radius: 8px;
+  object-fit: cover;
+  background: #e8f4ef;
+  color: #0f9f83;
+}
+
+.campus-shell--daylight .order-detail-image-fallback { display: grid; place-items: center; }
+.campus-shell--daylight .order-detail-summary p { margin: 0 0 10px; color: #526f69; line-height: 1.6; }
+.campus-shell--daylight .order-detail-info-grid { display: grid; grid-template-columns: repeat(3, minmax(0, 1fr)); gap: 1px; border-top: 1px solid rgba(24, 57, 54, 0.09); background: rgba(24, 57, 54, 0.09); }
+.campus-shell--daylight .order-detail-info-grid > div { display: grid; gap: 7px; min-height: 76px; padding: 16px 20px; background: #fff; }
+.campus-shell--daylight .order-detail-note { display: grid; gap: 7px; margin: 0; padding: 16px 24px; border-top: 1px solid rgba(24, 57, 54, 0.09); color: #365650; }
+.campus-shell--daylight .order-detail-actions { margin: 0; padding: 16px 24px 22px; border-top: 1px solid rgba(24, 57, 54, 0.09); }
+
+/* Product cards inside chat and the full official console use the daytime campus palette. */
+.campus-shell--daylight .chat-product-card,
+.campus-shell--daylight .chat-order-card,
+.campus-shell--daylight .chat-shop-item,
+.campus-shell--daylight .chat-shop-picker {
+  border-color: rgba(24, 57, 54, 0.13);
+  background: #ffffff;
+  color: #183936;
+  box-shadow: 0 10px 24px rgba(24, 68, 61, 0.08);
+}
+
+.campus-shell--daylight .chat-product-card-main small,
+.campus-shell--daylight .chat-order-card small,
+.campus-shell--daylight .chat-order-card span,
+.campus-shell--daylight .chat-shop-item small { color: #71847f; }
+.campus-shell--daylight .chat-product-buy,
+.campus-shell--daylight .chat-order-card button { background: #0f9f83; }
+.campus-shell--daylight .chat-product-buy:hover,
+.campus-shell--daylight .chat-order-card button:hover { background: #0b876f; }
+.campus-shell--daylight .chat-shop-item:hover { border-color: rgba(15, 159, 131, 0.4); background: #edf8f4; }
+
+.campus-shell--daylight .admin-panel {
+  border: 1px solid rgba(24, 57, 54, 0.1);
+  border-radius: 8px;
+  background: linear-gradient(140deg, #eff9f5 0%, #f7fbf9 55%, #edf6f2 100%);
+  color: #183936;
+  box-shadow: 0 18px 50px rgba(24, 68, 61, 0.08);
+}
+.campus-shell--daylight .admin-sidebar { border-color: rgba(24, 57, 54, 0.1); }
+.campus-shell--daylight .admin-brand { background: #ffffff; color: #183936; box-shadow: 0 10px 24px rgba(24, 68, 61, 0.06); }
+.campus-shell--daylight .admin-brand span,
+.campus-shell--daylight .admin-topbar > p { color: #71847f; }
+.campus-shell--daylight .admin-sidebar nav button { color: #56706b; }
+.campus-shell--daylight .admin-sidebar nav button.is-active,
+.campus-shell--daylight .admin-sidebar nav button:hover { background: #e2f5ec; color: #0b876f; }
+.campus-shell--daylight .admin-official-badge { background: #0f9f83 !important; }
+.campus-shell--daylight .admin-table article,
+.campus-shell--daylight .admin-reports article,
+.campus-shell--daylight .admin-notice-user-picker { border-color: rgba(24, 57, 54, 0.1); background: #fff; color: #183936; }
+.campus-shell--daylight .admin-toolbar select,
+.campus-shell--daylight .admin-toolbar input,
+.campus-shell--daylight .admin-notice-form input,
+.campus-shell--daylight .admin-notice-form textarea { border-color: rgba(24, 57, 54, 0.14); background: #fff; color: #183936; }
+.campus-shell--daylight .admin-stats-grid article,
+.campus-shell--daylight .admin-stat-card { border-color: rgba(24, 57, 54, 0.1); background: #fff; color: #183936; }
+.campus-shell--daylight .admin-stat-card:hover { border-color: rgba(15, 159, 131, 0.5); background: #edf8f4; }
+.campus-shell--daylight .admin-stats-grid span,
+.campus-shell--daylight .admin-stat-card span,
+.campus-shell--daylight .admin-stat-card small,
+.campus-shell--daylight .admin-selected-user small,
+.campus-shell--daylight .admin-notice-user-item small { color: #71847f; }
+.campus-shell--daylight .admin-stat-card small { color: #0f9f83; }
+.campus-shell--daylight .admin-notice-user-item { border-color: rgba(24, 57, 54, 0.12); background: #fff; color: #183936; }
+.campus-shell--daylight .admin-notice-user-item:hover { border-color: rgba(15, 159, 131, 0.45); background: #edf8f4; }
+.campus-shell--daylight .admin-selected-user { border-color: rgba(15, 159, 131, 0.25); background: #e8f6f0; }
+
+@media (max-width: 760px) {
+  .campus-shell--daylight .order-detail-hero { padding: 18px; }
+  .campus-shell--daylight .order-detail-summary { grid-template-columns: 70px minmax(0, 1fr); padding: 18px; }
+  .campus-shell--daylight .order-detail-summary img,
+  .campus-shell--daylight .order-detail-image-fallback { width: 70px; height: 70px; }
+  .campus-shell--daylight .order-detail-info-grid { grid-template-columns: 1fr; }
+  .campus-shell--daylight .order-detail-actions { padding: 14px 18px 18px; }
+}
+
 @media (max-width: 760px) {
   .campus-shell--daylight .orders-filter-panel {
     grid-template-columns: 1fr;

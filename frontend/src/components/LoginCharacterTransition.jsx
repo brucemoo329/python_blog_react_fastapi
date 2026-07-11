@@ -1,4 +1,5 @@
 import '../styles/auth-transition.css'
+import CampusBrand from './CampusBrand.jsx'
 
 const ORBS = [
   {
@@ -64,6 +65,7 @@ export default function LoginCharacterTransition() {
     <div className="landing-login-transition" aria-hidden="true">
       <span className="landing-login-transition__ring is-outer" />
       <span className="landing-login-transition__ring is-inner" />
+      <span className="landing-login-transition__brand"><CampusBrand compact inverted /></span>
       {ORBS.map((orb) => (
         <span
           className={`landing-login-transition__orb is-${orb.name}`}

@@ -308,6 +308,12 @@
 .login-characters.idle .character {
   transform: skewX(var(--idle-lean, 0deg));
   transition-duration: 0.36s;
+  animation: character-idle-breathe 2.8s ease-in-out infinite;
+}
+
+.login-characters.is-engaged .character-orange,
+.login-characters.is-engaged .character-yellow {
+  animation: character-attentive-bob 780ms ease-in-out infinite alternate;
 }
 
 .login-characters.account-active .character-purple {
@@ -344,6 +350,39 @@
   transition-delay: 0s;
 }
 
+.login-characters.password-hidden .character-orange,
+.login-characters.password-hidden .character-yellow {
+  animation: character-secret-whisper 640ms ease-in-out infinite alternate;
+}
+
+.login-characters.password-visible .character-purple {
+  animation: character-sneak-peek 1.25s ease-in-out infinite;
+}
+
+.login-characters.password-visible .character-black {
+  animation: character-sneak-peek 1.25s ease-in-out 170ms infinite;
+}
+
+@keyframes character-idle-breathe {
+  0%, 100% { margin-bottom: 0; }
+  50% { margin-bottom: 5px; }
+}
+
+@keyframes character-attentive-bob {
+  from { margin-bottom: 0; }
+  to { margin-bottom: 7px; }
+}
+
+@keyframes character-secret-whisper {
+  from { margin-bottom: 0; }
+  to { margin-bottom: 4px; }
+}
+
+@keyframes character-sneak-peek {
+  0%, 100% { margin-bottom: 0; }
+  50% { margin-bottom: 6px; }
+}
+
 .character-login-footer {
   position: relative;
   z-index: 2;
@@ -354,6 +393,15 @@
 .character-login-footer span {
   color: rgba(255, 255, 255, 0.68);
   font-size: 13px;
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .login-characters.idle .character,
+  .login-characters.is-engaged .character,
+  .login-characters.password-hidden .character,
+  .login-characters.password-visible .character {
+    animation: none;
+  }
 }
 
 .character-login-form-panel {

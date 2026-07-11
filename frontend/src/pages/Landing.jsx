@@ -37,7 +37,7 @@ const NAV_ITEMS = [
 const LANDING_COPY = {
   'zh-CN': {
     nav: ['首页', '校园场景', '平台能力', '同学反馈'], login: '登录', join: '加入校园', market: '进入集市', continue: '继续逛逛',
-    kicker: '南通理工学院 · 校园生活流转站', title: 'Campus Pulse 校园集市', lead: '二手交易、跑腿代取、游戏交易、求购与校园话题，在同一个可信校园社区里自然发生。',
+    kicker: '全国高校 · 校园生活流转站', title: 'Campus Pulse 校园集市', lead: '二手交易、跑腿代取、游戏交易、求购与校园话题，在同一个可信校园社区里自然发生；内容会优先按你填写的学校归类展示。',
     primary: '创建校园账号', explore: '先看看能做什么', proof: ['校园身份场景', '真实用户数据', '持久化消息'],
     showcase: [['二手市场', '西方经济学教材', '¥18'], ['跑腿代取', '东门外卖送到宿舍', '¥6'], ['游戏与数码', '机械键盘 · 校内面交', '¥129']],
     metrics: ['类校园需求统一入口', '套关注、通知与私信关系', '每位同学的初始信任分'],
@@ -49,7 +49,7 @@ const LANDING_COPY = {
   },
   'en-US': {
     nav: ['Home', 'Campus scenes', 'Platform', 'Student voices'], login: 'Log in', join: 'Join campus', market: 'Open market', continue: 'Keep exploring',
-    kicker: 'Nantong Institute of Technology · Campus exchange', title: 'Campus Pulse Marketplace', lead: 'Second-hand finds, errands, game trades, requests, and campus topics all meet in one trusted student community.',
+    kicker: 'Universities nationwide · Campus exchange', title: 'Campus Pulse Marketplace', lead: 'Second-hand finds, errands, game trades, requests, and campus topics all meet in one trusted student community, organized around each student’s school.',
     primary: 'Create an account', explore: 'See what is here', proof: ['Campus-first context', 'Real member data', 'Saved messages'],
     showcase: [['Second hand', 'Economics textbook', '¥18'], ['Campus errand', 'Takeout to dorm', '¥6'], ['Games & digital', 'Mechanical keyboard', '¥129']],
     metrics: ['campus needs in one place', 'social, notifications and messages', 'starting trust score for everyone'],
@@ -61,7 +61,7 @@ const LANDING_COPY = {
   },
   'ja-JP': {
     nav: ['ホーム', 'キャンパス', '機能', '学生の声'], login: 'ログイン', join: '参加する', market: 'マーケットへ', continue: '続けて見る',
-    kicker: '南通理工学院 · 学生のための交換コミュニティ', title: 'Campus Pulse キャンパス市場', lead: '中古品、代行、ゲーム取引、募集、キャンパストピックを、信頼できる学生コミュニティでつなぎます。',
+    kicker: '全国の大学 · 学生のための交換コミュニティ', title: 'Campus Pulse キャンパス市場', lead: '中古品、代行、ゲーム取引、募集、キャンパストピックを、学校ごとに信頼できる学生コミュニティでつなぎます。',
     primary: 'アカウントを作成', explore: 'できることを見る', proof: ['キャンパス優先', '実在ユーザーデータ', '保存されるメッセージ'],
     showcase: [['中古市場', '経済学の教科書', '¥18'], ['代行サービス', '寮までフード配達', '¥6'], ['ゲーム・デジタル', 'メカニカルキーボード', '¥129']],
     metrics: ['種類のニーズを一か所に', 'つながり・通知・メッセージ', '全員の初期信頼スコア'],
@@ -73,7 +73,7 @@ const LANDING_COPY = {
   },
   'ko-KR': {
     nav: ['홈', '캠퍼스', '기능', '학생 후기'], login: '로그인', join: '캠퍼스 참여', market: '마켓 열기', continue: '계속 보기',
-    kicker: '난퉁 이공대학교 · 캠퍼스 생활 교류', title: 'Campus Pulse 캠퍼스 마켓', lead: '중고 거래, 심부름, 게임 거래, 구매 요청과 캠퍼스 이야기를 신뢰할 수 있는 학생 커뮤니티에서 연결합니다.',
+    kicker: '전국 대학 · 캠퍼스 생활 교류', title: 'Campus Pulse 캠퍼스 마켓', lead: '중고 거래, 심부름, 게임 거래, 구매 요청과 캠퍼스 이야기를 각 학교의 신뢰할 수 있는 학생 커뮤니티에서 연결합니다.',
     primary: '계정 만들기', explore: '무엇을 할 수 있나요', proof: ['캠퍼스 중심', '실제 사용자 데이터', '저장되는 메시지'],
     showcase: [['중고 마켓', '경제학 교재', '¥18'], ['심부름', '기숙사 배달', '¥6'], ['게임·디지털', '기계식 키보드', '¥129']],
     metrics: ['가지 캠퍼스 수요', '관계·알림·메시지', '모두의 초기 신뢰 점수'],
@@ -85,7 +85,7 @@ const LANDING_COPY = {
   },
   'fil-PH': {
     nav: ['Home', 'Campus', 'Features', 'Students'], login: 'Mag-login', join: 'Sumali', market: 'Buksan ang market', continue: 'Magpatuloy',
-    kicker: 'Nantong Institute of Technology · Campus exchange', title: 'Campus Pulse Marketplace', lead: 'Second-hand items, errands, game trades, requests, at campus topics sa isang mapagkakatiwalaang student community.',
+    kicker: 'Mga unibersidad sa buong bansa · Campus exchange', title: 'Campus Pulse Marketplace', lead: 'Second-hand items, errands, game trades, requests, at campus topics sa student community ng bawat paaralan.',
     primary: 'Gumawa ng account', explore: 'Tingnan ang features', proof: ['Campus-first', 'Tunay na user data', 'Naka-save na mensahe'],
     showcase: [['Second hand', 'Economics textbook', '¥18'], ['Campus errand', 'Takeout sa dorm', '¥6'], ['Games at digital', 'Mechanical keyboard', '¥129']],
     metrics: ['uri ng campus needs', 'social, notifications at messages', 'panimulang trust score'],

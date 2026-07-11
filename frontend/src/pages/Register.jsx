@@ -23,7 +23,7 @@ export default function Register({ onNavigateLogin, onNavigateHome, onLogin }) {
     code: '',
     password: '',
     confirmPassword: '',
-    school: '南通理工学院',
+    school: '',
     phone: '',
   });
   const [focusedField, setFocusedField] = useState(null);
@@ -274,7 +274,7 @@ export default function Register({ onNavigateLogin, onNavigateHome, onLogin }) {
                 onChange={(event) => update('school', event.target.value)}
                 onFocus={() => setFocusedField('school')}
                 onBlur={() => setFocusedField(null)}
-                placeholder="请输入学校"
+                placeholder="例如：北京大学 / 上海交通大学"
                 autoComplete="organization"
               />
             </label>

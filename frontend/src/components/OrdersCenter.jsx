@@ -1,15 +1,17 @@
 import { useCallback, useEffect, useMemo, useState } from 'react'
-import { ArrowLeft, Bike, Package, Star, Truck, Wallet, CheckCircle2, XCircle, Navigation, Trash2, Scale } from 'lucide-react'
+import { ArrowLeft, Bike, Package, Star, Truck, Wallet, CheckCircle2, XCircle, Navigation, Trash2, Scale, RotateCcw } from 'lucide-react'
 import { Badge } from '@/components/ui/badge'
 import { Button } from '@/components/ui/button'
 import {
   appealOrder,
+  applyAfterSale,
   cancelOrder,
   deleteOrderRecord,
   getMyOrders,
   payOrder,
   receiveOrder,
   reviewOrder,
+  respondAfterSale,
   shipOrder,
   skipOrderReview,
 } from '@/api/marketplace'
@@ -59,6 +61,9 @@ export default function OrdersCenter({
   const [reviewText, setReviewText] = useState('')
   const [appealFor, setAppealFor] = useState(null)
   const [appealReason, setAppealReason] = useState('')
+  const [afterSaleFor, setAfterSaleFor] = useState(null)
+  const [afterSaleReason, setAfterSaleReason] = useState('')
+  const [afterSaleResponse, setAfterSaleResponse] = useState('')
   const t = (key, fallback = '') => translate(language, key, fallback)
 
   const tabs = useMemo(() => [
@@ -193,6 +198,31 @@ export default function OrdersCenter({
     }
   }
 
+  const submitAfterSale = async () => {
+    if (!afterSaleFor) return
+    const isSellerResponse = afterSaleFor.mode === 'respond'
+    const text = (isSellerResponse ? afterSaleResponse : afterSaleReason).trim()
+    if (!text) {
+      onNotice?.(isSellerResponse ? '请填写协商说明' : '请填写售后原因')
+      return
+    }
+    setBusyId(afterSaleFor.order.id)
+    try {
+      const response = isSellerResponse
+        ? await respondAfterSale(afterSaleFor.order.id, { agree: afterSaleFor.agree, response: text })
+        : await applyAfterSale(afterSaleFor.order.id, { reason: text })
+      onNotice?.(response?.message || '售后状态已更新')
+      setAfterSaleFor(null)
+      setAfterSaleReason('')
+      setAfterSaleResponse('')
+      await load()
+    } catch (error) {
+      onNotice?.(error.response?.data?.detail || '售后操作失败')
+    } finally {
+      setBusyId(null)
+    }
+  }
+
   return (
     <section className="orders-center">
       <header className="orders-center-header">
@@ -264,6 +294,12 @@ export default function OrdersCenter({
                       {order.my_appeals[0].admin_note ? ` · ${order.my_appeals[0].admin_note}` : ''}
                     </span>
                   ) : null}
+                  {order.after_sale ? (
+                    <span className="order-after-sale-status">
+                      售后：{order.after_sale.status === 'pending_seller' ? '等待卖家协商' : order.after_sale.status === 'admin_pending' ? '客服裁定中' : order.after_sale.status === 'refunded' ? '退款完成' : '售后已驳回'}
+                      {order.after_sale.admin_note ? ` · ${order.after_sale.admin_note}` : ''}
+                    </span>
+                  ) : null}
                   <strong className="order-price">¥{Number(order.amount || 0).toFixed(2)}</strong>
                 </div>
               </div>
@@ -285,6 +321,17 @@ export default function OrdersCenter({
                 ) : null}
                 {actions.includes('receive') ? (
                   <Button size="sm" disabled={busyId === order.id} onClick={() => runAction(order, 'receive')}><CheckCircle2 /> {t('orders.receive')}</Button>
+                ) : null}
+                {order.can_apply_after_sale ? (
+                  <Button size="sm" variant="outline" onClick={() => { setAfterSaleFor({ order, mode: 'apply' }); setAfterSaleReason('') }}>
+                    <RotateCcw /> 申请售后
+                  </Button>
+                ) : null}
+                {order.can_respond_after_sale ? (
+                  <>
+                    <Button size="sm" variant="outline" onClick={() => { setAfterSaleFor({ order, mode: 'respond', agree: false }); setAfterSaleResponse('') }}>拒绝售后</Button>
+                    <Button size="sm" onClick={() => { setAfterSaleFor({ order, mode: 'respond', agree: true }); setAfterSaleResponse('') }}>同意退款</Button>
+                  </>
                 ) : null}
                 {actions.includes('cancel') ? (
                   <Button size="sm" variant="ghost" disabled={busyId === order.id} onClick={() => { setCancelFor(order); setCancelReason(CANCEL_REASONS[2]) }}>
@@ -404,6 +451,32 @@ export default function OrdersCenter({
             <div className="order-modal-actions">
               <Button variant="outline" onClick={() => setAppealFor(null)}>取消</Button>
               <Button disabled={busyId === appealFor.id} onClick={submitAppeal}>提交申诉</Button>
+            </div>
+          </div>
+        </div>
+      ) : null}
+
+      {afterSaleFor ? (
+        <div className="order-modal-mask">
+          <div className="order-modal">
+            <h3>{afterSaleFor.mode === 'apply' ? '申请退货退款' : afterSaleFor.agree ? '同意退货退款' : '拒绝售后申请'}</h3>
+            <p>{afterSaleFor.mode === 'apply'
+              ? '提交后需要卖家同意；卖家不同意时，会自动进入客服裁定。'
+              : afterSaleFor.agree
+                ? '同意后平台会将订单标记为退款完成，并恢复商品在售状态。'
+                : '拒绝后会自动建立客服工单，由平台裁定是否退款。'}</p>
+            <textarea
+              className="order-review-text"
+              rows={4}
+              placeholder={afterSaleFor.mode === 'apply' ? '请说明退货/退款原因、商品情况和你的处理诉求…' : '请写明协商说明，客服会一并查看…'}
+              value={afterSaleFor.mode === 'apply' ? afterSaleReason : afterSaleResponse}
+              onChange={(event) => afterSaleFor.mode === 'apply' ? setAfterSaleReason(event.target.value) : setAfterSaleResponse(event.target.value)}
+            />
+            <div className="order-modal-actions">
+              <Button variant="outline" onClick={() => setAfterSaleFor(null)}>取消</Button>
+              <Button disabled={busyId === afterSaleFor.order.id} onClick={submitAfterSale}>
+                {afterSaleFor.mode === 'apply' ? '提交申请' : afterSaleFor.agree ? '确认同意退款' : '确认拒绝并转客服'}
+              </Button>
             </div>
           </div>
         </div>

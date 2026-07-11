@@ -26,6 +26,7 @@ class User(Base):
     email = Column(String(100), unique=True, index=True, nullable=False)
     hashed_password = Column(String(255), nullable=False)
     is_active = Column(Boolean, default=True)
+    is_deleted = Column(Boolean, default=False, index=True)
     is_admin = Column(Boolean, default=False, index=True)
     can_comment = Column(Boolean, default=True)
     can_post = Column(Boolean, default=True)
@@ -241,11 +242,33 @@ class Order(Base):
     received_at = Column(DateTime(timezone=True), nullable=True)
     created_at = Column(DateTime(timezone=True), server_default=func.now(), index=True)
     completed_at = Column(DateTime(timezone=True), nullable=True)
+    refunded_at = Column(DateTime(timezone=True), nullable=True)
 
     buyer = relationship("User", foreign_keys=[buyer_id])
     seller = relationship("User", foreign_keys=[seller_id])
     listing = relationship("Listing")
     service_task = relationship("ServiceTask")
+
+
+class AfterSaleRequest(Base):
+    """商品订单售后：买家申请，卖家协商，客服可最终裁定。"""
+    __tablename__ = "marketplace_after_sale_requests"
+
+    id = Column(Integer, primary_key=True)
+    order_id = Column(Integer, ForeignKey("marketplace_orders.id", ondelete="CASCADE"), nullable=False, index=True)
+    applicant_id = Column(Integer, ForeignKey("users.id", ondelete="CASCADE"), nullable=False, index=True)
+    reason = Column(String(500), nullable=False)
+    status = Column(String(30), default="pending_seller", index=True)
+    seller_response = Column(String(500), nullable=True)
+    admin_note = Column(String(500), nullable=True)
+    handled_by = Column(Integer, ForeignKey("users.id", ondelete="SET NULL"), nullable=True)
+    created_at = Column(DateTime(timezone=True), server_default=func.now(), index=True)
+    responded_at = Column(DateTime(timezone=True), nullable=True)
+    handled_at = Column(DateTime(timezone=True), nullable=True)
+
+    order = relationship("Order")
+    applicant = relationship("User", foreign_keys=[applicant_id])
+    handler = relationship("User", foreign_keys=[handled_by])
 
 
 class Favorite(Base):
@@ -375,7 +398,7 @@ class UserProfile(Base):
     avatar_url = Column(LongText, nullable=True)
     background_url = Column(LongText, nullable=True)
     background_theme = Column(String(40), default="teal")
-    school = Column(String(120), default="南通理工学院", index=True)
+    school = Column(String(120), default="未选择学校", index=True)
     signature = Column(String(180), nullable=True)
     current_ip = Column(String(80), nullable=True)
     language = Column(String(20), default="zh-CN")
