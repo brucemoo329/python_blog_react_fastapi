@@ -162,260 +162,50 @@
   min-height: 500px;
   align-items: flex-end;
   justify-content: center;
+  overflow: visible;
 }
 
-/* --------------------------------------------------------------------------
-   Login characters — feet planted on the ground.
-   Outer .character never uses margin/translate-Y (that was the sliding base).
-   Lean + breathe live on .character-body with transform-origin: bottom center.
-   -------------------------------------------------------------------------- */
-
-.login-characters {
+/* 21st.dev-style character stage — motion is inline on the component */
+.login-characters-scene {
   position: relative;
-  width: min(560px, 46vw);
-  height: 440px;
-}
-
-/* Fixed ground shadow — does not skew with bodies */
-.login-characters-ground {
-  position: absolute;
-  right: 28px;
-  bottom: -10px;
-  left: 18px;
-  z-index: 0;
-  height: 26px;
-  border-radius: 50%;
-  background: rgba(8, 28, 24, 0.28);
-  filter: blur(14px);
-  pointer-events: none;
-}
-
-/* Shell: position only. Never animate bottom / margin. */
-.character {
-  position: absolute;
-  bottom: 0;
-  z-index: 1;
-  display: flex;
-  flex-direction: column;
-  justify-content: flex-end;
-  pointer-events: none;
-}
-
-/* Static sole sits under the body so the “footprint” never slides */
-.character-sole {
-  position: absolute;
-  right: 8%;
-  bottom: 0;
-  left: 8%;
-  z-index: 0;
-  height: 10px;
-  border-radius: 50%;
-  background: rgba(0, 0, 0, 0.14);
-  filter: blur(3px);
-  transform: none !important;
-  animation: none !important;
-}
-
-/* Outer body: lean only (skewX). Inner fill: scaleY breathe. Both origin = floor. */
-.character-body {
-  position: relative;
-  z-index: 1;
-  width: 100%;
-  height: 100%;
-  transform-origin: bottom center;
-  will-change: transform;
-  transition:
-    transform 0.28s cubic-bezier(0.22, 0.82, 0.24, 1),
-    height 0.65s cubic-bezier(0.22, 0.82, 0.24, 1);
-}
-
-.character-body-fill {
-  position: relative;
-  width: 100%;
-  height: 100%;
-  transform-origin: bottom center;
-  will-change: transform;
-}
-
-.character-purple {
-  left: 13%;
-  z-index: 1;
-  width: 34%;
-  height: 92%;
-}
-
-.character-purple .character-body-fill {
-  border-radius: 12px 12px 0 0;
-  background: #6d48f5;
-  box-shadow: inset -16px 0 0 rgba(68, 39, 177, 0.16);
-}
-
-.character-purple .character-body.is-tall {
-  height: 108%;
-}
-
-.character-black {
-  left: 44%;
   z-index: 2;
-  width: 23%;
-  height: 70%;
-}
-
-.character-black .character-body-fill {
-  border-radius: 9px 9px 0 0;
-  background: #25252b;
-  box-shadow: inset -12px 0 0 rgba(0, 0, 0, 0.14);
-}
-
-.character-orange {
-  left: 0;
-  z-index: 3;
-  width: 44%;
-  height: 45%;
-}
-
-.character-orange .character-body-fill {
-  border-radius: 999px 999px 0 0;
-  background: #ff9c70;
-  box-shadow: inset -14px 0 0 rgba(218, 103, 59, 0.12);
-}
-
-.character-yellow {
-  left: 57%;
-  z-index: 4;
-  width: 27%;
-  height: 53%;
-}
-
-.character-yellow .character-body-fill {
-  border-radius: 999px 999px 0 0;
-  background: #ead958;
-  box-shadow: inset -14px 0 0 rgba(155, 137, 31, 0.1);
-}
-
-/* Eyes */
-.login-eye-pair {
-  position: absolute;
-  top: 40px;
-  left: 50%;
   display: flex;
-  align-items: center;
+  width: 100%;
+  min-height: 500px;
+  align-items: flex-end;
   justify-content: center;
-  transform: translateX(-50%);
-  transition: top 0.55s cubic-bezier(0.22, 0.82, 0.24, 1);
 }
 
-.login-eyeball {
-  display: flex;
-  align-items: center;
-  justify-content: center;
-  overflow: hidden;
-  border-radius: 50%;
-  transition: height 0.14s ease;
+.login-characters-stage {
+  position: relative;
+  width: min(550px, 100%);
+  height: 400px;
+  transform-origin: bottom center;
 }
 
-.login-eyeball.pupil-only {
-  background: transparent;
-}
-
-.login-eyeball.is-blinking {
-  border-radius: 2px;
-  background: #fff;
-}
-
-.login-eyeball.pupil-only.is-blinking {
-  background: #2d2d2d;
-}
-
-.login-pupil {
-  display: block;
-  flex-shrink: 0;
-  border-radius: 50%;
-  transition: transform 0.1s ease-out;
-}
-
-.character-mouth {
+.login-characters-stage::after {
   position: absolute;
-  top: 96px;
-  left: 50%;
-  width: 76px;
-  height: 4px;
-  border-radius: 999px;
-  background: #28282d;
-  transform: translateX(-50%);
-  transition: transform 0.16s ease-out;
+  right: 24px;
+  bottom: -14px;
+  left: 16px;
+  z-index: 0;
+  height: 28px;
+  content: '';
+  border-radius: 50%;
+  background: rgba(8, 28, 24, 0.22);
+  filter: blur(16px);
+  pointer-events: none;
 }
 
-/* Idle breathe: scaleY on fill only — contact edge never leaves the floor */
-.login-characters.is-idle .character-purple .character-body-fill {
-  animation: character-breathe-tall 3.1s ease-in-out infinite;
-}
+@media (max-width: 1100px) {
+  .login-characters-scene {
+    min-height: 360px;
+  }
 
-.login-characters.is-idle .character-black .character-body-fill {
-  animation: character-breathe-mid 2.9s ease-in-out infinite 0.15s;
-}
-
-.login-characters.is-idle .character-orange .character-body-fill {
-  animation: character-breathe-short 2.7s ease-in-out infinite 0.08s;
-}
-
-.login-characters.is-idle .character-yellow .character-body-fill {
-  animation: character-breathe-short 2.85s ease-in-out infinite 0.22s;
-}
-
-/* Soft attentive pulse on front characters when typing (scaleY, no hop) */
-.login-characters.is-engaged .character-orange .character-body-fill,
-.login-characters.is-engaged .character-yellow .character-body-fill {
-  animation: character-attentive-scale 1.1s ease-in-out infinite alternate;
-}
-
-/* Password hide: slightly taller purple shell */
-.login-characters.password-hidden .character-purple {
-  height: 100%;
-}
-
-.login-characters.password-hidden .character-orange.is-whisper .character-body-fill,
-.login-characters.password-hidden .character-yellow.is-whisper .character-body-fill {
-  animation: character-whisper-scale 0.9s ease-in-out infinite alternate;
-}
-
-/* Password visible: subtle scale peek, not vertical hop */
-.login-characters.password-visible .character-purple .character-body-fill {
-  animation: character-peek-scale 1.35s ease-in-out infinite;
-}
-
-.login-characters.password-visible .character-black .character-body-fill {
-  animation: character-peek-scale 1.35s ease-in-out 0.18s infinite;
-}
-
-@keyframes character-breathe-tall {
-  0%, 100% { transform: scaleY(1); }
-  50% { transform: scaleY(1.018); }
-}
-
-@keyframes character-breathe-mid {
-  0%, 100% { transform: scaleY(1); }
-  50% { transform: scaleY(1.016); }
-}
-
-@keyframes character-breathe-short {
-  0%, 100% { transform: scaleY(1); }
-  50% { transform: scaleY(1.022); }
-}
-
-@keyframes character-attentive-scale {
-  from { transform: scaleY(1); }
-  to { transform: scaleY(1.03); }
-}
-
-@keyframes character-whisper-scale {
-  from { transform: scaleY(1); }
-  to { transform: scaleY(1.02); }
-}
-
-@keyframes character-peek-scale {
-  0%, 100% { transform: scaleY(1); }
-  50% { transform: scaleY(1.025); }
+  .login-characters-stage {
+    transform: scale(0.82);
+    transform-origin: bottom center;
+  }
 }
 
 .character-login-footer {
@@ -428,12 +218,6 @@
 .character-login-footer span {
   color: rgba(255, 255, 255, 0.68);
   font-size: 13px;
-}
-
-@media (prefers-reduced-motion: reduce) {
-  .login-characters .character-body-fill {
-    animation: none !important;
-  }
 }
 
 .character-login-form-panel {
@@ -679,10 +463,6 @@
     grid-template-columns: minmax(360px, 0.86fr) minmax(430px, 1.14fr);
   }
 
-  .login-characters {
-    width: min(500px, 48vw);
-    height: 390px;
-  }
 }
 
 @media (max-width: 760px) {
@@ -728,11 +508,7 @@
 }
 
 @media (prefers-reduced-motion: reduce) {
-  .character,
-  .login-character-eyes,
-  .login-character-eyes i,
-  .character-mouth,
-  .character-login-submit {
-    transition: none;
+  .login-characters-stage * {
+    transition: none !important;
   }
 }

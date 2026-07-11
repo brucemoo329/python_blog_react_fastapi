@@ -15,6 +15,7 @@ export default function AnimatedAuthShowcase({
   accountFocused = false,
   passwordFocused = false,
   passwordVisible = false,
+  password = '',
 }) {
   return (
     <section className="character-login-showcase">
@@ -25,6 +26,7 @@ export default function AnimatedAuthShowcase({
           accountFocused={accountFocused}
           passwordFocused={passwordFocused}
           passwordVisible={passwordVisible}
+          password={password}
         />
       </div>
 

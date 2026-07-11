@@ -286,6 +286,7 @@ export default function Login({ onLogin, onNavigateRegister, onNavigateHome }) {
         accountFocused={accountFocused}
         passwordFocused={passwordFocused}
         passwordVisible={showPassword}
+        password={form.password}
       />
 
       <section className="grid min-h-screen min-w-0 place-items-center bg-background px-6 py-10 md:px-12 lg:px-16">

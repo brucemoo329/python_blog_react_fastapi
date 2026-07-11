@@ -1,135 +1,136 @@
 import { useEffect, useRef, useState } from 'react';
 
-function clamp(value, min, max) {
-  return Math.min(Math.max(value, min), max);
-}
+/**
+ * Faithful port of the 21st.dev / animated-characters-login-page characters.
+ * Integrated as a controlled showcase driven by login form focus/visibility.
+ */
 
-function useBlink(minMs = 3000, maxMs = 7000) {
-  const [blinking, setBlinking] = useState(false);
+function Pupil({
+  size = 12,
+  maxDistance = 5,
+  pupilColor = 'black',
+  forceLookX,
+  forceLookY,
+}) {
+  const [mouseX, setMouseX] = useState(0);
+  const [mouseY, setMouseY] = useState(0);
+  const pupilRef = useRef(null);
 
   useEffect(() => {
-    let blinkTimer;
-    let openTimer;
-
-    const schedule = () => {
-      const wait = minMs + Math.random() * (maxMs - minMs);
-      blinkTimer = window.setTimeout(() => {
-        setBlinking(true);
-        openTimer = window.setTimeout(() => {
-          setBlinking(false);
-          schedule();
-        }, 150);
-      }, wait);
+    const handleMouseMove = (e) => {
+      setMouseX(e.clientX);
+      setMouseY(e.clientY);
     };
+    window.addEventListener('mousemove', handleMouseMove);
+    return () => window.removeEventListener('mousemove', handleMouseMove);
+  }, []);
 
-    schedule();
-    return () => {
-      window.clearTimeout(blinkTimer);
-      window.clearTimeout(openTimer);
-    };
-  }, [minMs, maxMs]);
+  const calculatePupilPosition = () => {
+    if (!pupilRef.current) return { x: 0, y: 0 };
 
-  return blinking;
+    if (forceLookX !== undefined && forceLookY !== undefined) {
+      return { x: forceLookX, y: forceLookY };
+    }
+
+    const pupil = pupilRef.current.getBoundingClientRect();
+    const pupilCenterX = pupil.left + pupil.width / 2;
+    const pupilCenterY = pupil.top + pupil.height / 2;
+
+    const deltaX = mouseX - pupilCenterX;
+    const deltaY = mouseY - pupilCenterY;
+    const distance = Math.min(Math.sqrt(deltaX ** 2 + deltaY ** 2), maxDistance);
+
+    const angle = Math.atan2(deltaY, deltaX);
+    const x = Math.cos(angle) * distance;
+    const y = Math.sin(angle) * distance;
+
+    return { x, y };
+  };
+
+  const pupilPosition = calculatePupilPosition();
+
+  return (
+    <div
+      ref={pupilRef}
+      className="rounded-full"
+      style={{
+        width: `${size}px`,
+        height: `${size}px`,
+        backgroundColor: pupilColor,
+        transform: `translate(${pupilPosition.x}px, ${pupilPosition.y}px)`,
+        transition: 'transform 0.1s ease-out',
+      }}
+    />
+  );
 }
 
-/**
- * Eyes track the pointer; optional forceLook overrides (password peek / look-at-each-other).
- * Feet stay planted — only pupils move.
- */
 function EyeBall({
-  size = 18,
-  pupilSize = 7,
-  maxDistance = 5,
+  size = 48,
+  pupilSize = 16,
+  maxDistance = 10,
   eyeColor = 'white',
-  pupilColor = '#2D2D2D',
+  pupilColor = 'black',
   isBlinking = false,
   forceLookX,
   forceLookY,
-  pupilOnly = false,
 }) {
+  const [mouseX, setMouseX] = useState(0);
+  const [mouseY, setMouseY] = useState(0);
   const eyeRef = useRef(null);
-  const [offset, setOffset] = useState({ x: 0, y: 0 });
-  const frameRef = useRef(0);
 
   useEffect(() => {
+    const handleMouseMove = (e) => {
+      setMouseX(e.clientX);
+      setMouseY(e.clientY);
+    };
+    window.addEventListener('mousemove', handleMouseMove);
+    return () => window.removeEventListener('mousemove', handleMouseMove);
+  }, []);
+
+  const calculatePupilPosition = () => {
+    if (!eyeRef.current) return { x: 0, y: 0 };
+
     if (forceLookX !== undefined && forceLookY !== undefined) {
-      setOffset({ x: forceLookX, y: forceLookY });
-      return undefined;
+      return { x: forceLookX, y: forceLookY };
     }
 
-    const onMove = (event) => {
-      if (frameRef.current) return;
-      frameRef.current = window.requestAnimationFrame(() => {
-        frameRef.current = 0;
-        const el = eyeRef.current;
-        if (!el) return;
-        const rect = el.getBoundingClientRect();
-        const cx = rect.left + rect.width / 2;
-        const cy = rect.top + rect.height / 2;
-        const dx = event.clientX - cx;
-        const dy = event.clientY - cy;
-        const dist = Math.min(Math.hypot(dx, dy), maxDistance);
-        const angle = Math.atan2(dy, dx);
-        setOffset({
-          x: Math.cos(angle) * dist,
-          y: Math.sin(angle) * dist,
-        });
-      });
-    };
+    const eye = eyeRef.current.getBoundingClientRect();
+    const eyeCenterX = eye.left + eye.width / 2;
+    const eyeCenterY = eye.top + eye.height / 2;
 
-    const reset = () => setOffset({ x: 0, y: 0 });
-    window.addEventListener('pointermove', onMove, { passive: true });
-    window.addEventListener('blur', reset);
-    document.documentElement.addEventListener('mouseleave', reset);
+    const deltaX = mouseX - eyeCenterX;
+    const deltaY = mouseY - eyeCenterY;
+    const distance = Math.min(Math.sqrt(deltaX ** 2 + deltaY ** 2), maxDistance);
 
-    return () => {
-      window.removeEventListener('pointermove', onMove);
-      window.removeEventListener('blur', reset);
-      document.documentElement.removeEventListener('mouseleave', reset);
-      window.cancelAnimationFrame(frameRef.current);
-    };
-  }, [forceLookX, forceLookY, maxDistance]);
+    const angle = Math.atan2(deltaY, deltaX);
+    const x = Math.cos(angle) * distance;
+    const y = Math.sin(angle) * distance;
 
-  if (pupilOnly) {
-    return (
-      <div
-        ref={eyeRef}
-        className={`login-eyeball pupil-only${isBlinking ? ' is-blinking' : ''}`}
-        style={{ width: size, height: isBlinking ? 2 : size }}
-      >
-        {!isBlinking && (
-          <span
-            className="login-pupil"
-            style={{
-              width: pupilSize,
-              height: pupilSize,
-              backgroundColor: pupilColor,
-              transform: `translate(${offset.x}px, ${offset.y}px)`,
-            }}
-          />
-        )}
-      </div>
-    );
-  }
+    return { x, y };
+  };
+
+  const pupilPosition = calculatePupilPosition();
 
   return (
     <div
       ref={eyeRef}
-      className={`login-eyeball${isBlinking ? ' is-blinking' : ''}`}
+      className="rounded-full flex items-center justify-center transition-all duration-150"
       style={{
-        width: size,
-        height: isBlinking ? 2 : size,
+        width: `${size}px`,
+        height: isBlinking ? '2px' : `${size}px`,
         backgroundColor: eyeColor,
+        overflow: 'hidden',
       }}
     >
       {!isBlinking && (
-        <span
-          className="login-pupil"
+        <div
+          className="rounded-full"
           style={{
-            width: pupilSize,
-            height: pupilSize,
+            width: `${pupilSize}px`,
+            height: `${pupilSize}px`,
             backgroundColor: pupilColor,
-            transform: `translate(${offset.x}px, ${offset.y}px)`,
+            transform: `translate(${pupilPosition.x}px, ${pupilPosition.y}px)`,
+            transition: 'transform 0.1s ease-out',
           }}
         />
       )}
@@ -137,301 +138,402 @@ function EyeBall({
   );
 }
 
-function EyePair({
-  gap = 28,
-  size,
-  pupilSize,
-  maxDistance,
-  light = true,
-  blinking = false,
-  forceLookX,
-  forceLookY,
-  pupilOnly = false,
-  style,
-}) {
-  const shared = {
-    size,
-    pupilSize,
-    maxDistance,
-    eyeColor: light ? 'white' : 'transparent',
-    pupilColor: '#2D2D2D',
-    isBlinking: blinking,
-    forceLookX,
-    forceLookY,
-    pupilOnly,
-  };
+function calculatePosition(ref, mouseX, mouseY) {
+  if (!ref.current) return { faceX: 0, faceY: 0, bodySkew: 0 };
 
-  return (
-    <div className="login-eye-pair" style={{ gap, ...style }}>
-      <EyeBall {...shared} />
-      <EyeBall {...shared} />
-    </div>
-  );
+  const rect = ref.current.getBoundingClientRect();
+  const centerX = rect.left + rect.width / 2;
+  const centerY = rect.top + rect.height / 3;
+
+  const deltaX = mouseX - centerX;
+  const deltaY = mouseY - centerY;
+
+  const faceX = Math.max(-15, Math.min(15, deltaX / 20));
+  const faceY = Math.max(-10, Math.min(10, deltaY / 30));
+  const bodySkew = Math.max(-6, Math.min(6, -deltaX / 120));
+
+  return { faceX, faceY, bodySkew };
 }
 
 /**
- * Planted character: outer shell never translates/margins off the floor.
- * Lean + breathe apply only to .character-body with transform-origin: bottom center.
- * A static .character-sole under the body keeps the visual base fixed.
+ * @param {object} props
+ * @param {boolean} props.accountFocused - email/account field focused (isTyping)
+ * @param {boolean} props.passwordFocused - password field focused
+ * @param {boolean} props.passwordVisible - show password toggle on
+ * @param {string}  props.password - current password value (for hide/peek poses)
  */
-function Character({
-  tone,
-  className = '',
-  lean = 0,
-  rise = false,
-  children,
-}) {
-  return (
-    <div className={`character character-${tone} ${className}`.trim()}>
-      {/* Fixed sole — never skewed / lifted */}
-      <span className="character-sole" aria-hidden="true" />
-      {/* Outer: lean only. Inner: scaleY breathe. Origin is floor for both. */}
-      <div
-        className={`character-body${rise ? ' is-tall' : ''}`}
-        style={{ transform: `skewX(${lean}deg)` }}
-      >
-        <div className="character-body-fill">{children}</div>
-      </div>
-    </div>
-  );
-}
-
 export default function AnimatedLoginCharacters({
   accountFocused = false,
   passwordFocused = false,
   passwordVisible = false,
+  password = '',
 }) {
-  const sceneRef = useRef(null);
-  const frameRef = useRef(0);
-  const [pointerLean, setPointerLean] = useState(0);
+  const [mouseX, setMouseX] = useState(0);
+  const [mouseY, setMouseY] = useState(0);
+  const [isPurpleBlinking, setIsPurpleBlinking] = useState(false);
+  const [isBlackBlinking, setIsBlackBlinking] = useState(false);
   const [isLookingAtEachOther, setIsLookingAtEachOther] = useState(false);
   const [isPurplePeeking, setIsPurplePeeking] = useState(false);
-  const purpleBlinking = useBlink();
-  const blackBlinking = useBlink(3200, 6800);
+  const [, setTick] = useState(0);
 
+  const purpleRef = useRef(null);
+  const blackRef = useRef(null);
+  const yellowRef = useRef(null);
+  const orangeRef = useRef(null);
+
+  const showPassword = passwordVisible;
+  // Match reference: isTyping while focused on inputs
   const isTyping = accountFocused || passwordFocused;
-  const hidingPassword = passwordFocused && !passwordVisible;
-  const passwordExposed = passwordFocused && passwordVisible;
-  const idle = !accountFocused && !passwordFocused;
+  const hasPassword = password.length > 0;
+  const passwordHiddenMode = hasPassword && !showPassword;
+  const passwordVisibleMode = hasPassword && showPassword;
 
-  // Very soft ambient lean when idle — eyes do most tracking so soles stay visually planted
   useEffect(() => {
-    const onMove = (event) => {
-      if (frameRef.current) return;
-      frameRef.current = window.requestAnimationFrame(() => {
-        frameRef.current = 0;
-        const rect = sceneRef.current?.getBoundingClientRect();
-        if (!rect) return;
-        const nx = (event.clientX - (rect.left + rect.width / 2)) / (rect.width / 2);
-        // Keep lean tiny (±2°) so the silhouette base barely shifts
-        setPointerLean(clamp(-nx * 1.6, -2, 2));
-      });
+    const handleMouseMove = (e) => {
+      setMouseX(e.clientX);
+      setMouseY(e.clientY);
+      // Force re-render so calculatePosition runs with latest mouse
+      setTick((n) => n + 1);
+    };
+    window.addEventListener('mousemove', handleMouseMove);
+    return () => window.removeEventListener('mousemove', handleMouseMove);
+  }, []);
+
+  // Blinking — purple
+  useEffect(() => {
+    const getRandomBlinkInterval = () => Math.random() * 4000 + 3000;
+    let cancelled = false;
+    let timeoutId;
+
+    const scheduleBlink = () => {
+      timeoutId = window.setTimeout(() => {
+        if (cancelled) return;
+        setIsPurpleBlinking(true);
+        window.setTimeout(() => {
+          if (cancelled) return;
+          setIsPurpleBlinking(false);
+          scheduleBlink();
+        }, 150);
+      }, getRandomBlinkInterval());
     };
 
-    const reset = () => setPointerLean(0);
-    window.addEventListener('pointermove', onMove, { passive: true });
-    window.addEventListener('blur', reset);
-    document.documentElement.addEventListener('mouseleave', reset);
-
+    scheduleBlink();
     return () => {
-      window.removeEventListener('pointermove', onMove);
-      window.removeEventListener('blur', reset);
-      document.documentElement.removeEventListener('mouseleave', reset);
-      window.cancelAnimationFrame(frameRef.current);
+      cancelled = true;
+      window.clearTimeout(timeoutId);
     };
   }, []);
 
-  // When user starts typing, characters glance at each other briefly
+  // Blinking — black
   useEffect(() => {
-    if (!isTyping) {
-      setIsLookingAtEachOther(false);
-      return undefined;
+    const getRandomBlinkInterval = () => Math.random() * 4000 + 3000;
+    let cancelled = false;
+    let timeoutId;
+
+    const scheduleBlink = () => {
+      timeoutId = window.setTimeout(() => {
+        if (cancelled) return;
+        setIsBlackBlinking(true);
+        window.setTimeout(() => {
+          if (cancelled) return;
+          setIsBlackBlinking(false);
+          scheduleBlink();
+        }, 150);
+      }, getRandomBlinkInterval());
+    };
+
+    scheduleBlink();
+    return () => {
+      cancelled = true;
+      window.clearTimeout(timeoutId);
+    };
+  }, []);
+
+  // Looking at each other when typing starts
+  useEffect(() => {
+    if (isTyping) {
+      setIsLookingAtEachOther(true);
+      const timer = window.setTimeout(() => setIsLookingAtEachOther(false), 800);
+      return () => window.clearTimeout(timer);
     }
-    setIsLookingAtEachOther(true);
-    const timer = window.setTimeout(() => setIsLookingAtEachOther(false), 800);
-    return () => window.clearTimeout(timer);
+    setIsLookingAtEachOther(false);
+    return undefined;
   }, [isTyping]);
 
-  // Purple sneaky peek when password is visible
+  // Purple sneaky peeking when password is visible
   useEffect(() => {
-    if (!passwordExposed) {
-      setIsPurplePeeking(false);
-      return undefined;
+    if (hasPassword && showPassword) {
+      let cancelled = false;
+      let peekTimeout;
+
+      const schedulePeek = () => {
+        peekTimeout = window.setTimeout(() => {
+          if (cancelled) return;
+          setIsPurplePeeking(true);
+          window.setTimeout(() => {
+            if (cancelled) return;
+            setIsPurplePeeking(false);
+            schedulePeek();
+          }, 800);
+        }, Math.random() * 3000 + 2000);
+      };
+
+      schedulePeek();
+      return () => {
+        cancelled = true;
+        window.clearTimeout(peekTimeout);
+        setIsPurplePeeking(false);
+      };
     }
+    setIsPurplePeeking(false);
+    return undefined;
+  }, [hasPassword, showPassword]);
 
-    let peekTimer;
-    let holdTimer;
-
-    const schedule = () => {
-      peekTimer = window.setTimeout(() => {
-        setIsPurplePeeking(true);
-        holdTimer = window.setTimeout(() => {
-          setIsPurplePeeking(false);
-          schedule();
-        }, 800);
-      }, 2000 + Math.random() * 3000);
-    };
-
-    schedule();
-    return () => {
-      window.clearTimeout(peekTimer);
-      window.clearTimeout(holdTimer);
-    };
-  }, [passwordExposed]);
-
-  // Body leans: intentional poses when focused; gentle ambient when idle
-  const purpleLean = passwordExposed
-    ? 0
-    : hidingPassword
-      ? -10
-      : accountFocused
-        ? -7
-        : isLookingAtEachOther
-          ? -5
-          : idle
-            ? pointerLean * 0.85
-            : pointerLean * 0.5;
-
-  const blackLean = passwordExposed
-    ? 0
-    : hidingPassword
-      ? -8
-      : accountFocused
-        ? 7
-        : isLookingAtEachOther
-          ? 8
-          : idle
-            ? pointerLean * 0.7
-            : pointerLean * 0.45;
-
-  const orangeLean = passwordExposed
-    ? 0
-    : hidingPassword
-      ? -5
-      : idle
-        ? pointerLean * 0.55
-        : pointerLean * 0.35;
-
-  const yellowLean = passwordExposed
-    ? 0
-    : hidingPassword
-      ? -6
-      : idle
-        ? pointerLean * 0.6
-        : pointerLean * 0.4;
-
-  // Force look directions for story beats
-  const purpleForce =
-    passwordExposed
-      ? isPurplePeeking
-        ? { x: 4, y: 5 }
-        : { x: -4, y: -4 }
-      : isLookingAtEachOther
-        ? { x: 3, y: 4 }
-        : { x: undefined, y: undefined };
-
-  const blackForce =
-    passwordExposed
-      ? { x: -4, y: -3 }
-      : isLookingAtEachOther
-        ? { x: -3, y: 3 }
-        : { x: undefined, y: undefined };
-
-  const frontForce = passwordExposed
-    ? { x: -4, y: -3 }
-    : hidingPassword
-      ? { x: 5, y: -2 }
-      : { x: undefined, y: undefined };
+  const purplePos = calculatePosition(purpleRef, mouseX, mouseY);
+  const blackPos = calculatePosition(blackRef, mouseX, mouseY);
+  const yellowPos = calculatePosition(yellowRef, mouseX, mouseY);
+  const orangePos = calculatePosition(orangeRef, mouseX, mouseY);
 
   return (
-    <div
-      ref={sceneRef}
-      className={[
-        'login-characters',
-        idle ? 'is-idle' : '',
-        isTyping ? 'is-engaged' : '',
-        accountFocused ? 'account-active' : '',
-        hidingPassword ? 'password-hidden' : '',
-        passwordExposed ? 'password-visible' : '',
-      ]
-        .filter(Boolean)
-        .join(' ')}
-      aria-hidden="true"
-    >
-      {/* Ground shadow — fixed, never follows lean */}
-      <span className="login-characters-ground" />
-
-      <Character
-        tone="purple"
-        lean={purpleLean}
-        rise={hidingPassword || accountFocused}
-      >
-        <EyePair
-          gap={32}
-          size={18}
-          pupilSize={7}
-          maxDistance={5}
-          light
-          blinking={purpleBlinking && !hidingPassword}
-          forceLookX={purpleForce.x}
-          forceLookY={purpleForce.y}
-          style={{ top: passwordExposed ? 34 : isLookingAtEachOther ? 58 : 40 }}
-        />
-      </Character>
-
-      <Character tone="black" lean={blackLean}>
-        <EyePair
-          gap={22}
-          size={16}
-          pupilSize={6}
-          maxDistance={4}
-          light
-          blinking={blackBlinking && !hidingPassword}
-          forceLookX={blackForce.x}
-          forceLookY={blackForce.y}
-          style={{ top: passwordExposed ? 26 : isLookingAtEachOther ? 14 : 32 }}
-        />
-      </Character>
-
-      <Character
-        tone="orange"
-        className={hidingPassword ? 'is-whisper' : ''}
-        lean={orangeLean}
-      >
-        <EyePair
-          gap={36}
-          size={14}
-          pupilSize={9}
-          maxDistance={4}
-          pupilOnly
-          forceLookX={frontForce.x}
-          forceLookY={frontForce.y}
-          style={{ top: '46%' }}
-        />
-      </Character>
-
-      <Character
-        tone="yellow"
-        className={hidingPassword ? 'is-whisper' : ''}
-        lean={yellowLean}
-      >
-        <EyePair
-          gap={28}
-          size={12}
-          pupilSize={8}
-          maxDistance={4}
-          pupilOnly
-          forceLookX={frontForce.x}
-          forceLookY={frontForce.y}
-          style={{ top: 44 }}
-        />
-        <span
-          className="character-mouth"
+    <div className="login-characters-scene" aria-hidden="true">
+      <div className="login-characters-stage" style={{ width: '550px', height: '400px', maxWidth: '100%' }}>
+        {/* Purple tall rectangle — back */}
+        <div
+          ref={purpleRef}
+          className="absolute bottom-0 transition-all duration-700 ease-in-out"
           style={{
-            transform: `translateX(calc(-50% + ${(frontForce.x ?? 0) * 0.4}px)) translateY(${(frontForce.y ?? 0) * 0.25}px)`,
+            left: '70px',
+            width: '180px',
+            height: isTyping || passwordHiddenMode ? '440px' : '400px',
+            backgroundColor: '#6C3FF5',
+            borderRadius: '10px 10px 0 0',
+            zIndex: 1,
+            transform: passwordVisibleMode
+              ? 'skewX(0deg)'
+              : isTyping || passwordHiddenMode
+                ? `skewX(${(purplePos.bodySkew || 0) - 12}deg) translateX(40px)`
+                : `skewX(${purplePos.bodySkew || 0}deg)`,
+            transformOrigin: 'bottom center',
           }}
-        />
-      </Character>
+        >
+          <div
+            className="absolute flex gap-8 transition-all duration-700 ease-in-out"
+            style={{
+              left: passwordVisibleMode
+                ? '20px'
+                : isLookingAtEachOther
+                  ? '55px'
+                  : `${45 + purplePos.faceX}px`,
+              top: passwordVisibleMode
+                ? '35px'
+                : isLookingAtEachOther
+                  ? '65px'
+                  : `${40 + purplePos.faceY}px`,
+            }}
+          >
+            <EyeBall
+              size={18}
+              pupilSize={7}
+              maxDistance={5}
+              eyeColor="white"
+              pupilColor="#2D2D2D"
+              isBlinking={isPurpleBlinking}
+              forceLookX={
+                passwordVisibleMode
+                  ? isPurplePeeking
+                    ? 4
+                    : -4
+                  : isLookingAtEachOther
+                    ? 3
+                    : undefined
+              }
+              forceLookY={
+                passwordVisibleMode
+                  ? isPurplePeeking
+                    ? 5
+                    : -4
+                  : isLookingAtEachOther
+                    ? 4
+                    : undefined
+              }
+            />
+            <EyeBall
+              size={18}
+              pupilSize={7}
+              maxDistance={5}
+              eyeColor="white"
+              pupilColor="#2D2D2D"
+              isBlinking={isPurpleBlinking}
+              forceLookX={
+                passwordVisibleMode
+                  ? isPurplePeeking
+                    ? 4
+                    : -4
+                  : isLookingAtEachOther
+                    ? 3
+                    : undefined
+              }
+              forceLookY={
+                passwordVisibleMode
+                  ? isPurplePeeking
+                    ? 5
+                    : -4
+                  : isLookingAtEachOther
+                    ? 4
+                    : undefined
+              }
+            />
+          </div>
+        </div>
+
+        {/* Black tall rectangle — middle */}
+        <div
+          ref={blackRef}
+          className="absolute bottom-0 transition-all duration-700 ease-in-out"
+          style={{
+            left: '240px',
+            width: '120px',
+            height: '310px',
+            backgroundColor: '#2D2D2D',
+            borderRadius: '8px 8px 0 0',
+            zIndex: 2,
+            transform: passwordVisibleMode
+              ? 'skewX(0deg)'
+              : isLookingAtEachOther
+                ? `skewX(${(blackPos.bodySkew || 0) * 1.5 + 10}deg) translateX(20px)`
+                : isTyping || passwordHiddenMode
+                  ? `skewX(${(blackPos.bodySkew || 0) * 1.5}deg)`
+                  : `skewX(${blackPos.bodySkew || 0}deg)`,
+            transformOrigin: 'bottom center',
+          }}
+        >
+          <div
+            className="absolute flex gap-6 transition-all duration-700 ease-in-out"
+            style={{
+              left: passwordVisibleMode
+                ? '10px'
+                : isLookingAtEachOther
+                  ? '32px'
+                  : `${26 + blackPos.faceX}px`,
+              top: passwordVisibleMode
+                ? '28px'
+                : isLookingAtEachOther
+                  ? '12px'
+                  : `${32 + blackPos.faceY}px`,
+            }}
+          >
+            <EyeBall
+              size={16}
+              pupilSize={6}
+              maxDistance={4}
+              eyeColor="white"
+              pupilColor="#2D2D2D"
+              isBlinking={isBlackBlinking}
+              forceLookX={passwordVisibleMode ? -4 : isLookingAtEachOther ? 0 : undefined}
+              forceLookY={passwordVisibleMode ? -4 : isLookingAtEachOther ? -4 : undefined}
+            />
+            <EyeBall
+              size={16}
+              pupilSize={6}
+              maxDistance={4}
+              eyeColor="white"
+              pupilColor="#2D2D2D"
+              isBlinking={isBlackBlinking}
+              forceLookX={passwordVisibleMode ? -4 : isLookingAtEachOther ? 0 : undefined}
+              forceLookY={passwordVisibleMode ? -4 : isLookingAtEachOther ? -4 : undefined}
+            />
+          </div>
+        </div>
+
+        {/* Orange semi-circle — front left */}
+        <div
+          ref={orangeRef}
+          className="absolute bottom-0 transition-all duration-700 ease-in-out"
+          style={{
+            left: '0px',
+            width: '240px',
+            height: '200px',
+            zIndex: 3,
+            backgroundColor: '#FF9B6B',
+            borderRadius: '120px 120px 0 0',
+            transform: passwordVisibleMode
+              ? 'skewX(0deg)'
+              : `skewX(${orangePos.bodySkew || 0}deg)`,
+            transformOrigin: 'bottom center',
+          }}
+        >
+          <div
+            className="absolute flex gap-8 transition-all duration-200 ease-out"
+            style={{
+              left: passwordVisibleMode ? '50px' : `${82 + (orangePos.faceX || 0)}px`,
+              top: passwordVisibleMode ? '85px' : `${90 + (orangePos.faceY || 0)}px`,
+            }}
+          >
+            <Pupil
+              size={12}
+              maxDistance={5}
+              pupilColor="#2D2D2D"
+              forceLookX={passwordVisibleMode ? -5 : undefined}
+              forceLookY={passwordVisibleMode ? -4 : undefined}
+            />
+            <Pupil
+              size={12}
+              maxDistance={5}
+              pupilColor="#2D2D2D"
+              forceLookX={passwordVisibleMode ? -5 : undefined}
+              forceLookY={passwordVisibleMode ? -4 : undefined}
+            />
+          </div>
+        </div>
+
+        {/* Yellow tall capsule — front right */}
+        <div
+          ref={yellowRef}
+          className="absolute bottom-0 transition-all duration-700 ease-in-out"
+          style={{
+            left: '310px',
+            width: '140px',
+            height: '230px',
+            backgroundColor: '#E8D754',
+            borderRadius: '70px 70px 0 0',
+            zIndex: 4,
+            transform: passwordVisibleMode
+              ? 'skewX(0deg)'
+              : `skewX(${yellowPos.bodySkew || 0}deg)`,
+            transformOrigin: 'bottom center',
+          }}
+        >
+          <div
+            className="absolute flex gap-6 transition-all duration-200 ease-out"
+            style={{
+              left: passwordVisibleMode ? '20px' : `${52 + (yellowPos.faceX || 0)}px`,
+              top: passwordVisibleMode ? '35px' : `${40 + (yellowPos.faceY || 0)}px`,
+            }}
+          >
+            <Pupil
+              size={12}
+              maxDistance={5}
+              pupilColor="#2D2D2D"
+              forceLookX={passwordVisibleMode ? -5 : undefined}
+              forceLookY={passwordVisibleMode ? -4 : undefined}
+            />
+            <Pupil
+              size={12}
+              maxDistance={5}
+              pupilColor="#2D2D2D"
+              forceLookX={passwordVisibleMode ? -5 : undefined}
+              forceLookY={passwordVisibleMode ? -4 : undefined}
+            />
+          </div>
+          <div
+            className="absolute w-20 h-[4px] bg-[#2D2D2D] rounded-full transition-all duration-200 ease-out"
+            style={{
+              left: passwordVisibleMode ? '10px' : `${40 + (yellowPos.faceX || 0)}px`,
+              top: passwordVisibleMode ? '88px' : `${88 + (yellowPos.faceY || 0)}px`,
+            }}
+          />
+        </div>
+      </div>
     </div>
   );
 }

@@ -15,15 +15,14 @@ import {
 } from 'lucide-react'
 import { createElement, forwardRef } from 'react'
 import CampusBrand from '../components/CampusBrand.jsx'
+import LandingHeader from '../components/LandingHeader.jsx'
 import SpotlightCard from '../components/SpotlightCard.jsx'
 import BorderGlow from '../components/reactbits/BorderGlow.jsx'
 import BlurText from '../components/reactbits/BlurText.jsx'
 import CardSwap, { SwapCard } from '../components/reactbits/CardSwap.jsx'
 import GlassSurface from '../components/reactbits/GlassSurface.jsx'
-import GooeyNav from '../components/reactbits/GooeyNav.jsx'
 import ScrollReveal from '../components/reactbits/ScrollReveal.jsx'
 import ScrollStack, { ScrollStackItem } from '../components/reactbits/ScrollStack.jsx'
-import LanguageSwitcher from '../components/LanguageSwitcher.jsx'
 import { normalizeLang } from '../lib/i18n'
 import '../styles/landing.css'
 
@@ -183,25 +182,17 @@ export default function Landing({ onNavigateLogin, onNavigateRegister, onEnterMa
 
   return (
     <main className="campus-landing" id="landing-top">
-      <header className="landing-header">
-        <GlassSurface className="landing-header__glass" height={66} backgroundOpacity={0.34}>
-          <nav className="landing-header__inner" aria-label="站点导航">
-            <button type="button" className="landing-brand-button" onClick={() => scrollToItem(navItems[0])}>
-              <CampusBrand inverted />
-            </button>
-            <GooeyNav items={navItems} onItemChange={scrollToItem} />
-            <div className="landing-header__actions">
-              <LanguageSwitcher language={language} onChange={onLanguageChange} className="landing-language-switcher" />
-              <button type="button" className="landing-link-button" onClick={isAuthenticated ? onEnterMarket : onNavigateLogin}>
-                {isAuthenticated ? copy.market : copy.login}
-              </button>
-              <button type="button" className="landing-solid-button" onClick={primaryAction}>
-                {isAuthenticated ? copy.continue : copy.join} <ArrowRight />
-              </button>
-            </div>
-          </nav>
-        </GlassSurface>
-      </header>
+      <LandingHeader
+        navItems={navItems}
+        copy={copy}
+        language={language}
+        onLanguageChange={onLanguageChange}
+        isAuthenticated={isAuthenticated}
+        onNavigateLogin={onNavigateLogin}
+        onEnterMarket={onEnterMarket}
+        onPrimaryAction={primaryAction}
+        onScrollToItem={scrollToItem}
+      />
 
       <section className="landing-hero">
         <img className="landing-hero__image" src="/marketplace/campus-sunset.png" alt="傍晚校园操场与教学楼" />
