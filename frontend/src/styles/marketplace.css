@@ -2867,7 +2867,21 @@
 .x-reply-composer { display: grid; grid-template-columns: 40px minmax(0, 1fr) auto; align-items: end; gap: 10px; padding: 14px 18px; border-bottom: 1px solid rgba(148, 163, 184, 0.1); }
 .x-reply-composer textarea { min-height: 44px; border: 0; box-shadow: none; resize: none; }
 .x-reply-composer > button { border-radius: 999px; }
-.x-comment { display: grid; grid-template-columns: 40px minmax(0, 1fr); gap: 11px; margin-left: min(calc(var(--depth, 0) * 42px), 126px); padding: 14px 18px; border-bottom: 1px solid rgba(148, 163, 184, 0.09); }
+/* X-style comments: flat list + one-level thread, expand/collapse replies */
+.x-comment {
+  display: grid;
+  grid-template-columns: 40px minmax(0, 1fr);
+  gap: 11px;
+  margin-left: 0;
+  padding: 14px 18px;
+  border-bottom: 1px solid rgba(148, 163, 184, 0.09);
+}
+.x-comment.is-reply {
+  grid-template-columns: 32px minmax(0, 1fr);
+  gap: 10px;
+  padding: 10px 0 10px 0;
+  border-bottom: 0;
+}
 .x-comment-avatar { align-self: flex-start; border: 0; padding: 0; background: transparent; cursor: pointer; }
 .x-comment-body { min-width: 0; }
 .x-comment-meta { display: flex; min-width: 0; align-items: center; gap: 6px; }
@@ -2876,7 +2890,7 @@
 .x-comment-delete { margin-left: auto; border: 0; color: #777d8c; background: transparent; cursor: pointer; }
 .x-comment-delete svg { width: 14px; height: 14px; }
 .x-comment-body > p { margin: 5px 0 7px; color: #d4d6dd; font-size: 13px; line-height: 1.58; white-space: pre-wrap; }
-.x-comment-actions { display: flex; align-items: center; justify-content: space-between; max-width: 430px; }
+.x-comment-actions { display: flex; align-items: center; gap: 4px; max-width: 360px; }
 .x-comment-actions button { display: inline-flex; align-items: center; gap: 5px; border: 0; border-radius: 999px; padding: 5px 8px; color: #717787; background: transparent; font-size: 10px; cursor: pointer; }
 .x-comment-actions button:hover { color: #ad9cff; background: transparent; }
 .x-comment-actions button.is-like:hover { color: #f87171; }
@@ -2884,8 +2898,49 @@
 .x-comment-actions .is-dislike { color: #ff9e66; }
 .x-comment-reply { display: grid; gap: 8px; margin-top: 8px; }
 .x-comment-reply > div { display: flex; justify-content: flex-end; gap: 6px; }
-.x-comment-children { margin: 10px -18px -14px -51px; }
-.x-comment-children .x-comment { padding-right: 0; }
+.x-comment-thread-toggle {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  margin-top: 6px;
+  border: 0;
+  border-radius: 999px;
+  padding: 4px 2px;
+  color: #7c8cff;
+  background: transparent;
+  font-size: 12px;
+  font-weight: 650;
+  cursor: pointer;
+}
+.x-comment-thread-toggle:hover { color: #a5b4fc; }
+.x-comment-thread-toggle svg { width: 15px; height: 15px; }
+.x-comment-children {
+  position: relative;
+  margin: 8px 0 0;
+  padding: 0 0 0 12px;
+  border-left: 2px solid rgba(148, 163, 184, 0.18);
+}
+.x-comment-children .x-comment {
+  padding-right: 0;
+  padding-left: 10px;
+}
+.campus-shell--daylight .x-comment {
+  border-bottom-color: rgba(24, 57, 54, 0.08);
+}
+.campus-shell--daylight .x-comment-meta > button:first-child,
+.campus-shell--daylight .x-comment-body > p {
+  color: #183936;
+}
+.campus-shell--daylight .x-comment-meta > span,
+.campus-shell--daylight .x-comment-actions button {
+  color: #71847f;
+}
+.campus-shell--daylight .x-comment-thread-toggle {
+  color: #0f8c74;
+}
+.campus-shell--daylight .x-comment-children {
+  border-left-color: rgba(15, 159, 131, 0.22);
+}
 .x-report-dialog { max-width: 440px; background: #151620; }
 .x-report-options { display: grid; gap: 7px; }
 .x-report-options button { display: flex; align-items: center; gap: 8px; border: 1px solid rgba(148, 163, 184, 0.12); border-radius: 8px; padding: 10px 12px; color: #b8bbc6; background: transparent; cursor: pointer; }
@@ -3872,6 +3927,37 @@
   cursor: pointer;
 }
 .amap-task-marker.errand-open-marker small { font-size: 10px; font-weight: 700; opacity: 0.85; }
+/* Compact track panel on right rail stays readable in daylight */
+.campus-shell--daylight .errand-track-panel {
+  border-color: rgba(24, 57, 54, 0.1);
+  background: #fff;
+  color: #183936;
+}
+.campus-shell--daylight .errand-track-header p,
+.campus-shell--daylight .errand-track-meta,
+.campus-shell--daylight .errand-track-points {
+  color: #5f7872;
+}
+.campus-shell--daylight .errand-track-eta,
+.campus-shell--daylight .errand-track-eta strong {
+  color: #0f8c74;
+}
+.campus-shell--daylight .errand-track-steps > div {
+  color: #7a8f8a;
+  background: #eef5f2;
+}
+.campus-shell--daylight .errand-track-steps > div.is-active {
+  color: #9a6b08;
+  background: rgba(251, 191, 36, 0.2);
+}
+.campus-shell--daylight .errand-track-steps > div.is-done {
+  color: #0f8c74;
+  background: rgba(15, 159, 131, 0.12);
+}
+.campus-shell--daylight .errand-track-map {
+  border-color: rgba(24, 57, 54, 0.1);
+}
+
 .errand-track-panel {
   margin-top: 12px;
   padding: 12px;
@@ -4000,13 +4086,13 @@
   background: linear-gradient(145deg, #60a5fa, #2563eb);
 }
 
-/* Full errand navigation page */
+/* Full errand navigation page — light theme */
 .errand-nav-page {
   display: flex;
   flex-direction: column;
   min-height: calc(100vh - 68px);
-  background: #0b0d16;
-  color: #f5f3ff;
+  background: #f4f8f6;
+  color: #183936;
 }
 .errand-nav-top {
   display: grid;
@@ -4014,17 +4100,18 @@
   gap: 8px;
   align-items: center;
   padding: 10px 12px;
-  border-bottom: 1px solid rgba(167, 139, 250, 0.2);
-  background: rgba(12, 14, 24, 0.96);
+  border-bottom: 1px solid rgba(24, 57, 54, 0.1);
+  background: rgba(255, 255, 255, 0.96);
 }
 .errand-nav-top-main h1 {
   margin: 2px 0;
   font-size: 16px;
+  color: #183936;
 }
 .errand-nav-top-main p {
   margin: 0;
   font-size: 12px;
-  color: rgba(216, 180, 254, 0.78);
+  color: #5f7872;
 }
 .errand-nav-steps {
   display: grid;
@@ -4040,18 +4127,18 @@
   padding: 8px 4px;
   border-radius: 10px;
   font-size: 11px;
-  color: rgba(196, 181, 253, 0.5);
-  background: rgba(255,255,255,0.03);
+  color: #7a8f8a;
+  background: #e8f1ee;
 }
-.errand-nav-steps > div.is-active { color: #fde68a; background: rgba(251, 191, 36, 0.12); }
-.errand-nav-steps > div.is-done { color: #86efac; background: rgba(52, 211, 153, 0.1); }
+.errand-nav-steps > div.is-active { color: #9a6b08; background: rgba(251, 191, 36, 0.22); }
+.errand-nav-steps > div.is-done { color: #0f8c74; background: rgba(15, 159, 131, 0.14); }
 .errand-nav-legend {
   display: flex;
   flex-wrap: wrap;
   gap: 10px;
   padding: 8px 12px;
   font-size: 11px;
-  color: rgba(216, 180, 254, 0.75);
+  color: #5f7872;
 }
 .errand-nav-legend i {
   display: inline-block;
@@ -4070,12 +4157,13 @@
   margin: 0 12px;
   border-radius: 16px;
   overflow: hidden;
-  border: 1px solid rgba(167, 139, 250, 0.25);
+  border: 1px solid rgba(24, 57, 54, 0.12);
+  background: #e8f0ed;
 }
 .errand-nav-sheet {
   padding: 12px;
-  border-top: 1px solid rgba(167, 139, 250, 0.2);
-  background: linear-gradient(180deg, rgba(20, 18, 34, 0.98), #0b0d16);
+  border-top: 1px solid rgba(24, 57, 54, 0.1);
+  background: #fff;
 }
 .errand-nav-points {
   display: grid;
@@ -4086,20 +4174,23 @@
 .errand-nav-points > div {
   padding: 10px;
   border-radius: 12px;
-  background: rgba(167, 139, 250, 0.08);
+  background: #f3f8f6;
+  border: 1px solid rgba(24, 57, 54, 0.08);
 }
 .errand-nav-points strong {
   display: flex;
   align-items: center;
   gap: 4px;
   font-size: 12px;
+  color: #183936;
 }
 .errand-nav-points p {
   margin: 4px 0 0;
   font-size: 13px;
+  color: #31534d;
 }
 .errand-nav-points small {
-  color: rgba(253, 230, 138, 0.9);
+  color: #b45309;
   font-size: 11px;
 }
 .errand-nav-eta-card {
@@ -4110,20 +4201,21 @@
   padding: 10px 12px;
   margin-bottom: 10px;
   border-radius: 12px;
-  background: rgba(52, 211, 153, 0.08);
-  border: 1px solid rgba(52, 211, 153, 0.2);
+  background: #edf8f4;
+  border: 1px solid rgba(15, 159, 131, 0.22);
+  color: #183936;
 }
 .errand-nav-eta-card > div {
   display: flex;
   gap: 8px;
   align-items: center;
 }
-.errand-nav-eta-card strong { display: block; font-size: 15px; }
-.errand-nav-eta-card small { color: rgba(216, 180, 254, 0.75); }
+.errand-nav-eta-card strong { display: block; font-size: 15px; color: #0f8c74; }
+.errand-nav-eta-card small { color: #5f7872; }
 .errand-nav-eta-card em {
   font-style: normal;
   font-size: 11px;
-  color: rgba(253, 230, 138, 0.9);
+  color: #9a6b08;
 }
 .errand-mode-row {
   display: grid;
@@ -4138,17 +4230,17 @@
   gap: 6px;
   height: 40px;
   border-radius: 999px;
-  border: 1px solid rgba(167, 139, 250, 0.28);
-  background: rgba(255,255,255,0.03);
-  color: inherit;
+  border: 1px solid rgba(24, 57, 54, 0.14);
+  background: #f7fbf9;
+  color: #31534d;
   cursor: pointer;
   font-size: 13px;
   font-weight: 600;
 }
 .errand-mode-row button.is-active {
-  background: rgba(167, 139, 250, 0.24);
-  border-color: rgba(196, 181, 253, 0.6);
-  color: #f5f3ff;
+  background: #0f9f83;
+  border-color: #0f9f83;
+  color: #fff;
 }
 .errand-nav-peer {
   display: flex;
@@ -4157,10 +4249,11 @@
   margin-bottom: 10px;
   padding: 8px 10px;
   border-radius: 12px;
-  background: rgba(255,255,255,0.03);
+  background: #f3f8f6;
+  border: 1px solid rgba(24, 57, 54, 0.08);
 }
-.errand-nav-peer strong { display: block; font-size: 13px; }
-.errand-nav-peer small { color: rgba(196, 181, 253, 0.7); }
+.errand-nav-peer strong { display: block; font-size: 13px; color: #183936; }
+.errand-nav-peer small { color: #5f7872; }
 .errand-nav-peer > div { flex: 1; }
 .errand-nav-actions {
   display: flex;
@@ -4171,7 +4264,7 @@
   margin: 10px 0 0;
   font-size: 12px;
   line-height: 1.45;
-  color: rgba(196, 181, 253, 0.72);
+  color: #5f7872;
 }
 .errand-desired-box { margin-top: 10px; }
 .x-service-accept-box { margin: 10px 0; }

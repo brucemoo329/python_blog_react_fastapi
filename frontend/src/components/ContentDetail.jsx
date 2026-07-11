@@ -81,25 +81,104 @@ function removeComments(comments, removedIds) {
 function CommentNode({ comment, onReply, onReact, onDelete, onOpenUser, depth = 0, t }) {
   const [replying, setReplying] = useState(false)
   const [text, setText] = useState('')
-  const [expanded, setExpanded] = useState(true)
+  // X/TikTok style: nest collapsed by default, expand on demand
+  const [expanded, setExpanded] = useState(false)
   const author = comment.author || {}
+  const replyCount = comment.replies?.length || 0
 
   return (
-    <article className="x-comment" style={{ '--depth': depth }}>
+    <article className={cn('x-comment', depth > 0 && 'is-reply')}>
       <button type="button" className="x-comment-avatar" onClick={() => onOpenUser?.(author.id)}>
-        <Avatar className="size-10"><AvatarImage src={author.avatar_url || undefined} alt={author.nickname || author.username} /><AvatarFallback>{(author.nickname || author.username || '同').slice(0, 1)}</AvatarFallback></Avatar>
+        <Avatar className={depth > 0 ? 'size-8' : 'size-10'}>
+          <AvatarImage src={author.avatar_url || undefined} alt={author.nickname || author.username} />
+          <AvatarFallback>{(author.nickname || author.username || '同').slice(0, 1)}</AvatarFallback>
+        </Avatar>
       </button>
       <div className="x-comment-body">
-        <div className="x-comment-meta"><button type="button" onClick={() => onOpenUser?.(author.id)}>{author.nickname || author.username || t('ui.profile')}</button><span>@{author.username || 'campus'} · {timeLabel(comment.created_at)}</span>{comment.can_delete ? <button type="button" className="x-comment-delete" onClick={() => onDelete(comment)} aria-label={t('msg.delete')}><Trash2 /></button> : null}</div>
+        <div className="x-comment-meta">
+          <button type="button" onClick={() => onOpenUser?.(author.id)}>
+            {author.nickname || author.username || t('ui.profile')}
+          </button>
+          <span>@{author.username || 'campus'} · {timeLabel(comment.created_at)}</span>
+          {comment.can_delete ? (
+            <button type="button" className="x-comment-delete" onClick={() => onDelete(comment)} aria-label={t('msg.delete')}>
+              <Trash2 />
+            </button>
+          ) : null}
+        </div>
         <p>{comment.content}</p>
         <div className="x-comment-actions">
-          <button type="button" onClick={() => setReplying((value) => !value)}><MessageCircle /> {comment.replies?.length || 0}</button>
-          <button type="button" className={cn(comment.reaction === 'like' && 'is-like')} onClick={() => onReact('comment', comment.id, 'like')} aria-pressed={comment.reaction === 'like'}><Heart className={cn(comment.reaction === 'like' && 'fill-current')} /> {comment.likes || 0}</button>
-          <button type="button" className={cn(comment.reaction === 'dislike' && 'is-dislike')} onClick={() => onReact('comment', comment.id, 'dislike')}><ThumbsDown /> {comment.dislikes || 0}</button>
-          {comment.replies?.length ? <button type="button" onClick={() => setExpanded((value) => !value)}>{expanded ? <ChevronUp /> : <ChevronDown />}{expanded ? t('detail.collapse', '收起') : t('detail.expand', '展开')}</button> : null}
+          <button type="button" onClick={() => setReplying((value) => !value)}>
+            <MessageCircle /> {t('detail.reply')}
+          </button>
+          <button
+            type="button"
+            className={cn(comment.reaction === 'like' && 'is-like')}
+            onClick={() => onReact('comment', comment.id, 'like')}
+            aria-pressed={comment.reaction === 'like'}
+          >
+            <Heart className={cn(comment.reaction === 'like' && 'fill-current')} /> {comment.likes || 0}
+          </button>
+          <button
+            type="button"
+            className={cn(comment.reaction === 'dislike' && 'is-dislike')}
+            onClick={() => onReact('comment', comment.id, 'dislike')}
+          >
+            <ThumbsDown /> {comment.dislikes || 0}
+          </button>
         </div>
-        {replying ? <div className="x-comment-reply"><Textarea value={text} onChange={(event) => setText(event.target.value)} placeholder={`${t('detail.reply')} ${author.nickname || author.username || ''}...`} /><div><Button size="sm" onClick={async () => { if (!text.trim()) return; await onReply(text, comment.id); setText(''); setReplying(false) }}><Send /> {t('detail.reply')}</Button><Button size="sm" variant="ghost" onClick={() => setReplying(false)}>{t('publish.cancel')}</Button></div></div> : null}
-        {expanded && comment.replies?.length ? <div className="x-comment-children">{comment.replies.map((reply) => <CommentNode key={reply.id} comment={reply} onReply={onReply} onReact={onReact} onDelete={onDelete} onOpenUser={onOpenUser} depth={depth + 1} t={t} />)}</div> : null}
+        {replying ? (
+          <div className="x-comment-reply">
+            <Textarea
+              value={text}
+              onChange={(event) => setText(event.target.value)}
+              placeholder={`${t('detail.reply')} ${author.nickname || author.username || ''}...`}
+            />
+            <div>
+              <Button
+                size="sm"
+                onClick={async () => {
+                  if (!text.trim()) return
+                  await onReply(text, comment.id)
+                  setText('')
+                  setReplying(false)
+                  setExpanded(true)
+                }}
+              >
+                <Send /> {t('detail.reply')}
+              </Button>
+              <Button size="sm" variant="ghost" onClick={() => setReplying(false)}>{t('publish.cancel')}</Button>
+            </div>
+          </div>
+        ) : null}
+        {replyCount > 0 ? (
+          <button
+            type="button"
+            className="x-comment-thread-toggle"
+            onClick={() => setExpanded((value) => !value)}
+          >
+            {expanded ? <ChevronUp /> : <ChevronDown />}
+            {expanded
+              ? t('detail.collapse', '收起回复')
+              : t('detail.expandReplies', `查看 ${replyCount} 条回复`)}
+          </button>
+        ) : null}
+        {expanded && replyCount > 0 ? (
+          <div className="x-comment-children">
+            {comment.replies.map((reply) => (
+              <CommentNode
+                key={reply.id}
+                comment={reply}
+                onReply={onReply}
+                onReact={onReact}
+                onDelete={onDelete}
+                onOpenUser={onOpenUser}
+                depth={Math.min(depth + 1, 1)}
+                t={t}
+              />
+            ))}
+          </div>
+        ) : null}
       </div>
     </article>
   )

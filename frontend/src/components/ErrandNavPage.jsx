@@ -211,9 +211,9 @@ export default function ErrandNavPage({
         if (route.path?.length >= 2) {
           polyRef.current = new AMap.Polyline({
             path: route.path,
-            strokeColor: currentPhase === 'to_pickup' ? '#c084fc' : '#34d399',
-            strokeWeight: 8,
-            strokeOpacity: 0.95,
+            strokeColor: currentPhase === 'to_pickup' ? '#7c3aed' : '#0f9f83',
+            strokeWeight: 7,
+            strokeOpacity: 0.92,
             lineJoin: 'round',
             lineCap: 'round',
             showDir: true,
@@ -239,7 +239,11 @@ export default function ErrandNavPage({
     } else if (currentPhase === 'delivered') {
       setStatusText('订单已完成')
       try { map.setFitView(null, false, [70, 70, 70, 70]) } catch { /* ignore */ }
+    } else if (currentPhase === 'pending') {
+      setStatusText('等待跑手接单…')
+      try { map.setFitView(null, false, [70, 70, 70, 70]) } catch { /* ignore */ }
     } else {
+      setStatusText(isRunner ? '正在获取你的位置…' : '等待跑手位置，已显示取货/送达点')
       try { map.setFitView(null, false, [70, 70, 70, 70]) } catch { /* ignore */ }
     }
   }, [isRunner, isRequester, phase])
@@ -253,7 +257,7 @@ export default function ErrandNavPage({
       mapRef.current = new AMap.Map(mapBoxRef.current, {
         zoom: 16,
         viewMode: '2D',
-        mapStyle: 'amap://styles/darkblue',
+        mapStyle: 'amap://styles/whitesmoke',
         resizeEnable: true,
       })
       mapRef.current.addControl(new AMap.Scale())

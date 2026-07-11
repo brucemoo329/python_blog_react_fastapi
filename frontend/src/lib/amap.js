@@ -335,70 +335,7 @@ export function planRoute(origin, destination, preferredMode = 'auto', options =
       return new AMap.Riding({ map, hideMarkers: true, autoFitView: false })
     }
 
-    const searchOnce = (kind) => new Promise((resolve) => {
-      let planner
-      try {
-        planner = createPlanner(kind)
-      } catch {
-        resolve(null)
-        return
-      }
-      const done = (payload) => resolve(payload)
-      try {
-        planner.search(start, end, (status, result) => {
-          if (status !== 'complete' || !result) {
-            done(null)
-            return
-          }
-          const route = result.routes?.[0] || result.route
-          if (!route) {
-            done(null)
-            return
-          }
-          const path = extractRoutePath(route)
-          const distance = Number(route.distance) || meters || 0
-          const duration = Number(route.time) || Number(route.duration) || Math.max(60, Math.round(distance / 4))
-          done({
-            mode: kind,
-            distance,
-            duration,
-            path: path.length >= 2 ? path : null,
-            approximate: path.length < 2,
-            planner,
-            raw: result,
-          })
-        })
-      } catch {
-        done(null)
-      }
-    })
-
-    return (async () => {
-      // Prefer requested mode; if geometry fails, try other modes for path only
-      let best = await searchOnce(mode)
-      if (!best?.path || best.path.length < 2) {
-        for (const alt of ['drive', 'ride', 'walk']) {
-          if (alt === mode) continue
-          const tryAlt = await searchOnce(alt)
-          if (tryAlt?.path && tryAlt.path.length >= 2) {
-            // Keep user-selected mode label/ETA preference, but use real geometry
-            best = {
-              ...tryAlt,
-              mode, // report selected mode
-              // re-estimate duration for selected mode from distance
-              duration: Math.max(
-                60,
-                Math.round((tryAlt.distance || meters || 800) / (mode === 'walk' ? 1.3 : mode === 'drive' ? 8 : 4)),
-              ),
-              approximate: false,
-              geometryMode: alt,
-            }
-            break
-          }
-        }
-      }
-      if (best?.path && best.path.length >= 2) return best
-
+    const straightFallback = () => {
       const dist = meters || 800
       const speed = mode === 'walk' ? 1.3 : mode === 'drive' ? 8 : 4
       return {
@@ -409,6 +346,69 @@ export function planRoute(origin, destination, preferredMode = 'auto', options =
         approximate: true,
         planner: null,
       }
+    }
+
+    const searchOnce = (kind, timeoutMs = 3500) => {
+      const work = new Promise((resolve) => {
+        let planner
+        try {
+          planner = createPlanner(kind)
+        } catch {
+          resolve(null)
+          return
+        }
+        try {
+          planner.search(start, end, (status, result) => {
+            if (status !== 'complete' || !result) {
+              resolve(null)
+              return
+            }
+            const route = result.routes?.[0] || result.route
+            if (!route) {
+              resolve(null)
+              return
+            }
+            const path = extractRoutePath(route)
+            const distance = Number(route.distance) || meters || 0
+            const duration = Number(route.time) || Number(route.duration) || Math.max(60, Math.round(distance / 4))
+            resolve({
+              mode: kind,
+              distance,
+              duration,
+              path: path.length >= 2 ? path : null,
+              approximate: path.length < 2,
+              planner,
+              raw: result,
+            })
+          })
+        } catch {
+          resolve(null)
+        }
+      })
+      return withTimeout(work, timeoutMs, '路线规划').catch(() => null)
+    }
+
+    return (async () => {
+      // Prefer requested mode with short timeout; one fast fallback mode max
+      let best = await searchOnce(mode, 3500)
+      if (!best?.path || best.path.length < 2) {
+        // Campus distances: drive is usually the most reliable path API
+        const alt = mode === 'drive' ? 'ride' : 'drive'
+        const tryAlt = await searchOnce(alt, 2500)
+        if (tryAlt?.path && tryAlt.path.length >= 2) {
+          const speed = mode === 'walk' ? 1.3 : mode === 'drive' ? 8 : 4
+          best = {
+            ...tryAlt,
+            mode,
+            duration: Math.max(60, Math.round((tryAlt.distance || meters || 800) / speed)),
+            approximate: false,
+            geometryMode: alt,
+          }
+        }
+      }
+      if (best?.path && best.path.length >= 2) return best
+      // Instant approximate path so UI never sticks on "规划中"
+      return straightFallback()
     })()
   })
 }
