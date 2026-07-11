@@ -1129,17 +1129,19 @@ def full_order_payload(db: Session, order: models.Order, user_id: int):
 
 
 def order_actions_for_role(status: str, role: str, is_service: bool = False):
-    if status in {"completed", "cancelled", "refunded"}:
+    st = (status or "").strip().lower()
+    if st in {"completed", "cancelled", "refunded", "success", "delivered"}:
         return ["review"]
     if is_service:
         # 跑腿：进度走导航/取货送达，禁止「我已发货」；进行中双方可取消
         return ["cancel", "navigate"]
-    if status == "pending_payment":
+    if st == "pending_payment":
         return ["pay", "cancel"] if role == "buyer" else ["cancel"]
-    if status == "pending_ship":
-        return ["remind"] if role == "buyer" else ["ship", "cancel"]
-    if status == "shipped":
-        return ["receive"] if role == "buyer" else ["track"]
+    if st == "pending_ship":
+        return ["remind", "cancel"] if role == "buyer" else ["ship", "cancel"]
+    if st == "shipped":
+        # 校内当面：发货后仍允许双方协商取消，避免卡死
+        return ["receive", "cancel"] if role == "buyer" else ["track", "cancel"]
     return ["cancel"]
 
 
@@ -3813,32 +3815,60 @@ def cancel_order(
     ).filter_by(id=order_id).first()
     if not order or user.id not in {order.buyer_id, order.seller_id}:
         raise HTTPException(status_code=404, detail="订单不存在")
-    is_service = bool(order.service_task_id)
-    # 跑腿单进行中也可双方取消；普通商品 shipped 后不可取消
-    if order.status in {"completed", "cancelled"}:
-        raise HTTPException(status_code=409, detail="当前订单状态不可取消")
-    if not is_service and order.status == "shipped":
-        raise HTTPException(status_code=409, detail="当前订单状态不可取消")
-    cancel_text = (data.reason if data and data.reason else reason)[:240]
+
+    # Heal first: deleted task/listing should already be cancelled
+    heal_order_if_content_gone(db, order)
+
+    status = (order.status or "").strip().lower()
+    is_service = bool(order.service_task_id or order.delivery_method == "errand")
+
+    # Already cancelled → idempotent success (avoids "无法取消" after admin/heal cancel)
+    if status == "cancelled":
+        try:
+            db.commit()
+        except Exception:
+            db.rollback()
+        order = db.query(models.Order).options(
+            joinedload(models.Order.listing).joinedload(models.Listing.images),
+            joinedload(models.Order.service_task),
+            joinedload(models.Order.buyer).joinedload(models.User.profile),
+            joinedload(models.Order.seller).joinedload(models.User.profile),
+        ).filter_by(id=order_id).first()
+        return {
+            "message": "订单已是取消状态，可删除记录",
+            "item": full_order_payload(db, order, user.id),
+        }
+
+    # Only true terminal states block cancel
+    if status in {"completed", "refunded", "success", "delivered"}:
+        raise HTTPException(
+            status_code=409,
+            detail=f"当前订单状态不可取消（{order.status}）",
+        )
+
+    # Campus marketplace: allow cancel for pending / in-progress / shipped (service or goods)
+    # until completed/refunded — both parties can exit stuck trades.
+    cancel_text = (data.reason if data and data.reason else reason or "双方协商取消")[:240]
     order.status = "cancelled"
     order.cancel_reason = cancel_text
     order.cancelled_by_id = user.id
     if order.listing and order.listing.status in {"reserved", "pending", "sold_pending"}:
         order.listing.status = "available"
-    if order.service_task:
+    if order.service_task and getattr(order.service_task, "status", None) != "deleted":
         order.service_task.status = "cancelled"
         order.service_task.delivery_phase = "pending"
     peer_id = order.seller_id if user.id == order.buyer_id else order.buyer_id
-    create_notification(
-        db,
-        recipient_id=peer_id,
-        actor_id=user.id,
-        notification_type="order",
-        title="订单已取消",
-        content=f"{cancel_text}。可在「我的订单」中选择投诉或不投诉。",
-        target_type="order",
-        target_id=order.id,
-    )
+    if peer_id:
+        create_notification(
+            db,
+            recipient_id=peer_id,
+            actor_id=user.id,
+            notification_type="order",
+            title="订单已取消",
+            content=f"{cancel_text}。可在「我的订单」中选择投诉或不投诉。",
+            target_type="order",
+            target_id=order.id,
+        )
     db.commit()
     order = db.query(models.Order).options(
         joinedload(models.Order.listing).joinedload(models.Listing.images),

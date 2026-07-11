@@ -120,9 +120,20 @@ export default function OrdersCenter({
       const response = await cancelOrder(cancelFor.id, cancelReason)
       onNotice?.(response?.message || '订单已取消')
       setCancelFor(null)
+      // Prefer server item so UI flips to cancelled + 删除记录
+      if (response?.item) {
+        setOrders((current) => current.map((row) => (row.id === response.item.id ? { ...row, ...response.item } : row)))
+      }
       await load()
     } catch (error) {
-      onNotice?.(error.response?.data?.detail || '取消失败')
+      const detail = error.response?.data?.detail || '取消失败'
+      // If already cancelled, refresh list so user can 删除记录
+      if (String(detail).includes('不可取消') || String(detail).includes('已取消')) {
+        onNotice?.(detail)
+        await load()
+      } else {
+        onNotice?.(detail)
+      }
     } finally {
       setBusyId(null)
     }
@@ -282,14 +293,15 @@ export default function OrdersCenter({
         ) : null}
         {orders.map((order) => {
           const isService = order.kind === 'service' || Boolean(order.service_task_id) || order.delivery_method === 'errand'
-          const terminal = ['completed', 'cancelled', 'refunded'].includes(order.status)
-          // 跑腿禁止「我已发货」；进行中始终可取消；终态可删记录
+          const statusKey = String(order.status || '').toLowerCase()
+          const terminal = ['completed', 'cancelled', 'refunded', 'success', 'delivered'].includes(statusKey)
+          // 跑腿禁止「我已发货」；未完成始终可取消；终态可删记录
           const rawActions = order.actions || []
           const actions = isService
-            ? rawActions.filter((a) => a !== 'ship').concat(terminal ? [] : (rawActions.includes('cancel') ? [] : ['cancel']))
-            : rawActions
-          const canCancel = !terminal && (actions.includes('cancel') || isService)
-          const canDeleteRecord = order.can_delete_record || terminal
+            ? [...new Set(rawActions.filter((a) => a !== 'ship').concat(terminal ? [] : ['cancel']))]
+            : [...new Set(rawActions.concat(terminal ? [] : (rawActions.includes('cancel') ? [] : ['cancel'])))]
+          const canCancel = !terminal && (actions.includes('cancel') || isService || !['completed', 'refunded'].includes(statusKey))
+          const canDeleteRecord = Boolean(order.can_delete_record) || terminal
           const peerName = order.review_target?.user?.nickname || order.review_target?.user?.username
           const peerRole = order.review_target?.role_label
           return (
