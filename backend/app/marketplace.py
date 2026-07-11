@@ -1002,8 +1002,10 @@ def peer_role_label(is_service: bool, peer_is_buyer: bool) -> str:
 
 
 def full_order_payload(db: Session, order: models.Order, user_id: int):
+    # Auto-heal: admin/user deleted task/listing but order still open
+    heal_order_if_content_gone(db, order)
     role = "buyer" if order.buyer_id == user_id else "seller"
-    is_service = bool(order.service_task_id)
+    is_service = bool(order.service_task_id or (order.delivery_method == "errand"))
     payload = compact_order_payload(order, role)
     my_review = db.query(models.Review).filter_by(order_id=order.id, reviewer_id=user_id).first()
     can_review = order.status in {"completed", "cancelled"} and my_review is None
@@ -1117,25 +1119,99 @@ def full_order_payload(db: Session, order: models.Order, user_id: int):
             "responded_at": _dt(after_sale.responded_at),
             "handled_at": _dt(after_sale.handled_at),
         } if after_sale else None,
-        "service_task": service_task_tracking_payload(order.service_task, user_id, db=db, order_id=order.id) if order.service_task else None,
+        "service_task": (
+            service_task_tracking_payload(order.service_task, user_id, db=db, order_id=order.id)
+            if order.service_task and getattr(order.service_task, "status", None) not in {"deleted"}
+            else None
+        ),
     })
     return payload
 
 
 def order_actions_for_role(status: str, role: str, is_service: bool = False):
-    if status in {"completed", "cancelled"}:
-        return ["review"] if True else []
+    if status in {"completed", "cancelled", "refunded"}:
+        return ["review"]
     if is_service:
-        # 跑腿订单：双方均可取消；进行中可打开导航
-        actions = ["cancel", "navigate"]
-        return actions
+        # 跑腿：进度走导航/取货送达，禁止「我已发货」；进行中双方可取消
+        return ["cancel", "navigate"]
     if status == "pending_payment":
         return ["pay", "cancel"] if role == "buyer" else ["cancel"]
     if status == "pending_ship":
         return ["remind"] if role == "buyer" else ["ship", "cancel"]
     if status == "shipped":
         return ["receive"] if role == "buyer" else ["track"]
-    return []
+    return ["cancel"]
+
+
+def cancel_open_orders_for_content(
+    db: Session,
+    *,
+    listing_id: Optional[int] = None,
+    service_task_id: Optional[int] = None,
+    reason: str = "关联内容已删除",
+    actor_id: Optional[int] = None,
+):
+    """Cancel non-terminal orders when listing/service content is deleted by user or admin."""
+    if not listing_id and not service_task_id:
+        return 0
+    query = db.query(models.Order).filter(
+        models.Order.status.notin_(["completed", "cancelled", "refunded"]),
+    )
+    if listing_id:
+        query = query.filter(models.Order.listing_id == listing_id)
+    if service_task_id:
+        query = query.filter(models.Order.service_task_id == service_task_id)
+    count = 0
+    note = (reason or "关联内容已删除")[:240]
+    for order in query.all():
+        order.status = "cancelled"
+        order.cancel_reason = note
+        if actor_id:
+            order.cancelled_by_id = actor_id
+        if order.service_task_id and order.service_task and order.service_task.status not in {"deleted", "cancelled"}:
+            order.service_task.status = "cancelled"
+            order.service_task.delivery_phase = "pending"
+        for recipient_id in {order.buyer_id, order.seller_id}:
+            if not recipient_id:
+                continue
+            create_notification(
+                db,
+                recipient_id=recipient_id,
+                actor_id=actor_id,
+                notification_type="order",
+                title="订单已取消",
+                content=f"{note}。可在「我的订单」中查看并删除记录。",
+                target_type="order",
+                target_id=order.id,
+            )
+        count += 1
+    return count
+
+
+def heal_order_if_content_gone(db: Session, order: models.Order) -> bool:
+    """If listing/task was deleted but order still open, cancel it. Returns True when changed."""
+    if not order or order.status in {"completed", "cancelled", "refunded"}:
+        return False
+    changed = False
+    if order.service_task_id:
+        task = order.service_task
+        if task is None:
+            task = db.get(models.ServiceTask, order.service_task_id)
+        if task is None or getattr(task, "status", None) in {"deleted", "cancelled"}:
+            order.status = "cancelled"
+            if not order.cancel_reason:
+                order.cancel_reason = "关联跑腿任务已取消或删除"
+            changed = True
+    if order.listing_id and order.status not in {"completed", "cancelled", "refunded"}:
+        listing = order.listing
+        if listing is None:
+            listing = db.get(models.Listing, order.listing_id)
+        if listing is None or getattr(listing, "status", None) == "deleted":
+            order.status = "cancelled"
+            if not order.cancel_reason:
+                order.cancel_reason = "关联商品已删除"
+            changed = True
+    return changed
 
 
 def make_order_no(prefix: str = "CP") -> str:
@@ -2220,8 +2296,22 @@ def delete_content(
     # Community posts have no status field — hard delete.
     if hasattr(item, "status"):
         item.status = "deleted"
+        if normalized == "service":
+            cancel_open_orders_for_content(
+                db,
+                service_task_id=item_id,
+                reason="发布者已删除跑腿任务",
+                actor_id=user.id,
+            )
+        elif normalized == "listing":
+            cancel_open_orders_for_content(
+                db,
+                listing_id=item_id,
+                reason="卖家已删除商品",
+                actor_id=user.id,
+            )
         db.commit()
-        return {"message": "已删除发布内容"}
+        return {"message": "已删除发布内容，相关进行中订单已取消"}
 
     try:
         db.delete(item)
@@ -3324,6 +3414,15 @@ def list_my_orders(
     if status != "all":
         query = query.filter(models.Order.status == status)
     rows = query.order_by(models.Order.created_at.desc()).limit(100).all()
+    healed = False
+    for row in rows:
+        if heal_order_if_content_gone(db, row):
+            healed = True
+    if healed:
+        try:
+            db.commit()
+        except Exception:
+            db.rollback()
     items = []
     for row in rows:
         try:
@@ -3334,7 +3433,14 @@ def list_my_orders(
                 db.rollback()
             except Exception:
                 pass
-            items.append(compact_order_payload(row, "buyer" if row.buyer_id == user.id else "seller"))
+            role = "buyer" if row.buyer_id == user.id else "seller"
+            fallback = compact_order_payload(row, role)
+            # Ensure cancel/delete still usable on fallback payload
+            is_service = bool(row.service_task_id or row.delivery_method == "errand")
+            fallback["actions"] = order_actions_for_role(row.status, role, is_service=is_service)
+            fallback["can_delete_record"] = row.status in {"completed", "cancelled", "refunded"}
+            fallback["can_review"] = row.status in {"completed", "cancelled"}
+            items.append(fallback)
     return {"items": items}
 
 
@@ -3352,6 +3458,11 @@ def get_order_detail(
     ).filter_by(id=order_id).first()
     if not order or user.id not in {order.buyer_id, order.seller_id}:
         raise HTTPException(status_code=404, detail="订单不存在")
+    if heal_order_if_content_gone(db, order):
+        try:
+            db.commit()
+        except Exception:
+            db.rollback()
     return {"item": full_order_payload(db, order, user.id)}
 
 
@@ -3439,6 +3550,8 @@ def ship_order(
     ).filter_by(id=order_id).first()
     if not order or order.seller_id != user.id:
         raise HTTPException(status_code=404, detail="订单不存在")
+    if order.service_task_id or order.delivery_method == "errand":
+        raise HTTPException(status_code=409, detail="跑腿订单请在配送导航中确认取货/送达，无需「我已发货」")
     if order.status != "pending_ship":
         raise HTTPException(status_code=409, detail="当前订单状态不可发货")
     body = data or OrderShipBody()

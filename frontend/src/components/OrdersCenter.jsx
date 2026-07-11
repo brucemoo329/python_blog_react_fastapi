@@ -281,8 +281,15 @@ export default function OrdersCenter({
           </div>
         ) : null}
         {orders.map((order) => {
-          const isService = order.kind === 'service' || order.service_task_id
-          const actions = order.actions || []
+          const isService = order.kind === 'service' || Boolean(order.service_task_id) || order.delivery_method === 'errand'
+          const terminal = ['completed', 'cancelled', 'refunded'].includes(order.status)
+          // 跑腿禁止「我已发货」；进行中始终可取消；终态可删记录
+          const rawActions = order.actions || []
+          const actions = isService
+            ? rawActions.filter((a) => a !== 'ship').concat(terminal ? [] : (rawActions.includes('cancel') ? [] : ['cancel']))
+            : rawActions
+          const canCancel = !terminal && (actions.includes('cancel') || isService)
+          const canDeleteRecord = order.can_delete_record || terminal
           const peerName = order.review_target?.user?.nickname || order.review_target?.user?.username
           const peerRole = order.review_target?.role_label
           return (
@@ -348,7 +355,7 @@ export default function OrdersCenter({
                 {actions.includes('pay') ? (
                   <Button size="sm" disabled={busyId === order.id} onClick={() => runAction(order, 'pay')}><Wallet /> {t('orders.pay')}</Button>
                 ) : null}
-                {actions.includes('ship') ? (
+                {!isService && actions.includes('ship') ? (
                   <Button size="sm" disabled={busyId === order.id} onClick={() => runAction(order, 'ship')}><Truck /> {t('orders.ship')}</Button>
                 ) : null}
                 {actions.includes('receive') ? (
@@ -365,7 +372,7 @@ export default function OrdersCenter({
                     <Button size="sm" onClick={() => { setAfterSaleFor({ order, mode: 'respond', agree: true }); setAfterSaleResponse('') }}>同意退款</Button>
                   </>
                 ) : null}
-                {actions.includes('cancel') ? (
+                {canCancel ? (
                   <Button size="sm" variant="ghost" disabled={busyId === order.id} onClick={() => { setCancelFor(order); setCancelReason(CANCEL_REASONS[2]) }}>
                     <XCircle /> {t('orders.cancel')}
                   </Button>
@@ -386,7 +393,7 @@ export default function OrdersCenter({
                     <Scale /> 申诉客服
                   </Button>
                 ) : null}
-                {order.can_delete_record ? (
+                {canDeleteRecord ? (
                   <Button size="sm" variant="ghost" disabled={busyId === order.id} onClick={() => removeRecord(order)}>
                     <Trash2 /> 删除记录
                   </Button>

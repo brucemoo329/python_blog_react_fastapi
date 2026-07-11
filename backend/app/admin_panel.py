@@ -10,6 +10,7 @@ from sqlalchemy.orm import Session, joinedload
 
 from app import models
 from app.marketplace import (
+    cancel_open_orders_for_content,
     create_notification,
     get_current_user,
     get_db,
@@ -137,6 +138,12 @@ def delete_content_row(db: Session, item_type: str, item_id: int):
         if not item:
             raise HTTPException(status_code=404, detail="内容不存在")
         item.status = "deleted"
+        # Cancel open orders so runners/buyers cannot keep shipping/paying
+        cancel_open_orders_for_content(
+            db,
+            listing_id=item_id,
+            reason="管理员已删除该商品，相关订单已取消",
+        )
         return
     if item_type == "service":
         item = db.get(models.ServiceTask, item_id)
@@ -150,6 +157,12 @@ def delete_content_row(db: Session, item_type: str, item_id: int):
         raise HTTPException(status_code=404, detail="内容不存在")
     if hasattr(item, "status"):
         item.status = "deleted"
+        if item_type == "service":
+            cancel_open_orders_for_content(
+                db,
+                service_task_id=item_id,
+                reason="管理员已删除该跑腿任务，相关订单已取消",
+            )
     else:
         db.delete(item)
 
