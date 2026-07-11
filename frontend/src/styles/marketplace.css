@@ -3092,9 +3092,19 @@
 .messages-center { display: grid; height: calc(100vh - 68px); grid-template-columns: 300px minmax(0, 1fr); overflow: hidden; background: #0e0f16; }
 .messages-list-panel { display: flex; min-width: 0; flex-direction: column; border-right: 1px solid rgba(148, 163, 184, 0.1); background: #11121a; }
 .messages-list-panel > header { display: flex; align-items: center; gap: 7px; padding: 10px; }
-.messages-list-panel > header > div { display: flex; flex-direction: column; }
+.messages-list-panel > header > div { display: flex; flex: 1; min-width: 0; flex-direction: column; }
 .messages-list-panel h1 { margin: 0; color: #f4f4f8; font-size: 18px; }
 .messages-list-panel header span { color: #717787; font-size: 9px; }
+.messages-alert-btn {
+  flex: 0 0 auto;
+  gap: 6px;
+  border-radius: 999px;
+  font-size: 12px;
+}
+.messages-alert-btn svg { width: 14px; height: 14px; }
+.campus-top-actions .is-alert-on {
+  color: #0f9f83;
+}
 .messages-search { position: relative; padding: 0 10px 10px; }
 .messages-search > svg { position: absolute; top: 9px; left: 21px; z-index: 1; width: 14px; height: 14px; color: #717787; }
 .messages-search input { padding-left: 32px; border-color: transparent; border-radius: 999px; background: #20212a; }

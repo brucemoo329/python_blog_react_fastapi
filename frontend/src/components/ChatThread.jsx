@@ -29,6 +29,7 @@ import {
   geolocationErrorMessage,
   getGeolocationBlockReason,
 } from '@/lib/geolocation'
+import { alertIncoming } from '@/lib/messageAlerts'
 
 const EMOJIS = ['👍', '❤️', '😂', '😮', '😢', '👏']
 
@@ -85,11 +86,14 @@ export default function ChatThread({
   const cameraRef = useRef(null)
   const scrollerRef = useRef(null)
   const previousCountRef = useRef(0)
+  const lastMessageIdRef = useRef(null)
   const noticeRef = useRef(onNotice)
   const conversationUpdateRef = useRef(onConversationUpdate)
+  const currentUserIdRef = useRef(currentUser?.id)
 
   useEffect(() => { noticeRef.current = onNotice }, [onNotice])
   useEffect(() => { conversationUpdateRef.current = onConversationUpdate }, [onConversationUpdate])
+  useEffect(() => { currentUserIdRef.current = currentUser?.id }, [currentUser?.id])
 
   const refresh = useCallback(async (silent = false) => {
     if (!conversation?.id) return
@@ -98,11 +102,34 @@ export default function ChatThread({
       const response = await getConversationMessages(conversation.id)
       const items = response.items || []
       setMessages((previous) => {
+        const last = items[items.length - 1]
         const changed = previous.length !== items.length
-          || previous[previous.length - 1]?.id !== items[items.length - 1]?.id
+          || previous[previous.length - 1]?.id !== last?.id
         if (!silent || changed) {
           queueMicrotask(() => conversationUpdateRef.current?.())
         }
+        // Incoming from peer while this thread is open (and not first load)
+        if (silent && changed && last && lastMessageIdRef.current != null && last.id !== lastMessageIdRef.current) {
+          const fromOther = last.is_mine === false
+            || (last.is_mine == null && (
+              last.sender_id != null
+                ? last.sender_id !== currentUserIdRef.current
+                : last.sender?.id !== currentUserIdRef.current
+            ))
+          if (fromOther) {
+            const peer = conversation.user || {}
+            alertIncoming({
+              title: peer.nickname || peer.username || '新私信',
+              body: last.content || '发来一条新消息',
+              tag: `chat-${conversation.id}-${last.id}`,
+            }, {
+              // User is looking at chat: chime only, no OS banner if focused
+              skipDesktopWhenFocused: true,
+              skipSoundWhenFocused: false,
+            })
+          }
+        }
+        if (last?.id != null) lastMessageIdRef.current = last.id
         return items
       })
     } catch (error) {
@@ -110,11 +137,12 @@ export default function ChatThread({
     } finally {
       if (!silent) setLoading(false)
     }
-  }, [conversation?.id])
+  }, [conversation?.id, conversation?.user])
 
   useEffect(() => {
     setMessages([])
     previousCountRef.current = 0
+    lastMessageIdRef.current = null
     setShopOpen(false)
     refresh()
     const timer = window.setInterval(() => refresh(true), 5000)

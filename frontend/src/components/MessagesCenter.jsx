@@ -1,5 +1,5 @@
 import { useCallback, useEffect, useRef, useState } from 'react'
-import { ArrowLeft, Eraser, MessageCircle, Search, Trash2 } from 'lucide-react'
+import { ArrowLeft, BellRing, Eraser, MessageCircle, Search, Trash2 } from 'lucide-react'
 import { Avatar, AvatarFallback, AvatarImage } from '@/components/ui/avatar'
 import { Badge } from '@/components/ui/badge'
 import { Button } from '@/components/ui/button'
@@ -8,6 +8,14 @@ import ChatThread from '@/components/ChatThread'
 import { clearConversationMessages, deleteConversation, getConversations } from '@/api/marketplace'
 import { t as translate } from '@/lib/i18n'
 import { cn } from '@/lib/utils'
+import {
+  ensureNotificationPermission,
+  getAlertPrefs,
+  setAlertPrefs,
+  unlockAudioOnGesture,
+  alertIncoming,
+  notificationPermission,
+} from '@/lib/messageAlerts'
 
 function useIsMobile(breakpoint = 760) {
   const [isMobile, setIsMobile] = useState(() => (
@@ -81,6 +89,20 @@ export default function MessagesCenter({ currentUser, initialConversationId, onB
   const showThread = Boolean(activeId && active)
   const showList = !isMobile || !showThread
 
+  const enableAlerts = async () => {
+    unlockAudioOnGesture()
+    const permission = await ensureNotificationPermission()
+    setAlertPrefs({ sound: true, desktop: permission === 'granted' || permission === 'unsupported', vibrate: true })
+    if (permission === 'granted') {
+      onNotice?.(t('msg.alertOn', '已开启消息提示音与系统通知'))
+      alertIncoming({ title: t('msg.title', '消息'), body: t('msg.alertReady', '收到新消息时会提醒你') }, { force: true, skipDesktopWhenFocused: false })
+    } else if (permission === 'denied') {
+      onNotice?.(t('msg.alertDenied', '通知权限被拒绝，仍会播放应用内提示音。可在浏览器设置中允许通知。'))
+    } else {
+      onNotice?.(t('msg.alertSoundOnly', '已开启应用内提示音'))
+    }
+  }
+
   const clearChat = async () => {
     if (!active?.id) return
     if (!window.confirm(t('msg.clearConfirm', '确认清空该会话的全部聊天记录？'))) return
@@ -121,6 +143,16 @@ export default function MessagesCenter({ currentUser, initialConversationId, onB
           <header>
             <Button variant="ghost" size="icon" onClick={handleListBack} aria-label={t('detail.back')}><ArrowLeft /></Button>
             <div><h1>{t('msg.title')}</h1><span>{conversations.length} {t('msg.sessions')}</span></div>
+            <Button
+              variant="outline"
+              size="sm"
+              className="messages-alert-btn"
+              onClick={enableAlerts}
+              title={t('msg.enableAlerts', '开启提示音与通知')}
+            >
+              <BellRing />
+              <span>{notificationPermission() === 'granted' || getAlertPrefs().sound ? t('msg.alertEnabled', '提醒已开') : t('msg.enableAlerts', '开启提醒')}</span>
+            </Button>
           </header>
           <div className="messages-search"><Search /><Input value={search} onChange={(event) => setSearch(event.target.value)} placeholder={t('msg.search')} /></div>
           <div className="messages-conversation-list">

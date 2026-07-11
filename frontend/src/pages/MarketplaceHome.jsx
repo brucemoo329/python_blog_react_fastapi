@@ -1,6 +1,7 @@
-import { useCallback, useEffect, useMemo, useState } from 'react'
+import { useCallback, useEffect, useMemo, useRef, useState } from 'react'
 import {
   Bell,
+  BellRing,
   Bike,
   Bookmark,
   CheckCheck,
@@ -83,6 +84,14 @@ import {
 import { cn } from '@/lib/utils'
 import { navLabel, normalizeLang, t as translate, writeStoredLanguage } from '@/lib/i18n'
 import { campusesForSchool } from '@/lib/schools'
+import {
+  alertIncoming,
+  ensureNotificationPermission,
+  getAlertPrefs,
+  notificationPermission,
+  setAlertPrefs,
+  unlockAudioOnGesture,
+} from '@/lib/messageAlerts'
 import '@/styles/marketplace.css'
 
 const NAV_DEFS = [
@@ -294,6 +303,10 @@ export default function MarketplaceHome({ user, onLogout, onUserUpdate }) {
   })
   const [feedLightbox, setFeedLightbox] = useState({ open: false, images: [], index: 0 })
   const [feedReactBurst, setFeedReactBurst] = useState('')
+  const [alertPrefs, setAlertPrefsState] = useState(() => getAlertPrefs())
+  const prevUnreadMessagesRef = useRef(null)
+  const prevUnreadNotifRef = useRef(null)
+  const activeNavRef = useRef(activeNav)
 
   // Persist current screen so refresh stays on the same view
   useEffect(() => {
@@ -309,6 +322,15 @@ export default function MarketplaceHome({ user, onLogout, onUserUpdate }) {
       activeErrandTaskId: activeErrand?.taskId || null,
     })
   }, [activeNav, view, filter, topicFilter, selectedDetail, publicUserId, activeErrand])
+
+  useEffect(() => {
+    activeNavRef.current = activeNav
+  }, [activeNav])
+
+  // Unlock audio + optional notification permission after first interaction
+  useEffect(() => {
+    unlockAudioOnGesture()
+  }, [])
 
   const language = normalizeLang(currentUser?.profile?.language || localStorage.getItem('campus_language') || 'zh-CN')
   const isAdmin = Boolean(currentUser?.is_admin)
@@ -343,8 +365,27 @@ export default function MarketplaceHome({ user, onLogout, onUserUpdate }) {
   const loadNotifications = useCallback(async () => {
     try {
       const response = await getNotifications()
-      setNotifications(response.items || [])
-      setSummary((current) => ({ ...current, unread_notifications: response.unread || 0 }))
+      const items = response.items || []
+      const unread = response.unread || 0
+      setNotifications(items)
+      setSummary((current) => {
+        const prev = prevUnreadNotifRef.current
+        if (prev != null && unread > prev) {
+          const latest = items.find((item) => !item.is_read) || items[0]
+          alertIncoming({
+            title: latest?.title || '新通知',
+            body: latest?.content || `你有 ${unread} 条未读通知`,
+            tag: `notif-${latest?.id || unread}`,
+            onClick: () => {
+              /* user opens from OS tray — stay on app */
+            },
+          }, {
+            skipDesktopWhenFocused: activeNavRef.current === 'messages',
+          })
+        }
+        prevUnreadNotifRef.current = unread
+        return { ...current, unread_notifications: unread }
+      })
     } catch {
       // The main feed remains usable if notification polling is temporarily unavailable.
     }
@@ -352,9 +393,61 @@ export default function MarketplaceHome({ user, onLogout, onUserUpdate }) {
 
   const handleUnreadMessagesChange = useCallback((count) => {
     setSummary((current) => {
+      const prev = prevUnreadMessagesRef.current
+      if (prev != null && count > prev) {
+        const delta = count - prev
+        alertIncoming({
+          title: '新私信',
+          body: delta === 1 ? '你收到 1 条新消息' : `你收到 ${delta} 条新消息`,
+          tag: `msg-unread-${count}`,
+          onClick: () => {
+            try {
+              window.dispatchEvent(new CustomEvent('campus-open-messages'))
+            } catch { /* ignore */ }
+          },
+        }, {
+          // When already in messages UI, still chime but skip OS banner if tab focused
+          skipDesktopWhenFocused: activeNavRef.current === 'messages',
+        })
+      }
+      if (prevUnreadMessagesRef.current == null) prevUnreadMessagesRef.current = count
+      else prevUnreadMessagesRef.current = count
       if (current.unread_messages === count) return current
       return { ...current, unread_messages: count }
     })
+  }, [])
+
+  /** Lightweight inbox poll so alerts work even outside Messages page */
+  const pollInboxSummary = useCallback(async () => {
+    try {
+      const summaryResponse = await getMarketplaceSummary()
+      const nextUnread = Number(summaryResponse?.unread_messages || 0)
+      handleUnreadMessagesChange(nextUnread)
+      setSummary((current) => ({
+        ...current,
+        unread_messages: nextUnread,
+        unread_notifications: summaryResponse?.unread_notifications ?? current.unread_notifications,
+      }))
+    } catch {
+      /* ignore poll errors */
+    }
+  }, [handleUnreadMessagesChange])
+
+  const enableMessageAlerts = useCallback(async () => {
+    unlockAudioOnGesture()
+    const permission = await ensureNotificationPermission()
+    const next = setAlertPrefs({ sound: true, desktop: permission === 'granted' || permission === 'unsupported', vibrate: true })
+    setAlertPrefsState(next)
+    if (permission === 'granted') {
+      setNotice('已开启消息提示音与系统通知')
+      alertIncoming({ title: '校园集市', body: '提示已开启，收到新消息会提醒你' }, { force: true, skipDesktopWhenFocused: false })
+    } else if (permission === 'denied') {
+      setNotice('系统通知被浏览器拒绝，仍可播放应用内提示音。请在浏览器设置中允许通知。')
+    } else if (permission === 'unsupported') {
+      setNotice('当前环境不支持系统通知，已开启应用内提示音')
+    } else {
+      setNotice('请在弹窗中允许通知权限')
+    }
   }, [])
 
   const loadData = useCallback(async () => {
@@ -393,6 +486,19 @@ export default function MarketplaceHome({ user, onLogout, onUserUpdate }) {
     const timer = window.setInterval(loadNotifications, 20000)
     return () => window.clearInterval(timer)
   }, [loadNotifications])
+
+  // Poll message unread for sound / OS notification (desktop + mobile browser, HTTPS)
+  useEffect(() => {
+    pollInboxSummary()
+    const timer = window.setInterval(pollInboxSummary, 8000)
+    return () => window.clearInterval(timer)
+  }, [pollInboxSummary])
+
+  useEffect(() => {
+    const openMessages = () => selectNav('messages')
+    window.addEventListener('campus-open-messages', openMessages)
+    return () => window.removeEventListener('campus-open-messages', openMessages)
+  }, [])
 
   useEffect(() => {
     if (!notice) return undefined
@@ -804,6 +910,16 @@ export default function MarketplaceHome({ user, onLogout, onUserUpdate }) {
                 </div>
               </DropdownMenuContent>
             </DropdownMenu>
+            <Button
+              variant="ghost"
+              size="icon"
+              aria-label={notificationPermission() === 'granted' && alertPrefs.sound ? '消息提醒已开启' : '开启消息提醒'}
+              title={notificationPermission() === 'granted' && alertPrefs.sound ? '消息提示音与通知已开启' : '点击开启消息提示音与系统通知'}
+              className={cn('relative', (notificationPermission() === 'granted' || alertPrefs.sound) && 'is-alert-on')}
+              onClick={enableMessageAlerts}
+            >
+              <BellRing />
+            </Button>
             <Button variant="ghost" size="icon" aria-label="消息" className="relative" onClick={() => selectNav('messages')}><MessageCircle />{summary.unread_messages ? <span className="campus-unread">{summary.unread_messages}</span> : null}</Button>
             <DropdownMenu>
               <DropdownMenuTrigger asChild><Button variant="ghost" className="campus-profile"><Avatar className="size-8"><AvatarImage src={displayAvatar || undefined} alt={displayName} /><AvatarFallback>{displayName.slice(0, 1)}</AvatarFallback></Avatar><span>{displayName}</span><ChevronDown /></Button></DropdownMenuTrigger>
